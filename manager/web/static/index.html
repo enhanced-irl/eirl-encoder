@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0c111d">
+<title data-i18n="app.title">Encoder · EnhancedIRL</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+<!-- Texts: i18n.js + one dictionary per language (lang-*.js), before app.js. Every visible text of this
+     page comes from the dictionaries through data-i18n / data-i18n-attr -->
+<script src="i18n.js" defer></script>
+<script src="lang-es.js" defer></script>
+<script src="lang-en.js" defer></script>
+<script src="lang-fr.js" defer></script>
+<script src="app.js" defer></script>
+<script src="settings.js" defer></script>
+<script src="setup.js" defer></script>
+</head>
+<body>
+
+<!-- Messages: float at the bottom on every screen -->
+<div id="toast" class="toast" role="status" hidden></div>
+
+<!-- Login -->
+<main id="login" class="screen auth" hidden>
+  <form id="login-form" class="card auth-card">
+    <div class="brand"><img src="favicon.svg" alt="" width="36" height="36"> <span data-i18n="common.encoder"></span></div>
+    <input type="text" name="username" autocomplete="username" value="admin" hidden>
+    <label for="login-pw" data-i18n="login.password"></label>
+    <input id="login-pw" type="password" autocomplete="current-password" required autofocus>
+    <p id="login-err" class="err" hidden></p>
+    <button class="btn primary" type="submit" data-i18n="login.submit"></button>
+    <div class="auth-lang"><select name="lang" class="lang-pick" data-i18n-attr="aria-label:common.language"></select></div>
+  </form>
+</main>
+
+<!-- No password set (an app without the setup wizard) -->
+<main id="nopass" class="screen auth" hidden>
+  <div class="card auth-card">
+    <div class="brand"><img src="favicon.svg" alt="" width="36" height="36"> <span data-i18n="common.encoder"></span></div>
+    <p data-i18n="nopass.text"></p>
+    <pre>sudo -u eirl-encoder eirl-encoderd passwd
+sudo systemctl restart eirl-encoderd</pre>
+    <div class="auth-lang"><select name="lang" class="lang-pick" data-i18n-attr="aria-label:common.language"></select></div>
+  </div>
+</main>
+
+<!-- First-start wizard (setup.js), when GET /setup says done:false: language → password (when there is none
+     yet) → time → network → name → EnhancedIRL → done. The Wi-Fi and account cards of the dashboard are
+     borrowed into their steps -->
+<main id="setup" class="screen setup" hidden>
+  <header class="top">
+    <div class="top-in">
+      <div class="brand"><img src="favicon.svg" alt="" width="28" height="28"><span class="brand-name" data-i18n="common.encoder"></span></div>
+      <span id="setup-count" class="sub setup-count"></span>
+    </div>
+  </header>
+  <div class="setup-wrap">
+    <ol id="setup-steps" class="setup-steps" data-i18n-attr="aria-label:setup.stepsAria"></ol>
+    <div class="setup-bar" aria-hidden="true"><i id="setup-bar"></i></div>
+    <form id="setup-form" class="card setup-card" novalidate aria-labelledby="setup-h">
+      <h2 id="setup-h" class="setup-h" tabindex="-1"></h2>
+      <p id="setup-intro" class="setup-intro"></p>
+
+      <div class="setup-panel" data-step="language" hidden>
+        <div id="sp-langs" class="setup-choices" role="radiogroup" aria-labelledby="setup-h"></div>
+      </div>
+
+      <div class="setup-panel form" data-step="password" hidden>
+        <div id="sp-pw-fields" class="form">
+          <input type="text" name="username" autocomplete="username" value="admin" hidden>
+          <label for="sp-pw" data-i18n="setup.pw"></label>
+          <input id="sp-pw" name="password" type="password" autocomplete="new-password" minlength="10">
+          <p class="err" data-for="password" hidden></p>
+          <label for="sp-pw2" data-i18n="setup.pw2"></label>
+          <input id="sp-pw2" type="password" autocomplete="new-password" minlength="10">
+          <p class="err" data-for="password2" hidden></p>
+          <div id="sp-code-row" class="form">
+            <label for="sp-code" data-i18n="setup.code"></label>
+            <input id="sp-code" name="code" type="text" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" maxlength="11" inputmode="text" class="setup-code">
+            <p class="hint" data-i18n="setup.codeHint"></p>
+            <p class="err" data-for="code" hidden></p>
+          </div>
+        </div>
+        <p id="sp-pw-set" class="cloud-text" hidden data-i18n="setup.pwAlreadySet"></p>
+      </div>
+
+      <div class="setup-panel form" data-step="time" hidden>
+        <label for="sp-tz" data-i18n="device.timezone"></label>
+        <select id="sp-tz" name="timezone"></select>
+        <p class="err" data-for="timezone" hidden></p>
+        <label class="check"><input id="sp-ntp" type="checkbox" checked> <span data-i18n="device.ntp"></span></label>
+        <div id="sp-time-row" class="form" hidden>
+          <label for="sp-time" data-i18n="device.time"></label>
+          <div class="cams-addrow">
+            <input id="sp-time" type="datetime-local" step="1">
+            <button id="sp-time-now" class="btn" type="button" data-i18n="device.timeNow"></button>
+          </div>
+          <p class="err" data-for="time" hidden></p>
+        </div>
+        <p id="sp-clock" class="hint"></p>
+      </div>
+
+      <div class="setup-panel" data-step="network" hidden>
+        <p id="sp-net-status" class="setup-status"></p>
+        <div id="sp-net-slot"></div>
+        <p id="sp-net-none" class="hint" hidden data-i18n="setup.networkNoWifi"></p>
+      </div>
+
+      <div class="setup-panel form" data-step="name" hidden>
+        <label for="sp-name" data-i18n="device.name"></label>
+        <input id="sp-name" name="name" type="text" maxlength="40" autocomplete="off" spellcheck="false">
+        <p id="sp-name-hint" class="hint"></p>
+        <p class="err" data-for="name" hidden></p>
+        <p id="sp-moved" class="uplinks-warn" hidden></p>
+      </div>
+
+      <div class="setup-panel" data-step="cloud" hidden>
+        <div id="sp-cloud-slot"></div>
+        <p id="sp-cloud-none" class="hint" hidden data-i18n="setup.cloudUnavailable"></p>
+      </div>
+
+      <div class="setup-panel" data-step="done" hidden>
+        <ul id="sp-summary" class="setup-summary"></ul>
+      </div>
+
+      <p id="setup-err" class="err" role="alert" hidden></p>
+      <div class="setup-actions">
+        <button id="setup-back" class="btn ghost" type="button" data-i18n="setup.back"></button>
+        <span class="setup-gap"></span>
+        <button id="setup-skip" class="btn ghost" type="button" data-i18n="setup.skip" hidden></button>
+        <button id="setup-next" class="btn primary" type="submit"></button>
+      </div>
+    </form>
+  </div>
+</main>
+
+<!-- App: four zones by what the user does (live, status, configuration, system). The grid places them
+     by width: one column on a phone, two on a tablet and a laptop, three on a wide monitor (app.css,
+     «Layout») -->
+<main id="app" class="screen" hidden>
+  <header class="top">
+    <div class="top-in">
+      <div class="brand"><img src="favicon.svg" alt="" width="28" height="28"><span class="brand-name" data-i18n="common.encoder"></span></div>
+      <span id="phase" class="pill">…</span>
+      <select id="lang-top" name="lang" class="lang-pick" data-i18n-attr="aria-label:common.language"></select>
+      <button id="logout" class="btn ghost small" type="button" data-i18n="top.logout"></button>
+    </div>
+  </header>
+
+  <div id="pending" class="banner" hidden>
+    <span data-i18n="pending.text"></span>
+    <button id="pending-apply" class="btn small" type="button" data-i18n="pending.apply"></button>
+  </div>
+  <div id="update-banner" class="banner banner-info" hidden>
+    <span id="update-banner-txt"></span>
+    <span class="banner-acts">
+      <button id="update-banner-go" class="btn small" type="button" data-i18n="update.bannerSee"></button>
+      <button id="update-banner-x" class="btn small ghost" type="button" data-i18n-attr="aria-label:common.close">✕</button>
+    </span>
+  </div>
+
+  <div class="layout">
+
+    <!-- Live: the program, Go live and the mixer -->
+    <section class="zone zone-live" aria-labelledby="zone-live">
+      <h2 id="zone-live" class="zone-title" data-i18n="zone.live"></h2>
+
+      <div class="card program">
+        <div class="preview">
+          <video id="live" playsinline muted autoplay hidden data-i18n-attr="aria-label:live.videoAria"></video>
+          <div id="preview-empty" class="preview-empty" data-i18n="live.noPreview"></div>
+          <button id="live-sound" class="preview-sound" type="button" hidden data-i18n="live.soundOn"></button>
+          <span id="preview-label" class="preview-label" hidden data-i18n="live.program"></span>
+        </div>
+        <div class="program-bar">
+          <div class="meter" data-i18n-attr="aria-label:live.meterAria">
+            <div class="meter-row"><span>L</span><div class="meter-track"><div id="lvl-l-rms" class="meter-cover"></div><div id="lvl-l-peak" class="meter-peak"></div></div></div>
+            <div class="meter-row"><span>R</span><div class="meter-track"><div id="lvl-r-rms" class="meter-cover"></div><div id="lvl-r-peak" class="meter-peak"></div></div></div>
+          </div>
+          <div class="actions">
+            <!-- No rehearsal mode: the preview is always there; Go live hooks the output up and Stop releases it -->
+            <button id="btn-live" class="btn primary" type="button" data-i18n="live.start"></button>
+            <button id="btn-restart" class="btn" type="button" data-i18n="live.restart"></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mixer (MIXER.md §5): the same commands as the encoder's touch screen, live -->
+      <section id="mixer-card" class="card mixer" aria-labelledby="mixer-title" hidden>
+        <div class="card-head">
+          <h3 id="mixer-title" class="card-title" data-i18n="mixer.title"></h3>
+          <span class="mx-head"><span id="mixer-screen" class="sub"></span><button id="mixer-lock" class="btn small ghost" type="button" hidden></button></span>
+        </div>
+        <div class="mx-bar">
+          <span class="seg" role="group" data-i18n-attr="aria-label:mixer.layoutAria">
+            <button class="btn small" data-layout="full" type="button" data-i18n="mixer.layoutFull"></button>
+            <button class="btn small" data-layout="pip" type="button" data-i18n="mixer.layoutPip"></button>
+            <button class="btn small" data-layout="side" type="button" data-i18n="mixer.layoutSide"></button>
+          </span>
+          <span class="mx-group">
+            <button id="mixer-fade" class="btn small" type="button"></button>
+            <button id="mixer-swap" class="btn small" type="button" data-i18n="mixer.swap"></button>
+          </span>
+          <button id="mixer-pause" class="btn small mx-pausebtn" type="button" aria-pressed="false" hidden></button>
+        </div>
+        <!-- Only with the PiP layout: where the small window goes and its width -->
+        <div id="mixer-pip" class="mx-bar mx-pipbar" hidden>
+          <span class="mx-group" role="group" data-i18n-attr="aria-label:mixer.cornerAria">
+            <span class="mx-label" data-i18n="mixer.window"></span>
+            <span class="mx-corners">
+              <button class="btn small mx-corner" data-corner="tl" type="button" data-i18n-attr="aria-label:mixer.cornerTl" aria-pressed="false">↖</button>
+              <button class="btn small mx-corner" data-corner="tr" type="button" data-i18n-attr="aria-label:mixer.cornerTr" aria-pressed="false">↗</button>
+              <button class="btn small mx-corner" data-corner="bl" type="button" data-i18n-attr="aria-label:mixer.cornerBl" aria-pressed="false">↙</button>
+              <button class="btn small mx-corner" data-corner="br" type="button" data-i18n-attr="aria-label:mixer.cornerBr" aria-pressed="false">↘</button>
+            </span>
+          </span>
+          <span class="mx-group" role="group" data-i18n-attr="aria-label:mixer.sizeAria">
+            <span class="mx-label" data-i18n="mixer.width"></span>
+            <span class="seg">
+              <button class="btn small" data-size="25" type="button" aria-pressed="false" data-i18n="mixer.size25"></button>
+              <button class="btn small" data-size="33" type="button" aria-pressed="false" data-i18n="mixer.size33"></button>
+            </span>
+          </span>
+        </div>
+        <div id="mixer-sources" class="mx-grid"></div>
+        <p class="hint mx-hint" data-i18n="mixer.hint"></p>
+        <div id="mixer-audio-box" class="mx-audio" hidden>
+          <div class="mx-ahead">
+            <span class="mx-group">
+              <h4 class="sub-title" data-i18n="mixer.audio"></h4>
+              <!-- One source or the mix of several (an older engine does not send it) -->
+              <span id="mixer-amode" class="seg" role="group" data-i18n-attr="aria-label:mixer.amodeAria" hidden>
+                <button class="btn small" data-amode="single" type="button" aria-pressed="false" data-i18n="mixer.amodeSingle"></button>
+                <button class="btn small" data-amode="mix" type="button" aria-pressed="false" data-i18n="mixer.amodeMix"></button>
+              </span>
+            </span>
+            <!-- Follow video: taking a source on air plays its audio (an older engine does not send it; does nothing with the mix) -->
+            <label id="mixer-follow-row" class="mx-follow" hidden><input id="mixer-follow" type="checkbox" role="switch"> <span data-i18n="mixer.follow"></span></label>
+          </div>
+          <div id="mixer-audio" class="mx-abar" role="group" data-i18n-attr="aria-label:mixer.audioAria"></div>
+          <p id="mixer-follow-note" class="hint" hidden data-i18n="mixer.followNote"></p>
+          <p id="mixer-audio-hint" class="hint" data-i18n="mixer.audioHint"></p>
+          <p id="mixer-mix-note" class="hint" hidden></p>
+          <!-- Screen headphones: the program audio through the HDMI (an older engine does not send it) -->
+          <div id="mixer-phones" class="mx-phones" hidden>
+            <div class="mx-arow mx-gain">
+              <label class="mx-follow"><input id="mixer-phones-on" type="checkbox" role="switch"> <span data-i18n="mixer.phones"></span></label>
+              <output id="mixer-phones-val" aria-hidden="true"></output>
+              <input id="mixer-phones-gain" type="range" min="-40" max="0" step="2" data-i18n-attr="aria-label:mixer.phonesGainAria">
+            </div>
+            <p id="mixer-phones-note" class="hint"></p>
+          </div>
+          <details id="mixer-audio-set" class="mx-screen" hidden>
+            <summary data-i18n="mixer.audioSettings"></summary>
+            <div id="mixer-gain-box" class="mx-aset">
+              <h5 id="mixer-gains-title" class="sub-title" data-i18n="mixer.volume"></h5>
+              <div id="mixer-gains" class="mx-alist" role="group" aria-labelledby="mixer-gains-title"></div>
+              <p class="hint" data-i18n="mixer.volumeHint"></p>
+            </div>
+            <div id="mixer-delay-box" class="mx-aset">
+              <h5 id="mixer-delays-title" class="sub-title" data-i18n="mixer.delay"></h5>
+              <div id="mixer-delays" class="mx-alist" role="group" aria-labelledby="mixer-delays-title"></div>
+              <p class="hint" data-i18n="mixer.delayHint"></p>
+              <p id="delay-err" class="err" hidden></p>
+            </div>
+            <div id="mixer-links-box" class="mx-aset">
+              <h5 id="mixer-links-title" class="sub-title" data-i18n="mixer.links"></h5>
+              <div id="mixer-links" class="mx-alist" role="group" aria-labelledby="mixer-links-title"></div>
+              <p class="hint" data-i18n="mixer.linksHint"></p>
+            </div>
+          </details>
+        </div>
+        <div class="mx-more">
+          <details id="mixer-pause-box" class="mx-screen" hidden>
+            <summary data-i18n="mixer.pauseSettings"></summary>
+            <form id="mixer-pause-form" class="form" novalidate>
+              <label for="f-pause-text" data-i18n="mixer.pauseText"></label>
+              <input id="f-pause-text" type="text" maxlength="60" autocomplete="off" spellcheck="true" data-i18n-attr="placeholder:mixer.pausePlaceholder">
+              <p class="hint" data-i18n="mixer.pauseHint"></p>
+              <p id="pause-err" class="err" hidden></p>
+              <label class="check"><input id="f-pause-mute" type="checkbox"> <span data-i18n="mixer.pauseMute"></span></label>
+              <div class="form-actions"><button class="btn small primary" type="submit" data-i18n="common.save"></button></div>
+            </form>
+          </details>
+          <details id="mixer-screen-box" class="mx-screen">
+            <summary data-i18n="mixer.screenView"></summary>
+            <img id="mixer-screen-img" data-i18n-attr="alt:mixer.screenAlt">
+          </details>
+        </div>
+      </section>
+    </section>
+
+    <!-- Status: signal, audio, output, board and uplinks -->
+    <section class="zone zone-status" aria-labelledby="zone-status">
+      <h2 id="zone-status" class="zone-title" data-i18n="zone.status"></h2>
+      <div class="stats">
+        <div class="card stat"><h3 class="stat-label" data-i18n="status.signal"></h3><p id="st-signal" class="big">—</p><p id="st-signal-sub" class="sub"></p></div>
+        <div class="card stat"><h3 class="stat-label" data-i18n="status.audio"></h3><p id="st-audio" class="big">—</p><p id="st-audio-sub" class="sub"></p></div>
+        <div class="card stat"><h3 class="stat-label">SRT</h3><p id="st-srt" class="big">—</p><p id="st-srt-sub" class="sub"></p></div>
+        <div class="card stat"><h3 class="stat-label" data-i18n="status.board"></h3><p id="st-sys" class="big">—</p><p id="st-sys-sub" class="sub"></p></div>
+      </div>
+
+      <section id="uplinks-card" class="card" aria-labelledby="uplinks-title" hidden>
+        <div class="card-head"><h3 id="uplinks-title" class="card-title" data-i18n="uplinks.title"></h3><span id="uplinks-mode" class="sub"></span></div>
+        <p id="uplinks-warn" class="uplinks-warn" hidden></p>
+        <ul id="uplinks" class="uplinks"></ul>
+        <p class="hint" data-i18n="uplinks.hint"></p>
+      </section>
+    </section>
+
+    <!-- Configuration: destination, input and account -->
+    <section class="zone zone-config" aria-labelledby="zone-config">
+      <h2 id="zone-config" class="zone-title" data-i18n="zone.config"></h2>
+
+      <section class="card" aria-labelledby="dest-title">
+        <div class="card-head">
+          <h3 id="dest-title" class="card-title" data-i18n="dest.title"></h3>
+          <button id="dest-edit" class="btn small" type="button" data-i18n="common.edit"></button>
+        </div>
+        <dl id="dest-view" class="kv"></dl>
+        <form id="dest-form" class="form" hidden novalidate>
+          <label for="f-url" data-i18n="dest.url"></label>
+          <input id="f-url" name="url" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"
+                 data-i18n-attr="placeholder:dest.urlPlaceholder">
+          <p class="hint" data-i18n="dest.urlHint"></p>
+          <p class="err" data-for="url" hidden></p>
+
+          <label for="f-latency" data-i18n="dest.latency"></label>
+          <input id="f-latency" name="latencyMs" type="number" inputmode="numeric" min="20" max="8000" step="10">
+          <p class="hint" data-i18n="dest.latencyHint"></p>
+          <p class="err" data-for="latencyMs" hidden></p>
+          <p class="err" data-for="mode" hidden></p>
+
+          <label for="f-streamid" data-i18n="dest.streamId"></label>
+          <input id="f-streamid" name="streamId" type="password" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <label class="check"><input id="f-streamid-clear" type="checkbox"> <span data-i18n="dest.streamIdClear"></span></label>
+          <p class="err" data-for="streamId" hidden></p>
+
+          <label for="f-pass" data-i18n="dest.passphrase"></label>
+          <input id="f-pass" name="passphrase" type="password" autocomplete="off" autocapitalize="off" spellcheck="false">
+          <label class="check"><input id="f-pass-clear" type="checkbox"> <span data-i18n="dest.passClear"></span></label>
+          <p class="err" data-for="passphrase" hidden></p>
+
+          <div class="row">
+            <div>
+              <label for="f-vbr" data-i18n="dest.videoKbps"></label>
+              <input id="f-vbr" name="videoBitrateKbps" type="number" inputmode="numeric" min="500" max="20000" step="100">
+              <p class="err" data-for="videoBitrateKbps" hidden></p>
+            </div>
+            <div>
+              <label for="f-abr" data-i18n="dest.audioKbps"></label>
+              <select id="f-abr" name="audioBitrateKbps"><option>64</option><option>96</option><option>128</option><option>160</option><option>192</option><option>256</option></select>
+              <p class="err" data-for="audioBitrateKbps" hidden></p>
+            </div>
+          </div>
+
+          <label class="check"><input id="f-adaptive" name="adaptiveBitrate" type="checkbox"> <span data-i18n="dest.adaptive"></span></label>
+          <p class="hint" data-i18n="dest.adaptiveHint"></p>
+          <div id="f-vmin-row">
+            <label for="f-vmin" data-i18n="dest.videoMinKbps"></label>
+            <input id="f-vmin" name="videoMinBitrateKbps" type="number" inputmode="numeric" min="200" max="20000" step="100">
+            <p class="err" data-for="videoMinBitrateKbps" hidden></p>
+          </div>
+
+          <p id="dest-err" class="err" hidden></p>
+          <div class="form-actions">
+            <button class="btn ghost" type="button" id="dest-cancel" data-i18n="common.cancel"></button>
+            <button class="btn" type="submit" value="save" data-i18n="common.save"></button>
+            <button class="btn primary" type="submit" value="apply" data-i18n="common.saveApply"></button>
+          </div>
+          <p class="hint" data-i18n="dest.applyHint"></p>
+        </form>
+      </section>
+
+      <section class="card" aria-labelledby="input-title">
+        <div class="card-head">
+          <h3 id="input-title" class="card-title" data-i18n="input.title"></h3>
+          <button id="input-rescan" class="btn small" type="button" data-i18n="input.rescan"></button>
+        </div>
+        <form id="input-form" class="form" novalidate>
+          <p id="input-mixer" class="hint" hidden data-i18n="input.mixerHint"></p>
+          <label for="f-source" data-i18n="input.source"></label>
+          <select id="f-source" name="source"></select>
+          <p id="source-info" class="hint" hidden></p>
+          <p id="source-warn" class="uplinks-warn" hidden></p>
+          <p class="err" data-for="source" hidden></p>
+          <p class="err" data-for="device" hidden></p>
+
+          <div id="usb-fields" hidden>
+            <label for="f-mode" data-i18n="input.captureMode"></label>
+            <select id="f-mode" name="mode"></select>
+            <p class="hint" data-i18n="input.captureHint"></p>
+            <p class="err" data-for="videoMode" hidden></p>
+            <p class="err" data-for="videoFormat" hidden></p>
+          </div>
+
+          <div id="hdmi-fields">
+            <label for="f-edid" data-i18n="input.edid"></label>
+            <select id="f-edid" name="edidPreferred">
+              <option value="1080p30" data-i18n="input.edidRecommended"></option>
+              <option value="1080p50">1080p50</option>
+              <option value="720p60">720p60</option>
+            </select>
+            <p class="hint" data-i18n="input.edidHint"></p>
+            <p class="err" data-for="edidPreferred" hidden></p>
+          </div>
+
+          <label for="f-audio" data-i18n="input.audio"></label>
+          <select id="f-audio" name="audio"></select>
+          <p class="err" data-for="audio" hidden></p>
+
+          <p id="input-active" class="hint" hidden></p>
+          <p id="input-err" class="err" hidden></p>
+          <div class="form-actions">
+            <button class="btn" type="submit" value="save" data-i18n="common.save"></button>
+            <button class="btn primary" type="submit" value="apply" data-i18n="common.saveApply"></button>
+          </div>
+          <p class="hint" data-i18n="input.applyHint"></p>
+        </form>
+      </section>
+
+      <!-- Source slots (slots.json): what each mixer slot shows and its alias. Rows built by settings.js -->
+      <section id="slots-card" class="card" aria-labelledby="slots-title" hidden>
+        <div class="card-head"><h3 id="slots-title" class="card-title" data-i18n="slots.title"></h3></div>
+        <p class="hint slots-intro" data-i18n="slots.intro"></p>
+        <p id="slots-old" class="uplinks-warn" hidden data-i18n="slots.engineOld"></p>
+        <form id="slots-form" class="form" novalidate>
+          <div id="slots-rows" class="slots"></div>
+          <p class="hint" data-i18n="slots.aliasHint"></p>
+          <p id="slots-err" class="err" role="alert" hidden></p>
+          <div class="form-actions">
+            <button id="slots-cancel" class="btn ghost" type="button" data-i18n="common.cancel" hidden></button>
+            <button class="btn primary" type="submit" data-i18n="common.save"></button>
+          </div>
+        </form>
+      </section>
+
+      <!-- The board's Wi-Fi (WIFI.md): «Create my Wi-Fi» (W-A) and «Connect to a Wi-Fi» (W-B) -->
+      <section id="wifi-card" class="card" aria-labelledby="wifi-title" hidden>
+        <div class="card-head"><h3 id="wifi-title" class="card-title" data-i18n="wifi.title"></h3></div>
+        <p id="wifi-err" class="err" hidden></p>
+        <div class="cams-via">
+          <label class="mx-follow"><input id="wifi-ap" type="checkbox" role="switch"><span><span data-i18n="wifi.ap"></span> <span id="wifi-ap-txt" class="sub"></span></span></label>
+          <label id="wifi-client-row" class="mx-follow" hidden><input id="wifi-client" type="checkbox" role="switch"><span><span data-i18n="wifi.client"></span> <span id="wifi-client-txt" class="sub"></span></span></label>
+        </div>
+        <p id="wifi-warn" class="hint" hidden></p>
+        <details id="wifi-nets" class="cams-wifi" hidden>
+          <summary><span data-i18n="wifi.networks"></span> <span id="wifi-nets-sub" class="sub"></span></summary>
+          <div id="wifi-nets-body"></div>
+        </details>
+        <p class="hint" data-i18n="wifi.hint"></p>
+        <div id="wifi-name" class="cams-add wifi-name" hidden>
+          <label for="wifi-name-in" data-i18n="wifi.name"></label>
+          <div class="cams-addrow">
+            <input id="wifi-name-in" type="text" maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" aria-describedby="wifi-name-err wifi-name-hint">
+            <button id="wifi-name-save" class="btn" type="button" data-i18n="wifi.rename"></button>
+          </div>
+          <p id="wifi-name-err" class="err" role="alert" hidden></p>
+          <p id="wifi-name-hint" class="hint"></p>
+        </div>
+        <details id="cams-wifi" class="cams-wifi" hidden>
+          <summary><span data-i18n="wifi.apNetwork"></span> <span id="cams-ssid" class="sub"></span></summary>
+          <div id="cams-wifi-body"></div>
+        </details>
+      </section>
+
+      <section id="cams-card" class="card" aria-labelledby="cams-title" hidden>
+        <div class="card-head">
+          <h3 id="cams-title" class="card-title" data-i18n="cams.title"></h3>
+          <label class="mx-follow cams-master"><span id="cams-on-txt" class="sub" data-i18n="cams.reception"></span><input id="cams-on" type="checkbox" role="switch" data-i18n-attr="aria-label:cams.receptionAria"></label>
+        </div>
+        <p class="cloud-text" data-i18n="cams.intro"></p>
+        <p id="cams-err" class="err" hidden></p>
+        <p id="cams-offnote" class="hint" hidden></p>
+        <div id="cams-via" class="cams-via">
+          <label class="mx-follow"><input id="cams-via-wifi" type="checkbox" role="switch"><span><span data-i18n="cams.viaWifi"></span> <span id="cams-ap" class="sub"></span></span></label>
+          <label id="cams-lan-row" class="mx-follow"><input id="cams-via-lan" type="checkbox" role="switch"><span><span data-i18n="cams.viaLan"></span> <span id="cams-lan" class="sub"></span></span></label>
+          <p id="cams-lan-hint" class="hint" hidden></p>
+        </div>
+        <ul id="cams-list" class="uplinks cams"></ul>
+        <form id="cams-add" class="cams-add">
+          <label for="cams-name" data-i18n="cams.name"></label>
+          <div class="cams-addrow">
+            <input id="cams-name" type="text" maxlength="32" data-i18n-attr="placeholder:cams.namePlaceholder" autocomplete="off" required>
+            <button class="btn primary" type="submit" data-i18n="cams.add"></button>
+          </div>
+          <p class="hint" data-i18n="cams.addHint"></p>
+        </form>
+        <div id="cams-connect" class="cams-connect" hidden aria-live="polite"></div>
+        <p id="cams-tip" class="hint" data-i18n="cams.tip"></p>
+      </section>
+
+      <section id="cloud-card" class="card" aria-labelledby="cloud-title" hidden>
+        <div class="card-head"><h3 id="cloud-title" class="card-title" data-i18n="cloud.title"></h3><span id="cloud-status" class="sub"></span></div>
+        <div id="cloud-unlinked" hidden>
+          <p class="cloud-text" data-i18n="cloud.intro"></p>
+          <p id="cloud-error" class="err" hidden></p>
+          <div class="form-actions"><button id="cloud-pair" class="btn primary" type="button" data-i18n="cloud.pair"></button></div>
+        </div>
+        <div id="cloud-pairing" hidden>
+          <p class="cloud-text" data-i18n="cloud.pairingText"></p>
+          <p id="cloud-code" class="cloud-code" aria-live="polite"></p>
+          <div id="cloud-qr" class="cloud-qr" hidden></div>
+          <p class="cloud-center"><a id="cloud-link" class="cloud-link" href="#" target="_blank" rel="noopener noreferrer"></a></p>
+          <p id="cloud-expires" class="hint cloud-center"></p>
+          <div class="form-actions">
+            <button id="cloud-cancel" class="btn ghost" type="button" data-i18n="common.cancel"></button>
+            <button id="cloud-renew" class="btn" type="button" data-i18n="cloud.renew"></button>
+          </div>
+        </div>
+        <div id="cloud-linked" hidden>
+          <p class="cloud-text"><span data-i18n="cloud.linkedTo"></span> <strong id="cloud-account"></strong></p>
+          <p id="cloud-online" class="sub"></p>
+          <p id="cloud-warn" class="err" hidden></p>
+          <p class="hint" data-i18n="cloud.linkedHint"></p>
+          <div class="form-actions"><button id="cloud-unlink" class="btn danger" type="button" data-i18n="cloud.unlink"></button></div>
+        </div>
+      </section>
+    </section>
+
+    <!-- System: log, password and information -->
+    <section class="zone zone-system" aria-labelledby="zone-system">
+      <h2 id="zone-system" class="zone-title" data-i18n="zone.system"></h2>
+
+      <!-- Updates (OTA from GitHub Releases, signed): version, state, check and install. settings.js -->
+      <section id="update-card" class="card" aria-labelledby="update-title" hidden>
+        <div class="card-head"><h3 id="update-title" class="card-title" data-i18n="update.title"></h3><span id="update-state" class="sub"></span></div>
+        <dl id="update-versions" class="kv"></dl>
+        <div id="update-avail" class="update-avail" hidden>
+          <p id="update-avail-title" class="update-avail-title"></p>
+          <div id="update-notes" class="update-notes"></div>
+        </div>
+        <progress id="update-progress" class="update-progress" max="1" hidden></progress>
+        <p id="update-msg" class="hint" aria-live="polite"></p>
+        <p id="update-err" class="err" role="alert" hidden></p>
+        <p id="update-why" class="hint" hidden></p>
+        <p id="update-test" class="uplinks-warn" hidden data-i18n="update.testBuild"></p>
+        <div class="form-actions">
+          <button id="update-check" class="btn" type="button" data-i18n="update.check"></button>
+          <button id="update-install" class="btn primary" type="button" hidden></button>
+        </div>
+      </section>
+
+      <!-- The device: language, name (and hostname), time zone and clock. settings.js -->
+      <section id="device-card" class="card" aria-labelledby="device-title" hidden>
+        <div class="card-head"><h3 id="device-title" class="card-title" data-i18n="device.title"></h3></div>
+        <form id="device-form" class="form" novalidate>
+          <label for="dev-lang" data-i18n="device.language"></label>
+          <select id="dev-lang" name="language"></select>
+          <p class="hint" data-i18n="device.languageHint"></p>
+          <p class="err" data-for="language" hidden></p>
+
+          <label for="dev-name" data-i18n="device.name"></label>
+          <input id="dev-name" name="name" type="text" maxlength="40" autocomplete="off" spellcheck="false">
+          <p id="dev-name-hint" class="hint"></p>
+          <p class="err" data-for="name" hidden></p>
+          <p id="dev-moved" class="uplinks-warn" hidden></p>
+
+          <label for="dev-tz" data-i18n="device.timezone"></label>
+          <select id="dev-tz" name="timezone"></select>
+          <p class="err" data-for="timezone" hidden></p>
+
+          <label class="check"><input id="dev-ntp" name="ntp" type="checkbox"> <span data-i18n="device.ntp"></span></label>
+          <div id="dev-time-row" class="form" hidden>
+            <label for="dev-time" data-i18n="device.time"></label>
+            <div class="cams-addrow">
+              <input id="dev-time" name="time" type="datetime-local" step="1">
+              <button id="dev-time-now" class="btn" type="button" data-i18n="device.timeNow"></button>
+            </div>
+            <p class="err" data-for="time" hidden></p>
+          </div>
+          <p id="dev-clock" class="hint"></p>
+          <p class="err" data-for="ntp" hidden></p>
+
+          <p id="device-err" class="err" role="alert" hidden></p>
+          <div class="form-actions">
+            <button id="dev-cancel" class="btn ghost" type="button" data-i18n="common.cancel" hidden></button>
+            <button class="btn primary" type="submit" data-i18n="common.save"></button>
+          </div>
+          <div class="device-setup">
+            <p class="hint" data-i18n="device.setupAgainHint"></p>
+            <button id="dev-setup-again" class="btn small ghost" type="button" data-i18n="device.setupAgain"></button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card" aria-labelledby="logs-title">
+        <div class="card-head"><h3 id="logs-title" class="card-title" data-i18n="logs.title"></h3></div>
+        <ol id="logs" class="logs"></ol>
+      </section>
+
+      <details class="card fold">
+        <summary data-i18n="pw.title"></summary>
+        <form id="pw-form" class="form">
+          <input type="text" name="username" autocomplete="username" value="admin" hidden>
+          <label for="pw-cur" data-i18n="pw.current"></label>
+          <input id="pw-cur" type="password" autocomplete="current-password" required>
+          <label for="pw-new" data-i18n="pw.new"></label>
+          <input id="pw-new" type="password" autocomplete="new-password" minlength="10" required>
+          <p id="pw-msg" class="err" hidden></p>
+          <div class="form-actions"><button class="btn primary" type="submit" data-i18n="pw.submit"></button></div>
+        </form>
+      </details>
+
+      <footer id="info" class="foot"></footer>
+    </section>
+
+  </div>
+</main>
+</body>
+</html>

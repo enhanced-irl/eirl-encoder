@@ -1,0 +1,16 @@
+# Retira la pantalla de carga al terminar el arranque: con eirl-encoderd en marcha (o, si no está
+# instalado, en cuanto se llega a basic.target). eirl-splash deja el logo quieto y suelta la pantalla.
+# ⚠️ Contrato con el compositor (SPLASH.md §3): si solo pinta, su unidad lleva
+# After=eirl-splash-quit.service y arranca con la pantalla ya libre. Si además emite (eirl-engine), no
+# espera esta unidad: engancha la pantalla cuando eirl-splash.service está inactive o failed.
+[Unit]
+Description=eirl-splash: retira la pantalla de carga al terminar el arranque
+After=eirl-encoderd.service
+
+[Service]
+Type=oneshot
+# Bloqueante a propósito: quien vaya After= de esta unidad encuentra el splash ya parado
+ExecStart=/bin/systemctl stop eirl-splash.service
+
+[Install]
+WantedBy=multi-user.target

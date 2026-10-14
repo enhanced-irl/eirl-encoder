@@ -1,0 +1,5 @@
+# QSPI: nv-l4t-bootloader-config updates the QSPI bootloader if its version does not match the
+# nvidia-l4t-bootloader package. Board rule: the QSPI is never flashed. Since 13 Oct 2026 it failed at
+# every boot (a race with /dev/disk/by-partlabel): masked by decision of the maintainers (13 Oct 2026)
+# so that it never runs again, even if it stops failing.
+mask:nv-l4t-bootloader-config.service

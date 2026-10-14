@@ -1,0 +1,154 @@
+{
+ "v": 1,
+ "program": {
+  "main": "/dev/v4l/by-id/usb-046d_Logi_4K_Stream_Edition_0000ABCD-video-index0",
+  "secondary": "hdmi",
+  "layout": "full",
+  "transition": "fade",
+  "hidden": [],
+  "pip": {
+   "corner": "br",
+   "size": 33
+  },
+  "pause": {
+   "on": false,
+   "text": "Volvemos enseguida",
+   "mute": true
+  },
+  "width": 1920,
+  "height": 1080,
+  "fps": 60,
+  "measuredFps": 61,
+  "newFps": 59
+ },
+ "slots": 4,
+ "sources": [
+  {
+   "id": "hdmi",
+   "slot": 1,
+   "kind": "hdmi-csi",
+   "name": "HDMI de la placa",
+   "state": "live",
+   "detail": "",
+   "format": "UYVY",
+   "mode": "1920x1080@50",
+   "fps": 50,
+   "alias": "Cámara principal"
+  },
+  {
+   "id": "/dev/v4l/by-path/platform-70090000.xusb-usb-0:2.4:1.0-video-index0",
+   "slot": 2,
+   "kind": "usb",
+   "name": "USB3. 0 capture",
+   "state": "live",
+   "detail": "",
+   "format": "MJPG",
+   "mode": "1920x1080@60",
+   "fps": 30,
+   "alias": ""
+  },
+  {
+   "id": "/dev/v4l/by-id/usb-046d_Logi_4K_Stream_Edition_0000ABCD-video-index0",
+   "slot": 3,
+   "kind": "usb",
+   "name": "Logi 4K Stream Edition",
+   "state": "live",
+   "detail": "",
+   "format": "MJPG",
+   "mode": "1920x1080@60",
+   "fps": 59,
+   "alias": ""
+  }
+ ],
+ "screen": {
+  "state": "off",
+  "width": null,
+  "height": null,
+  "touch": false,
+  "locked": false
+ },
+ "output": {
+  "mode": "off",
+  "state": "off",
+  "by": "start",
+  "seq": 0
+ },
+ "preview": {
+  "on": false
+ },
+ "audio": {
+  "main": "i2s",
+  "mode": "single",
+  "follow": true,
+  "sources": [
+   {
+    "id": "i2s",
+    "slot": 1,
+    "kind": "i2s",
+    "name": "HDMI de la placa",
+    "state": "live",
+    "detail": ""
+   },
+   {
+    "id": "alsa:MS2109",
+    "slot": 2,
+    "kind": "usb",
+    "name": "USB3. 0 capture",
+    "state": "live",
+    "detail": ""
+   },
+   {
+    "id": "alsa:Logi",
+    "slot": 3,
+    "kind": "usb",
+    "name": "Logi 4K Stream Edition",
+    "state": "no_signal",
+    "detail": ""
+   }
+  ],
+  "links": {}
+ },
+ "slotConfig": [
+  {
+   "slot": 1,
+   "assign": "auto",
+   "alias": "Cámara principal",
+   "present": true
+  },
+  {
+   "slot": 2,
+   "assign": "auto",
+   "alias": "",
+   "present": true
+  },
+  {
+   "slot": 3,
+   "assign": "auto",
+   "alias": "",
+   "present": true
+  },
+  {
+   "slot": 4,
+   "assign": "auto",
+   "alias": "",
+   "present": false
+  }
+ ],
+ "catalog": [
+  {
+   "id": "hdmi",
+   "name": "HDMI de la placa",
+   "kind": "hdmi-csi"
+  },
+  {
+   "id": "/dev/v4l/by-path/platform-70090000.xusb-usb-0:2.4:1.0-video-index0",
+   "name": "USB3. 0 capture",
+   "kind": "usb"
+  },
+  {
+   "id": "/dev/v4l/by-id/usb-046d_Logi_4K_Stream_Edition_0000ABCD-video-index0",
+   "name": "Logi 4K Stream Edition",
+   "kind": "usb"
+  }
+ ]
+}

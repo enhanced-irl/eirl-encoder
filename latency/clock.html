@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><title>Reloj de latencia</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;cursor:none}
+  #bars{position:fixed;inset:0;display:flex}
+  #bars div{flex:1 1 0;height:100%}
+  #info{position:fixed;left:50%;top:30%;transform:translate(-50%,-50%);background:#222;color:#fff;
+        font:bold 64px/1.2 monospace;padding:16px 32px;border-radius:12px;text-align:center}
+  #info small{display:block;font-size:22px;font-weight:normal;color:#aaa}
+</style></head><body>
+<div id="bars"></div>
+<div id="info"><span id="t">--</span><small id="s">sincronizando con la Jetson…</small></div>
+<script>
+// 32 franjas verticales a lo ancho de la pantalla: [blanco, negro] + 24 bits de la hora de la Jetson
+// (ms mod 2^24, MSB primero) + 4 bits de control (valor mod 13) + [negro, blanco].
+// Las franjas ocupan todo el alto: el medidor lee una fila a 3/4 de la imagen, bajo este recuadro.
+const N = 32, bars = [];
+for (let i = 0; i < N; i++) { const d = document.createElement('div'); bars.push(d); document.getElementById('bars').append(d); }
+let offset = null;   // hora de la Jetson - performance.now()
+async function sync() {
+  let best = null;
+  for (let i = 0; i < 12; i++) {
+    const t0 = performance.now();
+    const r = await fetch('/now?' + Math.random(), {cache: 'no-store'});
+    const srv = parseFloat(await r.text());
+    const t1 = performance.now();
+    if (!best || t1 - t0 < best.rtt) best = {rtt: t1 - t0, off: srv + (t1 - t0) / 2 - t1};
+  }
+  offset = best.off;
+  document.getElementById('s').textContent = `hora de la Jetson · RTT ${best.rtt.toFixed(1)} ms`;
+}
+function paint() {
+  if (offset !== null) {
+    const ms = Math.floor(performance.now() + offset), v = ms % 16777216, c = v % 13;
+    const bits = [1, 0];
+    for (let b = 23; b >= 0; b--) bits.push((v >> b) & 1);
+    for (let b = 3; b >= 0; b--) bits.push((c >> b) & 1);
+    bits.push(0, 1);
+    bits.forEach((x, i) => bars[i].style.background = x ? '#fff' : '#000');
+    document.getElementById('t').textContent = new Date(ms).toLocaleTimeString('es-ES') + '.' + String(ms % 1000).padStart(3, '0');
+  }
+  requestAnimationFrame(paint);
+}
+sync().then(() => setInterval(sync, 10000));
+requestAnimationFrame(paint);
+document.addEventListener('click', () => document.documentElement.requestFullscreen());
+</script></body></html>

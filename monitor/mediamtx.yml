@@ -1,0 +1,35 @@
+# Local monitor on a development computer: MediaMTX pulls the Jetson's SRT (the engine with SRT_MODE=listener)
+# and serves it to the browser. Start: mediamtx monitor/mediamtx.yml
+#   HLS (video+audio):          http://localhost:8888/jetson/
+#   WebRTC (video only, AAC does not go over WebRTC, ~0.5 s): http://localhost:8889/jetson/
+# Change jetson.local below to the board's IP address if .local names do not resolve on your computer.
+logLevel: info
+api: no
+metrics: no
+pprof: no
+playback: no
+# RTSP on localhost only: latency/measure.py uses it to read the stream
+rtsp: yes
+rtspAddress: 127.0.0.1:8554
+rtspTransports: [tcp]
+rtmp: no
+srt: no
+moq: no
+
+hls: yes
+hlsAddress: 127.0.0.1:8888
+hlsAlwaysRemux: yes
+hlsVariant: lowLatency
+hlsSegmentCount: 7
+hlsSegmentDuration: 1s
+hlsPartDuration: 200ms
+
+webrtc: yes
+webrtcAddress: 127.0.0.1:8889
+webrtcLocalUDPAddress: 127.0.0.1:8189
+webrtcIPsFromInterfaces: no
+webrtcAdditionalHosts: [127.0.0.1]
+
+paths:
+  jetson:
+    source: srt://jetson.local:9000?latency=500

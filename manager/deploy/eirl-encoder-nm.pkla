@@ -1,0 +1,12 @@
+# polkit (0.105, Ubuntu 18.04) → /etc/polkit-1/localauthority/50-local.d/eirl-encoder-nm.pkla
+# La wifi cliente de la placa (WIFI.md §4, fase W-B): eirl-encoderd (usuario eirl-encoder, sin root ni
+# CAP_NET_ADMIN) maneja wlan0 por NetworkManager. network-control: escanear, conectar, desconectar y la
+# conexión automática de wlan0; settings.modify.system: crear, cambiar y borrar sus perfiles (eirl-wifi-*).
+# Ojo (para /security-review): settings.modify.system deja tocar CUALQUIER perfil de NetworkManager, no solo los
+# eirl-wifi-*; la app solo toca los suyos, pero el permiso no lo limita.
+[eirl-encoder: wifi cliente por NetworkManager]
+Identity=unix-user:eirl-encoder
+Action=org.freedesktop.NetworkManager.network-control;org.freedesktop.NetworkManager.settings.modify.system
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes

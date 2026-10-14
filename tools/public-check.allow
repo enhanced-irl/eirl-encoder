@@ -1,0 +1,3 @@
+# Justified exceptions for tools/public-check.sh, one `path:regex` per line (path: a shell glob relative to
+# the repository; regex: Python syntax, matched against the line). Keep this file tiny and comment every entry.
+

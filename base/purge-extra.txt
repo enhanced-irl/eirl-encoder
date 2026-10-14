@@ -1,0 +1,9 @@
+# B3 · depuración, documentación y fuentes que no usa la pantalla (DejaVu se queda: keep.txt).
+libc6-dbg
+libx11-doc
+fonts-noto-cjk
+fonts-noto-color-emoji
+fonts-tibetan-machine
+fonts-deva-extra
+fonts-sil-padauk
+fonts-sil-abyssinica

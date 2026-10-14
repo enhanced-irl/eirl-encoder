@@ -1,0 +1,632 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Patch to drivers/media/i2c/tc358743.c of NVIDIA L4T R32.7.6 (Linux 4.9), applied by build/build.sh.
+# The driver is GPL-2.0-only; so is this patch (see driver/LICENSE).
+
+--- tc358743.c.orig
++++ tc358743.c
+@@ -50,6 +50,10 @@
+ module_param(debug, int, 0644);
+ MODULE_PARM_DESC(debug, "debug level (0-3)");
+ 
++static int fifo_level;
++module_param(fifo_level, int, 0644);
++MODULE_PARM_DESC(fifo_level, "nivel del FIFO de vídeo (FIFOCTL); 0 = calculado para cada modo");
++
+ MODULE_DESCRIPTION("Toshiba TC358743 HDMI to CSI-2 bridge driver");
+ MODULE_AUTHOR("Ramakrishnan Muthukrishnan <ram@rkrishnan.org>");
+ MODULE_AUTHOR("Mikhail Khelik <mkhelik@cisco.com>");
+@@ -98,8 +102,20 @@
+ 	u32 mbus_fmt_code;
+ 
+ 	struct gpio_desc *reset_gpio;
++	/*
++	 * Reset por hardware en caliente (control "Hardware Reset"): el reset
++	 * borra TODO el chip, EDID incluido, así que se guarda una copia.
++	 */
++	struct work_struct work_hw_reset;
++	u8 edid[EDID_NUM_BLOCKS_MAX * EDID_BLOCK_SIZE];
++
++	/* Jetson: sin pin INT en el conector CSI de 15 pines -> sondeo */
++	struct timer_list timer;
++	struct work_struct work_i2c_poll;
+ };
+ 
++#define POLL_INTERVAL_MS	500
++
+ static void tc358743_enable_interrupts(struct v4l2_subdev *sd,
+ 		bool cable_connected);
+ static int tc358743_s_ctrl_detect_tx_5v(struct v4l2_subdev *sd);
+@@ -111,8 +127,46 @@
+ 
+ /* --------------- I2C --------------- */
+ 
++/*
++ * Jetson: el bloque de registros HDMI de 8 bits (0x8000+: HDMI-RX, EDID
++ * RAM...) solo autoincrementa la dirección I2C con CONFCTL.AUTOINDEX=1, que
++ * vale 0 tras el reset y el driver no activa hasta el final de
++ * initial_setup (después de varios accesos multibyte a 0x85xx). Para no
++ * depender de ese orden se trocean esos accesos en transferencias de 1 byte
++ * (verificado con i2ctransfer: con AUTOINDEX=0 todos los bytes caen en el
++ * primer registro).
++ */
++#define TC358743_NO_AUTOINC_BASE	0x8000
++
++static void __i2c_rd(struct v4l2_subdev *sd, u16 reg, u8 *values, u32 n);
++static void __i2c_wr(struct v4l2_subdev *sd, u16 reg, u8 *values, u32 n);
++
+ static void i2c_rd(struct v4l2_subdev *sd, u16 reg, u8 *values, u32 n)
+ {
++	u32 i;
++
++	if (reg < TC358743_NO_AUTOINC_BASE || n <= 1) {
++		__i2c_rd(sd, reg, values, n);
++		return;
++	}
++	for (i = 0; i < n; i++)
++		__i2c_rd(sd, reg + i, values + i, 1);
++}
++
++static void i2c_wr(struct v4l2_subdev *sd, u16 reg, u8 *values, u32 n)
++{
++	u32 i;
++
++	if (reg < TC358743_NO_AUTOINC_BASE || n <= 1) {
++		__i2c_wr(sd, reg, values, n);
++		return;
++	}
++	for (i = 0; i < n; i++)
++		__i2c_wr(sd, reg + i, values + i, 1);
++}
++
++static void __i2c_rd(struct v4l2_subdev *sd, u16 reg, u8 *values, u32 n)
++{
+ 	struct tc358743_state *state = to_state(sd);
+ 	struct i2c_client *client = state->i2c_client;
+ 	int err;
+@@ -139,7 +193,7 @@
+ 	}
+ }
+ 
+-static void i2c_wr(struct v4l2_subdev *sd, u16 reg, u8 *values, u32 n)
++static void __i2c_wr(struct v4l2_subdev *sd, u16 reg, u8 *values, u32 n)
+ {
+ 	struct tc358743_state *state = to_state(sd);
+ 	struct i2c_client *client = state->i2c_client;
+@@ -237,7 +291,13 @@
+ 
+ static void i2c_wr16_and_or(struct v4l2_subdev *sd, u16 reg, u16 mask, u16 val)
+ {
+-	i2c_wrreg(sd, reg, (i2c_rdreg(sd, reg, 1) & mask) | val, 1);
++	/*
++	 * Bug upstream 4.9 (corregido en mainline): leía/escribía 1 byte. El
++	 * chip ignora escrituras parciales a registros de 16 bits, así que
++	 * SYSCTL (sleep), PLLCTL1 (PLL_EN) y CONFCTL (AUTOINDEX) nunca se
++	 * aplicaban: chip dormido, PLL apagado y sin TMDS.
++	 */
++	i2c_wrreg(sd, reg, (i2c_rdreg(sd, reg, 2) & mask) | val, 2);
+ }
+ 
+ static u32 i2c_rd32(struct v4l2_subdev *sd, u16 reg)
+@@ -675,8 +735,71 @@
+ 		(state->mbus_fmt_code == MEDIA_BUS_FMT_UYVY8_1X16) ?  16 : 24;
+ 	u32 bps = bt->width * bt->height * fps(bt) * bits_pr_pixel;
+ 	u32 bps_pr_lane = (pdata->refclk_hz / pdata->pll_prd) * pdata->pll_fbd;
++	unsigned needed = DIV_ROUND_UP(bps, bps_pr_lane);
+ 
+-	return DIV_ROUND_UP(bps, bps_pr_lane);
++	/*
++	 * Jetson: el VI/NVCSI de Tegra se configura con el nº de lanes del DT,
++	 * así que el TC358743 tiene que transmitir siempre por esas mismas lanes
++	 * (con menos, p.ej. 1 lane en 720p30, el VI no sincroniza).
++	 */
++	if (needed > state->bus.num_data_lanes)
++		v4l2_warn(sd, "%ux%u@%u necesita %u lanes y el DT tiene %u\n",
++			  bt->width, bt->height, fps(bt), needed,
++			  state->bus.num_data_lanes);
++
++	return state->bus.num_data_lanes;
++}
++
++/*
++ * Jetson: nivel del FIFO de vídeo (FIFOCTL) calculado para cada modo, en vez de
++ * un valor fijo. El CSI empieza a vaciar una línea cuando el FIFO llega a ese
++ * nivel (en palabras de 32 bits: 2 píxeles UYVY):
++ * - Si la línea entra más despacio de lo que sale por el CSI, hay que esperar
++ *   lo justo para que el CSI no alcance a la entrada a mitad de línea:
++ *   nivel = palabras de la línea × (1 - entrada/CSI). Es la fórmula que da el
++ *   374 de mainline: 1080p30 a 2 lanes/972 Mbps y 1080p60 a 4 lanes (373,3).
++ * - Si entra más deprisa (1080p50 a 2 lanes), conviene arrancar cuanto antes:
++ *   el FIFO acumula palabras × (1 - CSI/entrada) además del nivel, y la línea
++ *   cabe solo si el CSI la vacía antes de que acabe la siguiente.
++ * Con el parámetro fifo_level > 0 se fuerza un valor (diagnóstico).
++ */
++static u16 tc358743_fifo_level(struct v4l2_subdev *sd)
++{
++	struct tc358743_state *state = to_state(sd);
++	struct tc358743_platform_data *pdata = &state->pdata;
++	const struct v4l2_bt_timings *bt = &state->timings.bt;
++	u32 bpp = (state->mbus_fmt_code == MEDIA_BUS_FMT_UYVY8_1X16) ? 16 : 24;
++	u64 in_bps = (u64)bt->pixelclock * bpp;
++	u64 csi_bps = (u64)(pdata->refclk_hz / pdata->pll_prd) *
++		      pdata->pll_fbd * state->bus.num_data_lanes;
++	u64 htotal = V4L2_DV_BT_FRAME_WIDTH(bt);
++	u32 words = bt->width * bpp / 32;
++	u32 level, peak, load;
++
++	if (fifo_level > 0)
++		return min(fifo_level, 511);
++	if (!in_bps || !csi_bps || !htotal || words < 32)
++		return pdata->fifo_level;
++
++	if (in_bps < csi_bps) {
++		level = (words * (csi_bps - in_bps) + csi_bps - 1) / csi_bps;
++		peak = level;
++	} else {
++		level = 16;
++		peak = level + words * (in_bps - csi_bps) / in_bps;
++	}
++	level = clamp_t(u32, level, 16, min_t(u32, words - 16, 511));
++
++	/* % de la línea HDMI que tarda el CSI en mandarla (> 100 % = no cabe) */
++	load = (u64)bt->width * bpp * bt->pixelclock * 100 / (csi_bps * htotal);
++	if (load > 100)
++		v4l2_warn(sd, "%ux%u@%u no cabe: el CSI necesita el %u%% de cada línea\n",
++			  bt->width, bt->height, fps(bt), load);
++	else
++		v4l2_info(sd, "%ux%u@%u: FIFO %u (pico ~%u), CSI al %u%% de la línea\n",
++			  bt->width, bt->height, fps(bt), level, peak, load);
++
++	return level;
+ }
+ 
+ static void tc358743_set_csi(struct v4l2_subdev *sd)
+@@ -688,6 +811,7 @@
+ 	v4l2_dbg(3, debug, sd, "%s:\n", __func__);
+ 
+ 	tc358743_reset(sd, MASK_CTXRST);
++	i2c_wr16(sd, FIFOCTL, tc358743_fifo_level(sd));
+ 
+ 	if (lanes < 1)
+ 		i2c_wr32(sd, CLW_CNTRL, MASK_CLW_LANEDISABLE);
+@@ -1328,6 +1452,23 @@
+ 	return handled ? IRQ_HANDLED : IRQ_NONE;
+ }
+ 
++static void tc358743_irq_poll_timer(unsigned long arg)
++{
++	struct tc358743_state *state = (struct tc358743_state *)arg;
++
++	schedule_work(&state->work_i2c_poll);
++	mod_timer(&state->timer, jiffies + msecs_to_jiffies(POLL_INTERVAL_MS));
++}
++
++static void tc358743_work_i2c_poll(struct work_struct *work)
++{
++	struct tc358743_state *state = container_of(work,
++			struct tc358743_state, work_i2c_poll);
++	bool handled;
++
++	tc358743_isr(&state->sd, 0, &handled);
++}
++
+ static int tc358743_subscribe_event(struct v4l2_subdev *sd, struct v4l2_fh *fh,
+ 				    struct v4l2_event_subscription *sub)
+ {
+@@ -1614,6 +1755,7 @@
+ 	for (i = 0; i < edid_len; i += EDID_BLOCK_SIZE)
+ 		i2c_wr(sd, EDID_RAM + i, edid->edid + i, EDID_BLOCK_SIZE);
+ 
++	memcpy(state->edid, edid->edid, edid_len);
+ 	state->edid_blocks_written = edid->blocks;
+ 
+ 	if (tx_5v_power_present(sd))
+@@ -1643,8 +1785,62 @@
+ 	.g_mbus_config = tc358743_g_mbus_config,
+ 	.s_stream = tc358743_s_stream,
+ };
++
++static int tc358743_enum_mbus_code(struct v4l2_subdev *sd,
++		struct v4l2_subdev_pad_config *cfg,
++		struct v4l2_subdev_mbus_code_enum *code)
++{
++	switch (code->index) {
++	case 0:
++		code->code = MEDIA_BUS_FMT_UYVY8_1X16;
++		break;
++	case 1:
++		code->code = MEDIA_BUS_FMT_RGB888_1X24;
++		break;
++	default:
++		return -EINVAL;
++	}
++	return 0;
++}
++
++static int tc358743_enum_frame_size(struct v4l2_subdev *sd,
++		struct v4l2_subdev_pad_config *cfg,
++		struct v4l2_subdev_frame_size_enum *fse)
++{
++	struct tc358743_state *state = to_state(sd);
+ 
++	if (fse->index > 0)
++		return -EINVAL;
++	if (fse->code != MEDIA_BUS_FMT_UYVY8_1X16 &&
++	    fse->code != MEDIA_BUS_FMT_RGB888_1X24)
++		return -EINVAL;
++
++	/* Un único tamaño: el de los timings HDMI activos */
++	fse->min_width = fse->max_width = state->timings.bt.width;
++	fse->min_height = fse->max_height = state->timings.bt.height;
++	return 0;
++}
++
++static int tc358743_enum_frame_interval(struct v4l2_subdev *sd,
++		struct v4l2_subdev_pad_config *cfg,
++		struct v4l2_subdev_frame_interval_enum *fie)
++{
++	struct tc358743_state *state = to_state(sd);
++	const struct v4l2_bt_timings *bt = &state->timings.bt;
++
++	if (fie->index > 0 || fie->width != bt->width ||
++	    fie->height != bt->height || !fps(bt))
++		return -EINVAL;
++
++	fie->interval.numerator = 1;
++	fie->interval.denominator = fps(bt);
++	return 0;
++}
++
+ static const struct v4l2_subdev_pad_ops tc358743_pad_ops = {
++	.enum_mbus_code = tc358743_enum_mbus_code,
++	.enum_frame_size = tc358743_enum_frame_size,
++	.enum_frame_interval = tc358743_enum_frame_interval,
+ 	.set_fmt = tc358743_set_fmt,
+ 	.get_fmt = tc358743_get_fmt,
+ 	.get_edid = tc358743_g_edid,
+@@ -1688,11 +1884,44 @@
+ #ifdef CONFIG_OF
+ static void tc358743_gpio_reset(struct tc358743_state *state)
+ {
++	struct i2c_client *client = state->i2c_client;
++	u8 reg[2] = { CHIPID >> 8, CHIPID & 0xff }, val[2];
++	struct i2c_msg msgs[] = {
++		{ .addr = client->addr, .flags = 0, .len = 2, .buf = reg },
++		{ .addr = client->addr, .flags = I2C_M_RD, .len = 2, .buf = val },
++	};
++	unsigned long start, timeout;
++	int attempt;
++
++	/*
++	 * Jetson: el RST de la placa tarda en subir tras soltarlo (pull-up de la
++	 * placa, probablemente con condensador): el chip ha tardado en contestar
++	 * por I2C de 0,1 s a más de 3 s, frente a los 20 ms de upstream. Pulso
++	 * de 10 ms (con 1-2 ms el reset no siempre era limpio), espera activa a
++	 * que conteste y hasta 3 intentos.
++	 */
+ 	usleep_range(5000, 10000);
+-	gpiod_set_value(state->reset_gpio, 1);
+-	usleep_range(1000, 2000);
+-	gpiod_set_value(state->reset_gpio, 0);
+-	msleep(20);
++	for (attempt = 1; attempt <= 3; attempt++) {
++		gpiod_set_value(state->reset_gpio, 1);
++		msleep(10);
++		gpiod_set_value(state->reset_gpio, 0);
++		start = jiffies;
++		msleep(100);
++		timeout = start + msecs_to_jiffies(3000);
++		do {
++			if (i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs)) ==
++			    ARRAY_SIZE(msgs)) {
++				dev_info(&client->dev,
++					 "chip listo %u ms tras el reset (intento %d)\n",
++					 jiffies_to_msecs(jiffies - start), attempt);
++				return;
++			}
++			msleep(20);
++		} while (time_before(jiffies, timeout));
++		dev_warn(&client->dev, "el chip no contesta tras el reset (intento %d)\n",
++			 attempt);
++	}
++	dev_err(&client->dev, "el chip no contesta tras 3 resets\n");
+ }
+ 
+ static int tc358743_probe_of(struct tc358743_state *state)
+@@ -1739,8 +1968,15 @@
+ 	state->pdata.ddc5v_delay = DDC5V_DELAY_100_MS;
+ 	state->pdata.enable_hdcp = false;
+ 	/* A FIFO level of 16 should be enough for 2-lane 720p60 at 594 MHz. */
+-	state->pdata.fifo_level = 16;
+ 	/*
++	 * Backport mainline ("Increase FIFO trigger level to 374"): 16 solo
++	 * vale para 720p60 a 2 lanes/594 Mbps; 1080p24/30 UYVY a 2 lanes/972
++	 * Mbps necesita >= 374 (con 16 el FIFO se desborda: el VI recibía
++	 * ~595 de 1080 líneas y 1 de cada 4 frames). Es solo el valor inicial:
++	 * tc358743_set_csi() lo recalcula para cada modo (tc358743_fifo_level).
++	 */
++	state->pdata.fifo_level = 374;
++	/*
+ 	 * The PLL input clock is obtained by dividing refclk by pll_prd.
+ 	 * It must be between 6 MHz and 40 MHz, lower frequency is better.
+ 	 */
+@@ -1776,26 +2012,47 @@
+ 	 * link frequency). In principle it should be possible to calculate
+ 	 * them based on link frequency and resolution.
+ 	 */
+-	if (bps_pr_lane != 594000000U)
++	switch (bps_pr_lane) {
++	case 972000000U:
++		/* Backport mainline: 972 Mbps/lane (1080p30 UYVY en 2 lanes) */
++		state->pdata.lineinitcnt = 0x1b58;
++		state->pdata.lptxtimecnt = 0x007;
++		/* tclk-preparecnt: 6, tclk-zerocnt: 40 */
++		state->pdata.tclk_headercnt = 0x2806;
++		state->pdata.tclk_trailcnt = 0x00;
++		/* ths-preparecnt: 6, ths-zerocnt: 8 */
++		state->pdata.ths_headercnt = 0x0806;
++		state->pdata.twakeup = 0x4268;
++		state->pdata.tclk_postcnt = 0x008;
++		state->pdata.ths_trailcnt = 0x5;
++		state->pdata.hstxvregcnt = 0;
++		break;
++	default:
+ 		dev_warn(dev, "untested bps per lane: %u bps\n", bps_pr_lane);
+-	state->pdata.lineinitcnt = 0xe80;
+-	state->pdata.lptxtimecnt = 0x003;
+-	/* tclk-preparecnt: 3, tclk-zerocnt: 20 */
+-	state->pdata.tclk_headercnt = 0x1403;
+-	state->pdata.tclk_trailcnt = 0x00;
+-	/* ths-preparecnt: 3, ths-zerocnt: 1 */
+-	state->pdata.ths_headercnt = 0x0103;
+-	state->pdata.twakeup = 0x4882;
+-	state->pdata.tclk_postcnt = 0x008;
+-	state->pdata.ths_trailcnt = 0x2;
+-	state->pdata.hstxvregcnt = 0;
++		/* fall through */
++	case 594000000U:
++		state->pdata.lineinitcnt = 0xe80;
++		state->pdata.lptxtimecnt = 0x003;
++		/* tclk-preparecnt: 3, tclk-zerocnt: 20 */
++		state->pdata.tclk_headercnt = 0x1403;
++		state->pdata.tclk_trailcnt = 0x00;
++		/* ths-preparecnt: 3, ths-zerocnt: 1 */
++		state->pdata.ths_headercnt = 0x0103;
++		state->pdata.twakeup = 0x4882;
++		state->pdata.tclk_postcnt = 0x008;
++		state->pdata.ths_trailcnt = 0x2;
++		state->pdata.hstxvregcnt = 0;
++		break;
++	}
+ 
+ 	state->reset_gpio = devm_gpiod_get_optional(dev, "reset",
+ 						    GPIOD_OUT_LOW);
+ 	if (IS_ERR(state->reset_gpio)) {
+-		dev_err(dev, "failed to get reset gpio\n");
+-		ret = PTR_ERR(state->reset_gpio);
+-		goto disable_clk;
++		/* Jetson: sin el pin de reset el chip funciona igual; solo se
++		 * pierde el reset en caliente. No vale la pena quedarse sin vídeo. */
++		dev_warn(dev, "sin gpio de reset (%ld): reset en caliente desactivado\n",
++			 PTR_ERR(state->reset_gpio));
++		state->reset_gpio = NULL;
+ 	}
+ 
+ 	if (state->reset_gpio)
+@@ -1816,7 +2073,100 @@
+ 	return -ENODEV;
+ }
+ #endif
++
++/*
++ * Jetson: reset por hardware en caliente. El PLL de audio del chip puede
++ * quedarse sin enganchar en frecuencia (AU_STATUS0.S_A_F_Lock = 0, sin reloj
++ * I2S) y ni los resets por software de SYSCTL ni reiniciar la Jetson lo
++ * sacan: solo quitarle la corriente. El pulso en RESETN deja el chip como
++ * recién encendido; aquí se reprograma entero (lo de initial_setup, los
++ * timings y el formato CSI vigentes y el EDID) sin reprobar el driver, que
++ * no se puede descargar mientras el VI lo tenga.
++ *
++ * Va en un work y no en s_ctrl: s_ctrl corre con el lock del ctrl_handler
++ * y el sondeo de interrupciones (que actualiza controles con ese lock) hay
++ * que pararlo y esperarlo antes de tocar el chip.
++ *
++ * Hacerlo con el pipeline parado: el CSI queda apagado hasta el siguiente
++ * s_stream(1). El hotplug baja y sube: la fuente vuelve a detectar la
++ * pantalla y renegocia.
++ */
++#define TC358743_CID_HW_RESET	(V4L2_CID_USER_TC358743_BASE + 2)
++
++static void tc358743_work_hw_reset(struct work_struct *work)
++{
++	struct tc358743_state *state = container_of(work,
++			struct tc358743_state, work_hw_reset);
++	struct v4l2_subdev *sd = &state->sd;
++	u16 edid_len = state->edid_blocks_written * EDID_BLOCK_SIZE;
++	int i;
++
++	v4l2_info(sd, "reset por hardware\n");
++
++	if (state->i2c_client->irq) {
++		disable_irq(state->i2c_client->irq);
++	} else {
++		del_timer_sync(&state->timer);
++		cancel_work_sync(&state->work_i2c_poll);
++	}
++	cancel_delayed_work_sync(&state->delayed_work_enable_hotplug);
+ 
++	tc358743_gpio_reset(state);
++
++	tc358743_initial_setup(sd);
++	/* s_dv_timings no reprograma si los timings no cambian: a mano */
++	tc358743_set_pll(sd);
++	tc358743_set_csi(sd);
++	tc358743_set_csi_color_space(sd);
++
++	tc358743_disable_edid(sd);
++	i2c_wr8(sd, EDID_LEN1, edid_len & 0xff);
++	i2c_wr8(sd, EDID_LEN2, edid_len >> 8);
++	for (i = 0; i < edid_len; i += EDID_BLOCK_SIZE)
++		i2c_wr(sd, EDID_RAM + i, state->edid + i, EDID_BLOCK_SIZE);
++
++	tc358743_init_interrupts(sd);
++	tc358743_enable_interrupts(sd, tx_5v_power_present(sd));
++	i2c_wr16(sd, INTMASK, ~(MASK_HDMI_MSK | MASK_CSI_MSK) & 0xffff);
++	if (tx_5v_power_present(sd))
++		tc358743_enable_edid(sd);
++
++	if (state->i2c_client->irq)
++		enable_irq(state->i2c_client->irq);
++	else
++		mod_timer(&state->timer,
++			  jiffies + msecs_to_jiffies(POLL_INTERVAL_MS));
++
++	tc358743_update_controls(sd);
++	v4l2_info(sd, "reset por hardware: chip reprogramado\n");
++}
++
++static int tc358743_s_ctrl(struct v4l2_ctrl *ctrl)
++{
++	struct tc358743_state *state = container_of(ctrl->handler,
++			struct tc358743_state, hdl);
++
++	switch (ctrl->id) {
++	case TC358743_CID_HW_RESET:
++		if (!state->reset_gpio)
++			return -ENODEV;
++		schedule_work(&state->work_hw_reset);
++		return 0;
++	}
++	return -EINVAL;
++}
++
++static const struct v4l2_ctrl_ops tc358743_ctrl_ops = {
++	.s_ctrl = tc358743_s_ctrl,
++};
++
++static const struct v4l2_ctrl_config tc358743_ctrl_hw_reset = {
++	.ops = &tc358743_ctrl_ops,
++	.id = TC358743_CID_HW_RESET,
++	.name = "Hardware Reset",
++	.type = V4L2_CTRL_TYPE_BUTTON,
++};
++
+ static int tc358743_probe(struct i2c_client *client,
+ 			  const struct i2c_device_id *id)
+ {
+@@ -1863,7 +2213,7 @@
+ 	}
+ 
+ 	/* control handlers */
+-	v4l2_ctrl_handler_init(&state->hdl, 3);
++	v4l2_ctrl_handler_init(&state->hdl, 4);
+ 
+ 	state->detect_tx_5v_ctrl = v4l2_ctrl_new_std(&state->hdl, NULL,
+ 			V4L2_CID_DV_RX_POWER_PRESENT, 0, 1, 0, 0);
+@@ -1875,6 +2225,9 @@
+ 	state->audio_present_ctrl = v4l2_ctrl_new_custom(&state->hdl,
+ 			&tc358743_ctrl_audio_present, NULL);
+ 
++	INIT_WORK(&state->work_hw_reset, tc358743_work_hw_reset);
++	v4l2_ctrl_new_custom(&state->hdl, &tc358743_ctrl_hw_reset, NULL);
++
+ 	sd->ctrl_handler = &state->hdl;
+ 	if (state->hdl.error) {
+ 		err = state->hdl.error;
+@@ -1887,14 +2240,13 @@
+ 	}
+ 
+ 	state->pad.flags = MEDIA_PAD_FL_SOURCE;
++	/* Como el tc358840 de NVIDIA: el VI de Tegra lo trata como "sensor" */
++	sd->entity.function = MEDIA_ENT_F_CAM_SENSOR;
+ 	err = media_entity_pads_init(&sd->entity, 1, &state->pad);
+ 	if (err < 0)
+ 		goto err_hdl;
+ 
+ 	sd->dev = &client->dev;
+-	err = v4l2_async_register_subdev(sd);
+-	if (err < 0)
+-		goto err_hdl;
+ 
+ 	mutex_init(&state->confctl_mutex);
+ 
+@@ -1905,7 +2257,8 @@
+ 
+ 	tc358743_s_dv_timings(sd, &default_timing);
+ 
+-	state->mbus_fmt_code = MEDIA_BUS_FMT_RGB888_1X24;
++	/* El VI2 de Tegra no captura RGB888: UYVY por defecto */
++	state->mbus_fmt_code = MEDIA_BUS_FMT_UYVY8_1X16;
+ 	tc358743_set_csi_color_space(sd);
+ 
+ 	tc358743_init_interrupts(sd);
+@@ -1918,6 +2271,12 @@
+ 						"tc358743", state);
+ 		if (err)
+ 			goto err_work_queues;
++	} else {
++		INIT_WORK(&state->work_i2c_poll, tc358743_work_i2c_poll);
++		setup_timer(&state->timer, tc358743_irq_poll_timer,
++			    (unsigned long)state);
++		mod_timer(&state->timer,
++			  jiffies + msecs_to_jiffies(POLL_INTERVAL_MS));
+ 	}
+ 
+ 	tc358743_enable_interrupts(sd, tx_5v_power_present(sd));
+@@ -1927,12 +2286,26 @@
+ 	if (err)
+ 		goto err_work_queues;
+ 
++	/*
++	 * Registrar el subdev AL FINAL: el VI de Tegra se engancha de forma
++	 * síncrona dentro de v4l2_async_register_subdev() y llama a get_fmt;
++	 * con el orden upstream mbus_fmt_code aún valía 0 y el canal VI
++	 * desreferenciaba un fmtinfo NULL (oops en tegra_channel_fmts_bitmap_init).
++	 */
++	err = v4l2_async_register_subdev(sd);
++	if (err < 0)
++		goto err_work_queues;
++
+ 	v4l2_info(sd, "%s found @ 0x%x (%s)\n", client->name,
+ 		  client->addr << 1, client->adapter->name);
+ 
+ 	return 0;
+ 
+ err_work_queues:
++	if (!state->i2c_client->irq) {
++		del_timer_sync(&state->timer);
++		flush_work(&state->work_i2c_poll);
++	}
+ 	cancel_delayed_work(&state->delayed_work_enable_hotplug);
+ 	mutex_destroy(&state->confctl_mutex);
+ err_hdl:
+@@ -1946,6 +2319,11 @@
+ 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+ 	struct tc358743_state *state = to_state(sd);
+ 
++	if (!state->i2c_client->irq) {
++		del_timer_sync(&state->timer);
++		flush_work(&state->work_i2c_poll);
++	}
++	cancel_work_sync(&state->work_hw_reset);
+ 	cancel_delayed_work(&state->delayed_work_enable_hotplug);
+ 	v4l2_async_unregister_subdev(sd);
+ 	v4l2_device_unregister_subdev(sd);
+@@ -1963,9 +2341,18 @@
+ 
+ MODULE_DEVICE_TABLE(i2c, tc358743_id);
+ 
++#ifdef CONFIG_OF
++static const struct of_device_id tc358743_of_match[] = {
++	{ .compatible = "toshiba,tc358743" },
++	{},
++};
++MODULE_DEVICE_TABLE(of, tc358743_of_match);
++#endif
++
+ static struct i2c_driver tc358743_driver = {
+ 	.driver = {
+ 		.name = "tc358743",
++		.of_match_table = of_match_ptr(tc358743_of_match),
+ 	},
+ 	.probe = tc358743_probe,
+ 	.remove = tc358743_remove,

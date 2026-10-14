@@ -1,0 +1,10 @@
+# Paths that tools/public-export.sh leaves out of the public repository, and that tools/public-check.sh
+# skips by default. One path per line (a directory ends with /), then the reason after a #.
+# Rule: leave out what only makes sense on the maintainers' own test board or in their internal workflow;
+# keep every tool that a contributor with a Jetson Nano could use.
+
+CLAUDE.md                     # instructions for the maintainers' AI coding sessions (internal workflow and test-board rules)
+mixer/f0/                     # phase-0 mixer spike: measurement scripts for the test board's own capture devices (results are in MIXER.md)
+mixer/f5/                     # overnight soak harness of the test board (its paths and its booking log)
+mixer/m0/                     # M0 prototypes of the Go engine's GStreamer bridge, superseded by manager/internal/gst (results are in ENGINE_GO.md)
+network/spike/                # network-camera spike: one-off measurements on the test board (results are in NETWORK_SOURCES.md)

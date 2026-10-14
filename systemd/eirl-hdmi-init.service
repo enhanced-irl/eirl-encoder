@@ -1,0 +1,14 @@
+[Unit]
+Description=EnhancedIRL: prepare the TC358743 at boot (I2S4 pins and EDID)
+# No systemd-udev-settle: it was the only unit asking for it and, as it goes Before=sysinit.target, the
+# whole boot waited for udev. With a hung USB capture device (Cam Link not enumerating, -110) that was
+# 34 s more. eirl-hdmi-init.sh already waits on its own (up to 30 s) for the TC358743 subdevice.
+After=systemd-modules-load.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/eirl-encoder/engine/eirl-hdmi-init.sh
+
+[Install]
+WantedBy=multi-user.target

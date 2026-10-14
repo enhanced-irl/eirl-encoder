@@ -1,0 +1,112 @@
+#!/bin/bash
+# /etc/NetworkManager/dispatcher.d/90-eirl-uplinks — enrutado por origen de los enlaces a internet
+# para SRTLA (ver SRTLA.md). Lo lanza NetworkManager, como root, en cada cambio de red (up, down,
+# dhcp4-change…); install.sh lo lanza una vez al instalar.
+#
+# srtla_send abre un socket por IP de origen (bind). Sin más, Linux elige la salida por la tabla
+# main (la ruta por defecto, normalmente eth0) y los paquetes de un módem saldrían por otra interfaz
+# con su IP: el operador los tira. Por eso, por cada enlace con IPv4 y puerta de enlace:
+#   tabla 10000+ifindex: default via <gw> dev <if> + su red conectada
+#   regla 1000+ifindex: from <ip> lookup <tabla>
+#   rp_filter=2 en la interfaz: la respuesta entra por un enlace que no es la ruta por defecto
+# (Tablas desde 10000 y no desde 100: con 100+ifindex, un módem que se reconecta muchas veces
+# llegaría a las tablas reservadas 253-255, default/main/local, y al irse se vaciaría main.)
+# It also leaves the list in /run/eirl-uplinks/available ("<interface> <ip>" per line, atomic rename),
+# read by the engine. Two links with the SAME IP (two factory HiLink modems: both get
+# 192.168.8.100) cannot be told apart by source: only the first is used and the rest are listed as
+# "<interface> <ip> conflict" (the app warns: the network of one of them must be changed in its web UI).
+# La tabla main no se toca: la LAN y el acceso a la app siguen igual.
+#
+# Antes de esas reglas, otra (999) consulta main para todo MENOS la ruta por defecto
+# (suppress_prefixlength 0): el tráfico hacia redes locales (la LAN, el gadget USB, la red del propio
+# módem) sigue saliendo por su interfaz aunque lleve como origen la IP de otro enlace.
+#
+# Siempre recalcula TODO (no solo la interfaz del evento): es idempotente y se recupera solo de
+# un evento perdido. No ejecuta ni lee nada que pueda escribir la app.
+#
+# EIRL_UPLINKS_DRYRUN=1: imprime los comandos en vez de ejecutarlos y escribe la lista en
+# $EIRL_UPLINKS_OUT (para probarlo sin root).
+set -u
+export LC_ALL=C
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+OUT="${EIRL_UPLINKS_OUT:-/run/eirl-uplinks/available}"
+DRY="${EIRL_UPLINKS_DRYRUN:-}"
+PRIO_MIN=1000 PRIO_MAX=30999  # rango de las reglas que son nuestras (main es 32766)
+TABLE_BASE=10000
+
+run() { if [ -n "$DRY" ]; then echo "+ $*"; else "$@"; fi; }
+
+# Interfaces que nunca son un enlace: loopback, puentes y sus esclavas (el modo gadget del
+# micro-USB de la Jetson es el puente l4tbr0 con rndis0 y usb0 dentro: da DHCP a un PC, no sale a
+# internet), docker y cualquier cosa sin dispositivo físico (tun, wireguard, dummy…). No se excluye
+# usb0 por nombre: un Android con anclaje RNDIS puede llamarse así.
+is_uplink_candidate() {
+  local i=$1 d=/sys/class/net/$1
+  case "$i" in lo|l4tbr*|dummy*|docker*|veth*|br-*|ap[0-9]*) return 1 ;; esac
+  [ -e "$d/device" ] || return 1
+  # El punto de acceso de las cámaras (ap0, NETWORK_SOURCES.md §6.2) nunca es un enlace, aunque algún
+  # día tuviera puerta de enlace: por nombre y por tipo
+  if [ -e "$d/phy80211" ] && iw dev "$i" info 2>/dev/null | grep -q 'type AP'; then
+    return 1
+  fi
+  [ -e "$d/bridge" ] && return 1
+  [ -e "$d/brport" ] && return 1
+  return 0
+}
+
+ip -4 rule show 2>/dev/null | grep -q '^999:' || run ip -4 rule add lookup main suppress_prefixlength 0 priority 999
+
+declare -A keep_prio=()
+declare -A keep_table=()
+declare -A seen_ip=()
+lines=""
+for d in /sys/class/net/*; do
+  i=${d##*/}
+  is_uplink_candidate "$i" || continue
+  [[ $i =~ ^[A-Za-z0-9_.-]{1,15}$ ]] || continue
+  [ "$(cat "$d/operstate" 2>/dev/null)" = down ] && continue
+  idx=$(cat "$d/ifindex" 2>/dev/null) || continue
+  [[ $idx =~ ^[0-9]{1,5}$ ]] && (( PRIO_MIN + idx <= PRIO_MAX )) || continue
+  # Primera IPv4 global de la interfaz y su red (192.168.8.100/24)
+  cidr=$(ip -4 -o addr show dev "$i" scope global 2>/dev/null | awk '{print $4; exit}')
+  [ -n "$cidr" ] || continue
+  ip4=${cidr%/*}
+  [[ $ip4 =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || continue
+  # Puerta de enlace: la ruta por defecto que NetworkManager pone en main para esta interfaz
+  gw=$(ip -4 route show default dev "$i" table main 2>/dev/null | awk '/^default via/ {print $3; exit}')
+  [ -n "$gw" ] || continue
+  if [ -n "${seen_ip[$ip4]:-}" ]; then
+    lines+="$i $ip4 conflict"$'\n'
+    continue
+  fi
+  seen_ip[$ip4]=1
+  table=$((TABLE_BASE + idx)) prio=$((PRIO_MIN + idx))
+  net=$(ip -4 route show dev "$i" table main proto kernel scope link 2>/dev/null | awk '{print $1; exit}')
+  [ -n "$net" ] && run ip -4 route replace "$net" dev "$i" src "$ip4" table "$table"
+  run ip -4 route replace default via "$gw" dev "$i" table "$table"
+  # Regla: si ya hay una con esta prioridad para otra IP (DHCP cambió la IP), se sustituye
+  cur=$(ip -4 rule show 2>/dev/null | awk -v p="$prio:" '$1 == p {print $3; exit}')
+  if [ "$cur" != "$ip4" ]; then
+    [ -n "$cur" ] && run ip -4 rule del priority "$prio"
+    run ip -4 rule add from "$ip4" lookup "$table" priority "$prio"
+  fi
+  run sysctl -q -w "net.ipv4.conf.$i.rp_filter=2"
+  keep_prio[$prio]=1 keep_table[$table]=1
+  lines+="$i $ip4"$'\n'
+done
+
+# Reglas y tablas de enlaces que ya no están
+while read -r p _; do
+  p=${p%:}
+  [[ $p =~ ^[0-9]+$ ]] && (( p >= PRIO_MIN && p <= PRIO_MAX )) || continue
+  [ -n "${keep_prio[$p]:-}" ] && continue
+  run ip -4 rule del priority "$p"
+  t=$((p - PRIO_MIN + TABLE_BASE))  # nunca 253-255: TABLE_BASE ≥ 10000
+  [ -n "${keep_table[$t]:-}" ] || run ip -4 route flush table "$t"
+done < <(ip -4 rule show 2>/dev/null)
+
+mkdir -p "$(dirname "$OUT")"
+printf '%s' "$lines" > "$OUT.tmp" && chmod 0644 "$OUT.tmp" && mv -f "$OUT.tmp" "$OUT"
+[ -n "$DRY" ] && { echo "== $OUT"; cat "$OUT"; }
+exit 0

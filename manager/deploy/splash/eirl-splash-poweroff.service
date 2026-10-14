@@ -1,0 +1,14 @@
+# «Apagando…» en la pantalla al apagar (D5). Pinta y sale: la imagen se queda hasta que se va la
+# corriente. El compositor declara Before= de esta unidad (SPLASH.md).
+[Unit]
+Description=eirl-splash: «Apagando…» en la pantalla
+DefaultDependencies=no
+After=eirl-splash.service eirl-encoderd.service eirl-engine.service
+Before=systemd-poweroff.service systemd-halt.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/eirl-splash -scene poweroff
+
+[Install]
+WantedBy=poweroff.target halt.target

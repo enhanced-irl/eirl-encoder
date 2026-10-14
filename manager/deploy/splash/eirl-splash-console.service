@@ -1,0 +1,14 @@
+# Arranque fallido (modo de emergencia o de rescate): devuelve la consola de texto a la pantalla para
+# que se vea el error y funcione un teclado (D4). En un arranque normal la consola no aparece nunca.
+[Unit]
+Description=eirl-splash: devuelve la consola de texto a la pantalla (arranque fallido)
+DefaultDependencies=no
+After=eirl-splash.service
+Before=emergency.service rescue.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/eirl-splash -console
+
+[Install]
+WantedBy=emergency.target rescue.target

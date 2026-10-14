@@ -1,0 +1,20 @@
+# /etc/udev/rules.d/70-eirl-capture.rules — capturadoras y cámaras USB del codificador (SOURCES.md).
+#
+# Sin autosuspend: uvcvideo lo activa en casi todos los aparatos y hay capturadoras que no despiertan
+# bien (la emisión se quedaría sin frames). uvcvideo lo activa al FINAL de su probe, después de
+# registrar el nodo de vídeo, así que la regla va sobre la aparición del nodo (también si se vuelve
+# a cargar el driver) y espera un segundo a que el probe acabe. El kernel 4.9 de L4T no emite eventos
+# "bind". /sys%p/../../.. = el aparato USB (nodo → video4linux → interfaz → aparato).
+ACTION=="add", SUBSYSTEM=="video4linux", ATTR{index}=="0", SUBSYSTEMS=="usb", DRIVERS=="uvcvideo", RUN+="/bin/sh -c 'sleep 1; echo on > /sys%p/../../../power/control'"
+
+# PulseAudio no toca el audio de las capturadoras: la emisión lo captura por ALSA directamente y, si
+# un PulseAudio arrancado por cualquier proceso de la placa abre la tarjeta a la vez, alsasrc no
+# puede abrirla y la emisión no arranca. Tarjetas de aparatos USB que además tienen vídeo (UVC).
+SUBSYSTEM=="sound", KERNEL=="card*", SUBSYSTEMS=="usb", IMPORT{builtin}="usb_id"
+SUBSYSTEM=="sound", KERNEL=="card*", ENV{ID_USB_INTERFACES}=="*:0e01??:*", ENV{PULSE_IGNORE}="1"
+
+# El hub de la placa (Realtek RTS5411: 0bda:5411 USB 2 y 0bda:0411 USB 3): el grupo eirl-usbhub, que solo
+# tiene eirl-engine (no la app web), puede escribir en su nodo /dev/bus/usb para cortar y devolver la
+# alimentación de un puerto, lo único que recupera una capturadora colgada con `-71`
+# (internal/engine/usbhub, MIXER.md §16). Ni los hubs raíz ni otros hubs ni ningún otro aparato.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0bda", ATTR{idProduct}=="5411|0411", GROUP="eirl-usbhub", MODE="0664"

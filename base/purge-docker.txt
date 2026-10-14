@@ -1,0 +1,10 @@
+# B3 · contenedores y snaps: nada del codificador los usa (deshabilitados desde el 08-oct).
+docker
+docker.io
+containerd
+runc
+cgroupfs-mount
+nvidia-docker2
+nvidia-container-*
+libnvidia-container*
+snapd

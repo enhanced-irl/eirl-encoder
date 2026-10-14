@@ -1,0 +1,8 @@
+#!/usr/bin/python3
+# asuser USER CMD ARGS…: exec CMD as USER with its groups (setpriv is not in the image)
+import os, pwd, sys
+p = pwd.getpwnam(sys.argv[1])
+os.setgroups(os.getgrouplist(p.pw_name, p.pw_gid))
+os.setgid(p.pw_gid)
+os.setuid(p.pw_uid)
+os.execv(sys.argv[2], sys.argv[2:])

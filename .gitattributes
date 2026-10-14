@@ -1,0 +1,8 @@
+# Scripts run on the board as they are: always LF
+*.sh     text eol=lf
+*.py     text eol=lf
+*.patch  text eol=lf
+*.dtsi   text eol=lf
+# Binary assets: no diffs, no line-ending conversion
+*.png    binary
+*.ttf    binary

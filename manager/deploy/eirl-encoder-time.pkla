@@ -1,0 +1,19 @@
+# polkit (0.105, Ubuntu 18.04) → /etc/polkit-1/localauthority/50-local.d/eirl-encoder-time.pkla
+# Device settings and first-boot wizard (SETUP.md §7): eirl-encoderd (user eirl-encoder, no root, no CAP_SYS_TIME)
+# sets the time zone, automatic time (NTP), the clock and the hostname through systemd-timedated and
+# systemd-hostnamed (timedatectl/hostnamectl --no-ask-password). Exactly these actions; NOT set-machine-info
+# (pretty hostname, icon, chassis, location) nor set-local-rtc. The app validates every value before calling.
+# Worst case if the app were compromised: a wrong clock or a wrong hostname, both visible and reversible.
+[eirl-encoder: time zone, NTP and clock]
+Identity=unix-user:eirl-encoder
+Action=org.freedesktop.timedate1.set-timezone;org.freedesktop.timedate1.set-ntp;org.freedesktop.timedate1.set-time
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+
+[eirl-encoder: hostname]
+Identity=unix-user:eirl-encoder
+Action=org.freedesktop.hostname1.set-hostname;org.freedesktop.hostname1.set-static-hostname
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes

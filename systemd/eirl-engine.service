@@ -1,0 +1,50 @@
+# The encoder's engine (formerly hdmi2srt.service): captures the sources, composes the program, encodes
+# and streams it, and draws the touch screen. Starts at boot and restarts by itself if it falls over.
+# Board settings in /etc/default/eirl-engine; what the app manages, in /etc/eirl-encoder/engine.env
+# (drop-in eirl-encoder.conf). Code in /usr/lib/eirl-encoder/engine (tools/deploy-engine.sh).
+[Unit]
+Description=EnhancedIRL encoder engine (capture, mixing, encoding and streaming)
+Wants=network-online.target
+After=network-online.target eirl-hdmi-init.service
+# Wants and not Requires: without audio (eirl-hdmi-init failed) the video must keep going out
+Wants=eirl-hdmi-init.service
+# No retry limit: if the source is off for hours, keep trying
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# Its own system user (no login, no sudo, home = its state directory), created by tools/deploy-engine.sh
+# --unit and by the release install. Until Oct 14 the engine ran as the board's login user.
+User=eirl-engine
+Group=eirl-engine
+# video: captures, encoders and the display · audio: ALSA capture and the headphones · input: the touch
+# screen · i2c: the TC358743 audio PLL watchdog (i2ctransfer). The app's group and the USB hub's, in the
+# drop-in eirl-encoder.conf
+SupplementaryGroups=video audio input i2c
+EnvironmentFile=/etc/default/eirl-engine
+# Outside a session, some library starts its own PulseAudio (autospawn) that grabs the card. Audio is
+# captured from ALSA directly: with an explicit, non-existent server it is not launched.
+Environment=PULSE_SERVER=unix:/nonexistent
+# Without a user session there is no session D-Bus: GIO must not try to load gvfs (BASE.md §4.3)
+Environment=GIO_USE_VFS=local
+# The GStreamer registry (and fontconfig's cache) in /var/cache/eirl-engine, not in a home
+CacheDirectory=eirl-engine
+Environment=XDG_CACHE_HOME=/var/cache/eirl-engine
+# eirl-engine-start runs the Go engine, eirl-engine-go, with its memory settings (ENGINE_GO.md §15.1)
+ExecStart=/usr/lib/eirl-encoder/engine/eirl-engine-start
+# /run/eirl-engine (tmpfs): state and SRT statistics for the app; 0755 so it can read them
+RuntimeDirectory=eirl-engine
+RuntimeDirectoryMode=0755
+# /var/lib/eirl-engine: what has to survive a reboot (the scene, the audio and headphones settings, the
+# lock, the TC358743 reset marks). It used to be /tmp, which boot wipes
+StateDirectory=eirl-engine
+StateDirectoryMode=0755
+# With three sources and not streaming it already has ~730 open descriptors (500 NVMM dmabufs): the
+# default 1024 falls short when streaming, with a fourth source or when reopening a source with two live pools
+LimitNOFILE=8192
+Restart=always
+RestartSec=2
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

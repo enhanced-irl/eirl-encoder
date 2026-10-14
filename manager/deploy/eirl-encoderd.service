@@ -1,0 +1,52 @@
+# eirl-encoderd: app de gestión del codificador (API y web en la LAN). Ver MANAGER.md.
+# No emite: configura, arranca/para y observa eirl-engine.service. Si se cae, el directo sigue.
+[Unit]
+Description=eirl-encoderd: gestión del codificador HDMI -> SRT (web en la LAN)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=eirl-encoder
+Group=eirl-encoder
+# Opciones de la instalación (p. ej. el backend de EnhancedIRL de la Jetson de pruebas: dev). Fichero
+# de root: la app no puede cambiar a qué backend se vincula.
+EnvironmentFile=-/etc/default/eirl-encoderd
+ExecStart=/usr/local/bin/eirl-encoderd $EIRL_ENCODERD_OPTS
+Restart=on-failure
+RestartSec=3
+
+# Que nunca le quite recursos al encoder
+Environment=GOMAXPROCS=1
+Nice=10
+IOSchedulingClass=idle
+CPUQuota=20%
+MemoryLimit=64M
+
+# /run/eirl-encoder: lo que la app deja para la pantalla táctil (wifi.json, la red de las cámaras;
+# NETWORK_SOURCES.md §6.4) y el socket de la API para la pantalla (api.sock, 0660; MANAGER.md §3).
+# 0750: lo usa el motor por el grupo eirl-encoder
+RuntimeDirectory=eirl-encoder
+RuntimeDirectoryMode=0750
+# /var/lib/eirl-encoder: what the app keeps across reboots. update/ = the downloaded update (UPDATES.md §8),
+# which the root helper reads as data. Writable despite ProtectSystem=strict (systemd adds it)
+StateDirectory=eirl-encoder
+StateDirectoryMode=0750
+
+# Puerto 80 sin root
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+# Endurecimiento. SIN NoNewPrivileges: rompería el `sudo -n systemctl …` acotado de
+# /etc/sudoers.d/eirl-encoder, que es como arranca y para la emisión. Por lo mismo, nada que lo
+# active implícitamente en una unidad sin root (systemd 237): ProtectKernelModules, PrivateDevices,
+# SystemCallFilter, RestrictAddressFamilies, MemoryDenyWriteExecute… Probado una a una en la placa
+# (2026-10-08): ProtectKernelModules=yes y ProtectKernelTunables=yes hacen fallar a sudo con
+# "effective uid is not 0"; las de abajo no.
+ProtectSystem=strict
+ReadWritePaths=/etc/eirl-encoder -/run/sudo -/var/lib/sudo
+ProtectHome=yes
+PrivateTmp=yes
+ProtectControlGroups=yes
+
+[Install]
+WantedBy=multi-user.target

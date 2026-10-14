@@ -1,0 +1,12 @@
+#!/bin/bash
+# Fake sudo: only the exact rules of /etc/sudoers.d/eirl-encoder, executed by the root broker of run.sh
+[ "${1:-}" = -n ] && shift
+req="$*"
+grep -qxF "$req" /run/fake-sudo/allowed || { echo "sudo: not allowed: $req" >&2; exit 1; }
+id=$$-$RANDOM
+echo "$req" > /run/fake-sudo/q/$id.req
+for i in $(seq 1 100); do
+  [ -f /run/fake-sudo/q/$id.rc ] && { rc=$(cat /run/fake-sudo/q/$id.rc); rm -f /run/fake-sudo/q/$id.rc; exit "$rc"; }
+  sleep 0.1
+done
+echo "sudo: broker timeout" >&2; exit 1

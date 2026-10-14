@@ -1,0 +1,15 @@
+# «Reiniciando…» en la pantalla al reiniciar (D5); sirve también para el reinicio pedido desde la
+# app. Pinta y sale: la imagen se queda hasta que el firmware vuelve a poner la suya. Va después de
+# parar lo que puede tener la pantalla; el compositor declara Before= de esta unidad (SPLASH.md).
+[Unit]
+Description=eirl-splash: «Reiniciando…» en la pantalla
+DefaultDependencies=no
+After=eirl-splash.service eirl-encoderd.service eirl-engine.service
+Before=systemd-reboot.service systemd-kexec.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/eirl-splash -scene reboot
+
+[Install]
+WantedBy=reboot.target kexec.target

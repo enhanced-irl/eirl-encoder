@@ -1,0 +1,23 @@
+# B1, group A: services the encoder does not use and that do not touch the engine (BASE.md §4.1).
+# One unit per line. «linger:<user>» enables linger instead of disabling («@login»: whoever runs sudo).
+# slim.sh disables, stops and masks them; --undo leaves them as they were.
+networkd-dispatcher.service   # systemd-networkd's dispatcher; NetworkManager is in charge here (its dispatcher is another one)
+speech-dispatcher.service     # the desktop's speech synthesis (SysV)
+pppd-dns.service              # PPP leftover
+dns-clean.service             # resolvconf/PPP leftover
+grub-common.service           # GRUB boot mark; the Jetson does not use GRUB (SysV)
+ubuntu-fan.service            # Ubuntu's container network
+spice-vdagent.service         # virtual machine agent
+spice-vdagentd.service
+ubuntu-advantage.service      # Ubuntu Pro
+ua-reboot-cmds.service
+ua-timer.timer
+apport.service                # crash reports
+apport-autoreport.path
+apport-forward.socket
+rsync.service                 # rsync server
+nfs-client.target             # NFS mounts
+nvweston.service              # NVIDIA's Wayland (desktop only)
+nvmemwarning.service          # the desktop's low-memory warning (a loop with sleep 300)
+# getty@tty1 STAYS: it is the screen's login when the boot fails (SPLASH.md, decision D4)
+linger:@login                 # a permanent user manager: without it, every ssh starts and stops it (29 times in 10 min)

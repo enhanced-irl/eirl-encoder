@@ -1,0 +1,8 @@
+#!/bin/sh
+# ExecStart of eirl-engine.service: the Go engine (ENGINE_GO.md). The Python engine and its selector
+# (MIXER_ENGINE) were retired on Oct 14.
+# glibc gives each GStreamer streaming thread its own malloc arena and keeps what a closed pipeline freed
+# there: two arenas halve the RSS after output reconnections; GOGC=50 keeps the Go heap's slack smaller
+# (-5 MB, same CPU). Both measured on the board (ENGINE_GO.md §15.1) and can be overridden in
+# /etc/default/eirl-engine (an EnvironmentFile only root can write; never from the app's engine.env).
+MALLOC_ARENA_MAX=${MALLOC_ARENA_MAX:-2} GOGC=${GOGC:-50} exec "$(dirname "$0")/eirl-engine-go"

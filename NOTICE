@@ -1,0 +1,56 @@
+EnhancedIRL Encoder — Copyright 2026 EnhancedIRL
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE),
+except for the parts listed below, which keep their own licences.
+
+
+Linux-kernel derived code: GPL-2.0-only
+---------------------------------------
+
+  driver/   Patch to the Linux TC358743 HDMI-to-CSI-2 bridge driver
+            (drivers/media/i2c/tc358743.c, as shipped in NVIDIA L4T R32.7.6).
+  dt/       Device-tree fragments for the Jetson Nano (L4T R32.7.6).
+
+These two directories are licensed under the GNU General Public License,
+version 2 only (see driver/LICENSE and dt/LICENSE), NOT under the Apache
+License. The original copyright notices of the files they modify still apply.
+
+
+Third-party files in this repository
+------------------------------------
+
+  manager/internal/engine/screen/ui/testdata/fonts/*.ttf
+            DejaVu fonts, used only as test data (the board uses the fonts of
+            its operating system). Bitstream Vera / DejaVu licence: see
+            manager/internal/engine/screen/ui/testdata/fonts/LICENSE.
+
+
+Third-party software in binary releases
+---------------------------------------
+
+The release bundles built from this repository also contain:
+
+  - Go modules statically linked into the binaries built from manager/ (listed
+    in manager/go.mod), under the MIT, BSD-2-Clause, BSD-3-Clause and ISC
+    licences.
+  - MediaMTX (https://github.com/bluenviron/mediamtx), MIT licence, unmodified
+    official binary (fetched by build/mediamtx.sh; its licence is shipped as
+    mediamtx.LICENSE).
+  - srtla_send from BELABOX/srtla (https://github.com/BELABOX/srtla),
+    AGPL-3.0. It is built from a pinned upstream commit with one change, applied
+    by build/srtla.sh (the local socket listens on 127.0.0.1 instead of all
+    interfaces). That script and the pinned commit are its corresponding source.
+
+The engine links dynamically against GStreamer and NVIDIA L4T libraries that
+are part of the board's operating system; they are not distributed here.
+
+
+Trademarks
+----------
+
+"EnhancedIRL" and the EnhancedIRL logos
+(manager/internal/engine/screen/ui/assets/eirl-logo.png,
+manager/internal/splash/assets/logo.png, manager/web/static/favicon.svg) are
+trademarks of EnhancedIRL. As section 6 of the Apache License says, the licence
+does not grant permission to use them, except as required for reasonable and
+customary use in describing the origin of the work.

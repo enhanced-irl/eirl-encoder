@@ -1,0 +1,72 @@
+# Packages the encoder needs (BASE.md §3). purge.sh marks them «manual» before purging, so that
+# autoremove does not take them even if only the desktop brought them in, and it aborts if a plan
+# includes them. The nvidia-l4t-* are not needed here: they are all on hold (except those a group
+# names by hand).
+
+# GStreamer 1.14 and its Python 3.6 bindings (engine)
+gstreamer1.0-tools
+gstreamer1.0-plugins-base
+gstreamer1.0-plugins-good
+gstreamer1.0-plugins-bad
+gstreamer1.0-plugins-ugly
+gstreamer1.0-libav
+gstreamer1.0-alsa
+gstreamer1.0-x                # 🪤 brings libgstpango (textoverlay), loaded by the engine: it is NOT only X11
+libgstreamer1.0-0
+libgstreamer-plugins-base1.0-0
+libgstreamer-plugins-bad1.0-0
+python3
+python3-gi
+python3-cairo
+gir1.2-gstreamer-1.0
+gir1.2-gst-plugins-base-1.0
+fonts-dejavu-core
+
+# Tools that the engine, the app and the installers call (grep in scripts/ and manager/)
+v4l-utils
+i2c-tools
+alsa-utils
+alsa-base                     # fixes the order of the sound cards (USB after the board's); the desktop brought it in
+vim-common
+iproute2
+iw
+iptables
+ethtool
+iputils-ping
+udev
+ca-certificates
+haveged
+
+# Network: NetworkManager and its dispatcher (SRTLA), the access point and DHCP for network cameras, jetson.local
+network-manager
+wpasupplicant
+dnsmasq-base
+avahi-daemon
+libnss-mdns
+policykit-1           # Wi-Fi client: eirl-encoderd talks to NetworkManager over D-Bus with a .pkla
+modemmanager          # 4G modems for SRTLA (the custom board plan): disabled, but it stays
+bluez                 # undecided (disabled since 08 Oct 2026): not purged without the maintainers' OK
+
+# System and access
+openssh-server
+sudo
+systemd
+dbus
+cron
+logrotate
+rsyslog
+linux-firmware
+ubuntu-minimal
+
+# Development on the board (decision D4: they stay while it is the test board)
+ffmpeg
+build-essential
+git
+pkg-config
+libssl-dev
+tcl
+cmake
+debhelper
+dh-autoreconf
+libgstreamer1.0-dev
+libgstreamer-plugins-base1.0-dev

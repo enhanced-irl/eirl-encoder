@@ -1,0 +1,54 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Audio HDMI del TC358743 por I2S4 (conector de 40 pines: SCK=12, LRCK=35, SD=38).
+ * Se incluye AL FINAL del .dts de la B01 (después del pinmux base, que si no lo pisaría).
+ *
+ * - El TC358743 solo sabe ser maestro de reloj I2S → la Jetson tiene que ser ESCLAVA, y desde el
+ *   arranque (así nunca hay un instante con los dos lados empujando BCLK/LRCK).
+ *   El driver de máquina usa snd_soc_of_parse_daifmt: solo lee "bitclock-master"/"frame-master"
+ *   (desde el lado del CÓDEC; los "bitclock-slave"/"frame-slave" de NVIDIA no los lee nadie).
+ *   Códec maestro → ASoC invierte el papel para el I2S4 (enlace códec↔códec) → I2S4 esclavo.
+ * - El TC358743 usa huecos de 32 bits → el enlace I2S va en s32_le (el ADMAIF convierte a lo que
+ *   pida la captura, p. ej. S16_LE).
+ * - Pinmux igual que jetson-io ("i2s4b"), salvo DOUT (pin 40) en alta impedancia: no se usa.
+ */
+#include <dt-bindings/pinctrl/pinctrl-tegra.h>
+
+&hdr40_snd_link_i2s {
+	/delete-property/ bitclock-slave;
+	/delete-property/ frame-slave;
+	bitclock-master;
+	frame-master;
+	bit-format = "s32_le";
+};
+
+/ {
+	pinmux@700008d4 {
+		common {
+			dap4_sclk_pj7 {
+				nvidia,function = "i2s4b";
+				nvidia,pull = <TEGRA_PIN_PULL_DOWN>;
+				nvidia,tristate = <TEGRA_PIN_DISABLE>;
+				nvidia,enable-input = <TEGRA_PIN_ENABLE>;
+			};
+			dap4_fs_pj4 {
+				nvidia,function = "i2s4b";
+				nvidia,pull = <TEGRA_PIN_PULL_DOWN>;
+				nvidia,tristate = <TEGRA_PIN_DISABLE>;
+				nvidia,enable-input = <TEGRA_PIN_ENABLE>;
+			};
+			dap4_din_pj5 {
+				nvidia,function = "i2s4b";
+				nvidia,pull = <TEGRA_PIN_PULL_DOWN>;
+				nvidia,tristate = <TEGRA_PIN_ENABLE>;
+				nvidia,enable-input = <TEGRA_PIN_ENABLE>;
+			};
+			dap4_dout_pj6 {
+				nvidia,function = "i2s4b";
+				nvidia,pull = <TEGRA_PIN_PULL_DOWN>;
+				nvidia,tristate = <TEGRA_PIN_ENABLE>;
+				nvidia,enable-input = <TEGRA_PIN_DISABLE>;
+			};
+		};
+	};
+};

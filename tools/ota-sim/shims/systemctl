@@ -1,0 +1,67 @@
+#!/bin/bash
+# Fake systemctl for the OTA container test: runs eirl-encoderd for real (as eirl-encoder), starts the
+# update helper for real (eirl-update.service), the engine is "inactive", everything else succeeds.
+echo "systemctl $*" >> /var/log/fake-systemctl.log
+[ "${1:-}" = --no-block ] && shift
+cmd=${1:-}; shift || true
+pidf() { echo "/run/fake-$1.pid"; }
+alive() { [ -f "$(pidf "$1")" ] && kill -0 "$(cat "$(pidf "$1")")" 2>/dev/null; }
+stop_app() {
+  if alive eirl-encoderd.service; then kill "$(cat "$(pidf eirl-encoderd.service)")"; sleep 0.5; fi
+  rm -f "$(pidf eirl-encoderd.service)"
+}
+start_app() {
+  stop_app
+  install -d -m 0750 -o eirl-encoder -g eirl-encoder /run/eirl-encoder /var/lib/eirl-encoder
+  EIRL_ENCODERD_OPTS=""
+  . /etc/default/eirl-encoderd
+  setsid /bin/asuser eirl-encoder /usr/local/bin/eirl-encoderd $EIRL_ENCODERD_OPTS \
+    >> /var/log/eirl-encoderd.log 2>&1 < /dev/null &
+  echo $! > "$(pidf eirl-encoderd.service)"
+}
+# The engine is emulated: a "restart" counts (the invocation id) and publishes its state files as the real
+# one does; nothing runs (no GStreamer in the container)
+eng_start() {
+  n=$(( $(cat /run/fake-engine.n 2>/dev/null || echo 0) + 1 )); echo "$n" > /run/fake-engine.n
+  mkdir -p /run/eirl-engine
+  printf 'OUTPUT=off\nMIXER=1\n' > /run/eirl-engine/state
+  echo '{"output":{"mode":"off","state":"off"}}' > /run/eirl-engine/mixer.json
+  touch /run/fake-engine.active
+}
+case "$cmd" in
+  daemon-reload|enable|disable) exit 0 ;;
+  start|restart)
+    case "$1" in
+      eirl-engine.service) eng_start ;;
+      eirl-encoderd.service) start_app ;;
+      eirl-update.service)
+        setsid /usr/local/sbin/eirl-update -health-timeout 25s -settle 3s install >> /var/log/eirl-update.log 2>&1 < /dev/null &
+        echo $! > "$(pidf eirl-update.service)" ;;
+      *) ;;
+    esac ;;
+  stop)
+    [ "$1" = eirl-encoderd.service ] && stop_app
+    [ "$1" = eirl-engine.service ] && rm -f /run/fake-engine.active ;;
+  is-active)
+    if { [ "$1" = eirl-encoderd.service ] && alive "$1"; } || { [ "$1" = eirl-engine.service ] && [ -f /run/fake-engine.active ]; }; then
+      echo active; else echo inactive; fi ;;
+  show)
+    # show -p PROP --value UNIT
+    prop=$2; unit=${4:-}
+    if [ "$unit" = eirl-engine.service ]; then
+      case "$prop" in
+        ActiveState) if [ -f /run/fake-engine.active ]; then echo active; else echo inactive; fi ;;
+        InvocationID) cat /run/fake-engine.n 2>/dev/null || echo none ;;
+        User) echo eirl-engine ;;
+        *) echo "" ;;
+      esac
+      exit 0
+    fi
+    case "$prop" in
+      ActiveState) if alive "$unit"; then echo active; else echo inactive; fi ;;
+      InvocationID) cat "$(pidf "$unit")" 2>/dev/null || echo none ;;
+      *) echo "" ;;
+    esac ;;
+  *) ;;
+esac
+exit 0

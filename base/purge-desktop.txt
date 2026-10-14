@@ -1,0 +1,44 @@
+# B3 · entorno de escritorio y sus servicios (D3). Con el motor: hay que reiniciarlo y validarlo
+# después (gvfs está en su proceso). gstreamer1.0-x NO: trae el textoverlay (keep.txt).
+# Tampoco dconf-gsettings-backend ni dconf-service (libgtk-3-common → libgtk-3-0, que lo pide
+# nvidia-l4t-camera, dependencia de nvidia-l4t-gstreamer), ni
+# xorg-sgml-doctools (lo pide x11proto-dev → libx11-dev → los ejemplos multimedia).
+ubuntu-desktop
+gdm3
+lightdm*
+unity*
+gnome-shell*
+gnome-session*
+gnome-settings-daemon*
+gnome-keyring*
+lxde*
+lxsession*
+lxpanel*
+openbox*
+xorg
+xorg-docs-core
+xserver-xorg*
+xinit
+x11-xserver-utils
+pulseaudio*
+gstreamer1.0-pulseaudio
+gstreamer1.0-gl
+gstreamer1.0-gtk3
+gstreamer1.0-clutter-3.0
+gvfs*
+dconf-cli
+packagekit*
+nautilus*
+network-manager-gnome
+evolution-data-server*
+zeitgeist-*
+ibus*
+ubuntu-report
+update-manager*
+update-notifier*
+apport*
+whoopsie*
+kerneloops
+speech-dispatcher*
+spice-vdagent
+anacron                 # 🪤 hay que purgarlo, no deshabilitarlo: con él instalado, cron no corre cron.daily

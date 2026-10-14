@@ -1,0 +1,23 @@
+# eirl-ap-dhcp: DHCP del punto de acceso de cámaras. SOLO en ap0 y en modo cámaras: sin puerta de
+# enlace ni DNS (las cámaras y los móviles siguen saliendo a internet por sus datos; comprobado con
+# un iPhone, NETWORK_SOURCES.md §1). Lo arranca y para eirl-netsetup; no se habilita solo.
+# Sin fichero de configuración: todo va en la línea de órdenes, fijo.
+[Unit]
+Description=eirl-ap-dhcp: DHCP del punto de acceso de cámaras (ap0)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/dev/null --no-hosts --no-resolv --port=0 --interface=ap0 --bind-dynamic --except-interface=lo --dhcp-range=10.42.0.10,10.42.0.99,255.255.255.0,2h --dhcp-lease-max=50 --dhcp-option=3 --dhcp-option=6 --dhcp-authoritative --dhcp-leasefile=/run/eirl-ap/dnsmasq.leases --pid-file= --user=nobody --group=nogroup --log-facility=-
+Restart=on-failure
+RestartSec=2
+# Endurecido (lo alcanza cualquiera de la wifi): dnsmasq arranca como root, abre el puerto 67 y sus
+# ficheros y se pasa a nobody, conservando solo lo que pide el DHCP. Solo escribe sus concesiones
+ProtectSystem=strict
+ReadWritePaths=/run/eirl-ap
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_CHOWN

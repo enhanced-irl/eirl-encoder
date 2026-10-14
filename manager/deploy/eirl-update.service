@@ -1,0 +1,20 @@
+# eirl-update: installs the release the app downloaded (UPDATES.md §7). A oneshot started by the app
+# with `sudo -n /bin/systemctl --no-block start eirl-update.service` (exact rule in
+# /etc/sudoers.d/eirl-encoder), never as a child of the app: so it does not inherit the app's sandbox or
+# limits, and keeps going when install.sh restarts the app. It takes no arguments from the app: it reads the files of /var/lib/eirl-encoder/update as data
+# and verifies them again (signature with the compiled-in key, sha256, no downgrade, minFrom). It
+# refuses while streaming, backs up what it replaces, runs the bundle's install.sh, restarts the
+# services, checks that they come up healthy and otherwise restores the backup.
+[Unit]
+Description=eirl-update: install a verified encoder update (rolls back if unhealthy)
+After=eirl-update-recover.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/eirl-update install
+# backup + install.sh + 90 s health check + rollback, on an SD card
+TimeoutStartSec=20min
+# Root (it installs the software), but install.sh only needs the system: no home, its own /tmp
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes

@@ -1,0 +1,7 @@
+# Packages that a plan MAY remove even though they have libraries loaded in a running process
+# (purge.sh, inuse). One per line, with its reason. Libraries already loaded keep working until the
+# process restarts; after that, the process must start fine without them.
+gvfs-libs                 # the engine's GIO (it runs as the board's login user): without gvfs it uses the local VFS
+gvfs                      # same
+dconf-gsettings-backend   # GIO: without dconf, GSettings uses the in-memory backend
+libpam-gnome-keyring      # PAM module of the GNOME keyring (loaded by sshd and login): its postrm removes it from common-* with pam-auth-update

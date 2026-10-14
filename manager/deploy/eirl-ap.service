@@ -1,0 +1,24 @@
+# eirl-ap: punto de acceso de las cámaras de red del codificador (NETWORK_SOURCES.md §6.2).
+# Al arrancar la placa, eirl-netsetup lo deja como piden /etc/eirl-encoder/{cameras.json,
+# network.json, ap.psk}: con alguna cámara, AP arriba (ap0, DHCP, cortafuegos y MediaMTX); sin
+# ninguna, nada. Después lo arranca la app (sudo systemctl start, regla exacta) cada vez que cambian
+# las cámaras o la red: así el ayudante no hereda el sandbox ni los límites de la app.
+[Unit]
+Description=eirl-ap: punto de acceso de las cámaras de red (si hay alguna dada de alta)
+Wants=NetworkManager.service
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/eirl-netsetup apply
+TimeoutStartSec=120
+# Root, pero solo puede escribir donde le toca: /run (estado, MediaMTX, bloqueo de iptables) y el
+# perfil de NetworkManager. /etc/eirl-encoder lo lee como datos
+ProtectSystem=full
+ReadWritePaths=/etc/NetworkManager/system-connections
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

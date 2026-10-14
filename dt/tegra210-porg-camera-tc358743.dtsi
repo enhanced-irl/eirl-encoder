@@ -1,0 +1,147 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * TC358743 (HDMI -> CSI-2) en el conector CAM1 de la Jetson Nano B01.
+ * Sustituye a los includes de imx219/imx477 del DT de la B01.
+ *
+ * - I2C: cam_i2cmux canal 1 (bus 8 en Linux), dirección 0x0f.
+ * - CSI: puerto E (port-index 4, "serial_e"), 2 lanes, reloj CONTINUO.
+ * - Sin nodos modeX: el canal VI usa la ruta "HDMI-IN" (dv_timings) y el
+ *   NVCSI lee cil_settletime/discontinuous_clk de su nodo channel@0.
+ * - Refclk: cristal de 27 MHz del módulo (fixed-clock).
+ */
+#include <dt-bindings/media/camera.h>
+#include <dt-bindings/platform/t210/t210.h>
+
+#define CAM1_PWDN		TEGRA_GPIO(S, 7)
+#define CAM2_PWDN		TEGRA_GPIO(T, 0)
+#define CAM_I2C_MUX		TEGRA_GPIO(I, 0)
+/*
+ * RESETN del TC358743 (pad "RST" de la placa, activo en bajo, pull-up a 3,3 V)
+ * al pin 31 del conector de 40 pines (GPIO11 = PZ0): reset por hardware en
+ * caliente (control "Hardware Reset" del driver). DESACTIVADO: con un cable
+ * DIRECTO el conversor de nivel del conector (TXB0108) se queda enganchado en
+ * bajo y deja el chip en reset incluso tras un ciclo de corriente (0,6 V en RST,
+ * probado 2026-10-07). Solo con un transistor en drenador abierto (2N7000/BS170
+ * o NPN: puerta/base al pin 31, drenador/colector a RST, fuente/emisor a GND)
+ * y descomentando reset-gpios abajo. Ver README.
+ */
+#define TC358743_RESET		TEGRA_GPIO(Z, 0)
+
+/ {
+	tc358743_refclk: tc358743-refclk {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <27000000>;
+	};
+
+	host1x {
+		vi_base: vi {
+			num-channels = <1>;
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				vi_port0: port@0 {
+					reg = <0>;
+					tc358743_vi_in0: endpoint {
+						port-index = <4>;
+						bus-width = <2>;
+						remote-endpoint = <&tc358743_csi_out0>;
+					};
+				};
+			};
+		};
+
+		csi_base: nvcsi {
+			num-channels = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi_chan0: channel@0 {
+				reg = <0>;
+				discontinuous_clk = "no";
+				cil_settletime = "0";
+				ports {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					csi_chan0_port0: port@0 {
+						reg = <0>;
+						tc358743_csi_in0: endpoint@0 {
+							port-index = <4>;
+							bus-width = <2>;
+							remote-endpoint = <&tc358743_out0>;
+						};
+					};
+					csi_chan0_port1: port@1 {
+						reg = <1>;
+						tc358743_csi_out0: endpoint@1 {
+							remote-endpoint = <&tc358743_vi_in0>;
+						};
+					};
+				};
+			};
+		};
+	};
+
+	cam_i2cmux {
+		compatible = "i2c-mux-gpio";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		mux-gpios = <&gpio CAM_I2C_MUX GPIO_ACTIVE_HIGH>;
+		i2c-parent = <&i2c7>;
+		i2c@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+		};
+		i2c@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			tc358743@f {
+				compatible = "toshiba,tc358743";
+				reg = <0x0f>;
+				clocks = <&tc358743_refclk>;
+				clock-names = "refclk";
+				/* reset-gpios = <&gpio TC358743_RESET GPIO_ACTIVE_LOW>; (ver arriba) */
+				status = "okay";
+				ports {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					port@0 {
+						reg = <0>;
+						tc358743_out0: endpoint {
+							port-index = <4>;
+							bus-width = <2>;
+							data-lanes = <1 2>;
+							clock-lanes = <0>;
+							/* 486 MHz DDR = 972 Mbps/lane: 1080p30 UYVY en 2 lanes (como RPi/mainline; máx. del chip 1 Gbps) */
+							link-frequencies = /bits/ 64 <486000000>;
+							remote-endpoint = <&tc358743_csi_in0>;
+						};
+					};
+				};
+			};
+		};
+	};
+
+	/* Se mantiene el hog original: PWDN de CAM0/CAM1 a nivel bajo (el chip responde así). */
+	gpio@6000d000 {
+		camera-control-output-low {
+			gpio-hog;
+			output-low;
+			gpios = < CAM1_PWDN 0  CAM2_PWDN 0>;
+			label = "cam1-pwdn", "cam2-pwdn";
+		};
+	};
+
+	tegra-camera-platform {
+		compatible = "nvidia, tegra-camera-platform";
+		num_csi_lanes = <2>;
+		max_lane_speed = <1500000>;
+		min_bits_per_pixel = <16>;
+		vi_peak_byte_per_pixel = <2>;
+		vi_bw_margin_pct = <25>;
+		max_pixel_rate = <160000>;
+		isp_peak_byte_per_pixel = <2>;
+		isp_bw_margin_pct = <25>;
+	};
+};

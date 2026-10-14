@@ -1,0 +1,4 @@
+# B2: registro y escrituras en la SD (BASE.md §5). rsyslog solo copiaba el journal en /var/log/syslog
+# y nada lo lee (la app lee el journal). No se purga: ubuntu-minimal depende de él.
+rsyslog.service
+file:/etc/systemd/journald.conf.d/90-eirl-nosyslog.conf   # se aplica al reiniciar journald o la placa

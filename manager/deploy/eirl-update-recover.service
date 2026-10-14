@@ -1,0 +1,18 @@
+# eirl-update-recover: at boot, BEFORE the encoder's services, undo an update that was interrupted
+# (power loss or crash between the backup and the health check, UPDATES.md §7.4). Only runs when the
+# helper's marker is there; restores the backup and reloads systemd, and the services then start with
+# the previous release.
+[Unit]
+Description=eirl-update: undo an interrupted encoder update
+DefaultDependencies=no
+After=local-fs.target
+Before=eirl-encoderd.service eirl-engine.service eirl-hdmi-init.service eirl-update.service
+ConditionPathExists=/var/lib/eirl-update/in-progress.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/eirl-update recover
+TimeoutStartSec=10min
+
+[Install]
+WantedBy=multi-user.target

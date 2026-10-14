@@ -1,0 +1,30 @@
+# eirl-media: MediaMTX del codificador. Recibe RTMP y SRT de las cámaras de red en la IP del punto de
+# acceso (10.42.0.1) o, con «cámaras por cable», en 0.0.0.0 detrás de la cadena EIRL-MEDIA (solo lo, ap0 y
+# eth0), y se los da al motor por RTSP SOLO en 127.0.0.1 (NETWORK_SOURCES.md §6.3 y §6.11).
+# La configuración la escribe eirl-netsetup (root) en /run/eirl-media, con las claves en hash; lo
+# arranca y lo para eirl-netsetup con el punto de acceso. Sin privilegios: usuario propio, puertos
+# > 1024, sin capacidades; no escribe nada (sin grabación).
+[Unit]
+Description=eirl-media: MediaMTX para las cámaras de red del codificador
+After=network.target
+
+[Service]
+Type=simple
+User=eirl-media
+Group=eirl-media
+ExecStart=/usr/local/bin/mediamtx /run/eirl-media/mediamtx.yml
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+MemoryLimit=256M
+
+# Sin [Install]: no se habilita nunca. Solo lo arranca eirl-netsetup, después de poner el cortafuegos

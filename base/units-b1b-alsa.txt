@@ -1,0 +1,5 @@
+# B1 group B · alsa-restore (approved 13 Oct 2026). Restores the ALSA mixer at boot (1.9 s) and saves it
+# at shutdown. The encoder does not need it: the engine sets «ADMAIF<n> Mux» = I2S4 itself with
+# amixer for the TC358743 capture, and the headphones over HDMI set «IEC958 Playback Switch» = on before
+# opening hw:tegrahda,3. It is static: it is only masked (takes effect at the next boot).
+mask:alsa-restore.service

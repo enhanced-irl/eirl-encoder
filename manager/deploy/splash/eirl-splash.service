@@ -1,0 +1,28 @@
+# Pantalla de carga de EnhancedIRL en la salida HDMI durante el arranque (ver SPLASH.md).
+# Arranca en cuanto empieza systemd (~2,5 s desde el kernel). La retira eirl-splash-quit.service
+# cuando eirl-encoderd está en marcha: queda el logo quieto y la pantalla libre para el compositor.
+# Necesita la entrada de extlinux con fbcon=map:9; sin ella, la consola tiene la pantalla y no pinta.
+[Unit]
+Description=eirl-splash: pantalla de carga de EnhancedIRL
+DefaultDependencies=no
+ConditionPathExists=/dev/fb0
+Conflicts=shutdown.target emergency.service rescue.service
+Before=shutdown.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/eirl-splash -scene boot
+TimeoutStopSec=5
+# Solo escribe en /dev/fb0 y lee sysfs. Nada que dependa de montajes: PrivateTmp añadiría
+# RequiresMountsFor=/tmp /var/tmp y retrasaría el arranque de la pantalla.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateNetwork=yes
+DevicePolicy=closed
+DeviceAllow=/dev/fb0 rw
+MemoryLimit=64M
+
+[Install]
+WantedBy=sysinit.target

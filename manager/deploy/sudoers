@@ -1,0 +1,9 @@
+# /etc/sudoers.d/eirl-encoder — eirl-encoderd may only start, stop and restart the engine, reboot the
+# board (the EnhancedIRL `reboot` command for a linked device, ENCODER_CLOUD.md §4.2, and the Power
+# menu of the touch screen) or power it off (that menu, MIXER.md §14), apply the network of the cameras
+# as their files ask (eirl-ap.service = eirl-netsetup apply, NETWORK_SOURCES.md §6.2) and start the
+# update helper (eirl-update.service, which takes nothing from the app but data it verifies itself,
+# UPDATES.md §7).
+# EXACT commands, no wildcards: sudo rejects any other argument (e.g. `systemctl reboot --force`).
+eirl-encoder ALL=(root) NOPASSWD: /bin/systemctl start eirl-engine.service, /bin/systemctl stop eirl-engine.service, /bin/systemctl restart eirl-engine.service, /bin/systemctl reboot, /bin/systemctl poweroff, /bin/systemctl start eirl-ap.service, /bin/systemctl --no-block start eirl-update.service
+Defaults:eirl-encoder !lecture

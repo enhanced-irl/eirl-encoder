@@ -1,0 +1,25 @@
+# B3 · SDK de NVIDIA sin usar (D2): CUDA 10.2, cuDNN, TensorRT, VPI, VisionWorks, OpenCV y ejemplos.
+# El motor solo usa nvidia-l4t-* (multimedia, gstreamer, core, 3d-core), que no se tocan.
+cuda-*
+libcublas*
+libcufft*
+libcurand*
+libcusolver*
+libcusparse*
+libnpp*
+libcudnn8*
+libnvinfer*
+libnvonnxparsers*
+libnvparsers*
+python3-libnvinfer*
+tensorrt
+graphsurgeon-tf
+uff-converter-tf
+libnvvpi1
+vpi1-*
+libvisionworks*
+libopencv
+libopencv-*
+opencv-licenses
+nvidia-l4t-graphics-demos        # ejemplos gráficos (nombrado a mano: los nvidia-l4t-* van en hold)
+nvidia-l4t-jetson-multimedia-api # ejemplos y cabeceras de la API multimedia (nombrado a mano)
