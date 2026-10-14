@@ -134,25 +134,38 @@ const (
 // VerifyManifest checks the detached signature (base64 ed25519 over the exact bytes of raw) with any of
 // keys, then parses and validates the manifest. Nothing in raw is looked at before the signature holds.
 func VerifyManifest(raw, sig []byte, keys []ed25519.PublicKey) (*Manifest, error) {
+	if err := checkSignature(raw, sig, keys); err != nil {
+		return nil, err
+	}
+	return ParseManifest(raw)
+}
+
+// checkSignature checks a detached signature (base64 ed25519 over the exact bytes of raw) with any of keys.
+// It is the same for the OTA manifest and the image manifest (image.go): their "product" tells them apart.
+func checkSignature(raw, sig []byte, keys []ed25519.PublicKey) error {
 	if len(raw) == 0 || len(raw) > MaxManifestSize {
-		return nil, errf(CodeBadManifest, "manifest size %d", len(raw))
+		return errf(CodeBadManifest, "manifest size %d", len(raw))
 	}
 	if len(sig) > MaxSigSize {
-		return nil, errf(CodeBadSignature, "signature file too large")
+		return errf(CodeBadSignature, "signature file too large")
 	}
 	s, err := base64.StdEncoding.DecodeString(string(bytes.TrimSpace(sig)))
 	if err != nil || len(s) != ed25519.SignatureSize {
-		return nil, errf(CodeBadSignature, "signature is not base64 of %d bytes", ed25519.SignatureSize)
+		return errf(CodeBadSignature, "signature is not base64 of %d bytes", ed25519.SignatureSize)
 	}
-	ok := false
 	for _, k := range keys {
 		if len(k) == ed25519.PublicKeySize && ed25519.Verify(k, raw, s) {
-			ok = true
-			break
+			return nil
 		}
 	}
-	if !ok {
-		return nil, errf(CodeBadSignature, "signature does not verify with the trusted key")
+	return errf(CodeBadSignature, "signature does not verify with the trusted key")
+}
+
+// ParseManifest parses and validates a manifest WITHOUT checking its signature: only for the release tool,
+// which checks what it is about to sign. Everything that installs a release calls VerifyManifest.
+func ParseManifest(raw []byte) (*Manifest, error) {
+	if len(raw) == 0 || len(raw) > MaxManifestSize {
+		return nil, errf(CodeBadManifest, "manifest size %d", len(raw))
 	}
 	var m Manifest
 	if err := json.Unmarshal(raw, &m); err != nil {

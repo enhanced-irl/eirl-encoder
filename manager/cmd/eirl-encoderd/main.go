@@ -3,6 +3,7 @@
 //	eirl-encoderd [flags]                 serves the API (and the web) on the LAN
 //	eirl-encoderd passwd [-hash path]     sets the admin password (read from stdin)
 //	eirl-encoderd probe [-device …]       what to capture a USB source with (used by the engine; see probe.go)
+//	eirl-encoderd -print-hardware-id      prints the device's hardware id and exits (for the image's first boot)
 package main
 
 import (
@@ -11,6 +12,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -42,6 +44,9 @@ import (
 )
 
 var version = "dev" // -ldflags "-X main.version=…"
+
+// machineIDFile is what the device's hardware id is derived from (cloud.DeviceID).
+const machineIDFile = "/etc/machine-id"
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "passwd" {
@@ -76,7 +81,11 @@ func main() {
 	updateURL := flag.String("update-url", update.DefaultManifestURL, "manifest of the latest release (empty = no updates)")
 	updateDir := flag.String("update-dir", "/var/lib/eirl-encoder/update", "where the downloaded update is kept (the unit's StateDirectory)")
 	updateCheck := flag.Bool("update-check", true, "check for updates automatically (every 6 h, only when online)")
+	printHWID := flag.Bool("print-hardware-id", false, "print the device's hardware id (the cloud's, and the end of the default Wi-Fi name) and exit")
 	flag.Parse()
+	if *printHWID {
+		os.Exit(printHardwareID(os.Stdout, os.Stderr, machineIDFile))
+	}
 	if *thumb == "" {
 		*thumb = filepath.Join(*runDir, "thumb.jpg")
 	}
@@ -137,7 +146,7 @@ func main() {
 	if _, err := os.Stat(*netsetup); err == nil {
 		srv.Network = &network.Manager{
 			Dir: *confDir, StatePath: *apState, MediaAPI: fmt.Sprintf("http://127.0.0.1:%d", netcfg.APIPort),
-			HardwareID: cloud.DeviceID("/etc/machine-id"), Max: *camerasMax,
+			HardwareID: cloud.DeviceID(machineIDFile), Max: *camerasMax,
 			Apply:      func(ctx context.Context) error { return network.SystemdApply(ctx, *apState) },
 			Write:      func(p string, b []byte, mode os.FileMode) error { return config.WriteAtomic(p, b, mode) },
 			ScreenFile: "/run/eirl-encoder/wifi.json",
@@ -325,7 +334,7 @@ func newCloud(ctx context.Context, srv *api.Server, apiBase, appBase, confDir, t
 		Srv: srv, Thumb: thumb, ThumbEnabled: thumbOn && thumb != "", ThumbMaxAge: 3 * time.Duration(thumbEvery) * time.Second,
 		Port: port, Rebooter: service.Unit{Name: unit},
 		Ident: cloud.DeviceInfo{
-			HardwareID: cloud.DeviceID("/etc/machine-id"), Model: "Jetson Nano + TC358743",
+			HardwareID: cloud.DeviceID(machineIDFile), Model: "Jetson Nano + TC358743",
 			FirmwareVersion: version, Capabilities: caps,
 		},
 	}
@@ -395,4 +404,17 @@ func setupDevice(srv *api.Server, confDir, releaseFile, engineFile string, log *
 			log.Info("setup code created", "path", codePath) // never the code itself
 		}
 	}
+}
+
+// printHardwareID is -print-hardware-id: the same id the app uses (the cloud's hardwareId, and the end of the
+// default Wi-Fi name, netcfg.DefaultSSID), so that the image's first boot can name things without repeating
+// how it is derived. Without a machine-id (an image before its first boot) there is none: an error and exit 1.
+func printHardwareID(out, errOut io.Writer, machineID string) int {
+	id := cloud.DeviceID(machineID)
+	if id == "" {
+		fmt.Fprintf(errOut, "eirl-encoderd: no hardware id: %s is missing or empty\n", machineID)
+		return 1
+	}
+	fmt.Fprintln(out, id)
+	return 0
 }

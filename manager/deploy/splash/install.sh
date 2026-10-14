@@ -28,7 +28,8 @@ esac
 install -m 0755 eirl-splash /usr/local/bin/eirl-splash.new
 mv -f /usr/local/bin/eirl-splash.new /usr/local/bin/eirl-splash
 for u in $UNITS; do install -m 0644 "$u" "/etc/systemd/system/$u"; done
-systemctl daemon-reload
+# EIRL_IMAGE=1 (the encoder's install.sh --image): an SD card image with no systemd running; enable works offline
+[ "${EIRL_IMAGE:-}" = 1 ] || systemctl daemon-reload
 systemctl enable $UNITS >/dev/null 2>&1
 /usr/local/bin/eirl-splash boot-entry install
 echo "boot splash $(/usr/local/bin/eirl-splash -version) installed: it shows at the next boot"

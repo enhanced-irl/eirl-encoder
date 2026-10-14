@@ -1,0 +1,17 @@
+# /etc/default/eirl-engine: the board settings of eirl-engine.service (its EnvironmentFile).
+# Only root can write it: it is loaded as environment, so it must never be writable by the app.
+# install.sh creates it on a new device and never overwrites it afterwards.
+#
+# What the app manages (destination, bitrates, OUTPUT, the input) is NOT here: it is in
+# /etc/eirl-encoder/engine.env, which overrides these keys. Every key and its default: README.md,
+# "Operating". After a change: sudo systemctl restart eirl-engine
+
+# The source on air at start and whose audio is used: hdmi (the board's HDMI input), usb or test (bars).
+# Without it the engine starts on the test bars.
+SOURCE=hdmi
+
+# Memory of the engine (scripts/eirl-engine-start, ENGINE_GO.md §15.1):
+#MALLOC_ARENA_MAX=2
+#GOGC=50
+# How the board's HDMI is captured: nvcam (default) or v4l2 (MIXER.md §17)
+#MIXER_HDMI_CAPTURE=nvcam

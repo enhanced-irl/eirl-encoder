@@ -40,6 +40,10 @@ The release bundles built from this repository also contain:
     AGPL-3.0. It is built from a pinned upstream commit with one change, applied
     by build/srtla.sh (the local socket listens on 127.0.0.1 instead of all
     interfaces). That script and the pinned commit are its corresponding source.
+  - srt-live-transmit and the libsrt shared library from Haivision SRT
+    (https://github.com/Haivision/srt), Mozilla Public License 2.0. They are
+    built without changes from a pinned upstream tag by build/srt.sh; the
+    release ships their licence and where their source is.
 
 The engine links dynamically against GStreamer and NVIDIA L4T libraries that
 are part of the board's operating system; they are not distributed here.

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # build.sh — builds the app's package for the Jetson (static, linux/arm64) and, with JETSON=<ssh host>,
 # installs it there.
-#   ./build.sh                    → dist/pkg/ (binaries, srtla_send, MediaMTX, deploy/, splash/, install.sh,
-#                                   VERSION, BUILD, files.txt, doc/ with the licences)
+#   ./build.sh                    → dist/pkg/ (binaries, srt-live-transmit + libsrt, srtla_send, MediaMTX, deploy/,
+#                                   splash/, install.sh, VERSION, BUILD, files.txt, doc/ with the licences)
 #   JETSON=jetson ./build.sh      → also copies it and runs `sudo ./install.sh` on the board
 #   JETSON=jetson ./build.sh --restart-engine   (passes the option to install.sh)
 # Environment (tools/release.sh sets them; UPDATES.md §6):
@@ -40,13 +40,25 @@ cp ../build/out/mediamtx dist/pkg/
 # srtla_send (SRTLA): built separately in build/out (arm64 container, pinned commit); reused
 [ -x ../build/out/srtla_send ] || ../build/srtla.sh
 cp ../build/out/srtla_send dist/pkg/
+# The SRT output: srt-live-transmit and its libsrt (Haivision SRT, pinned tag in build/srt.sh, arm64 container);
+# reused while build/out has the pinned one
+srt_version=$(sed -n 's/^SRT_VERSION=\([^ ]*\).*/\1/p' ../build/srt.sh)
+srt_commit=$(sed -n 's/^SRT_COMMIT=\([0-9a-f]*\).*/\1/p' ../build/srt.sh)
+srt_soname=$(sed -n 's/^SRT_SONAME=\([^ ]*\).*/\1/p' ../build/srt.sh)
+[ -n "$srt_version" ] && [ -n "$srt_commit" ] && [ -n "$srt_soname" ] || { echo "build/srt.sh without SRT_VERSION/SRT_COMMIT/SRT_SONAME" >&2; exit 1; }
+if ! [ -x ../build/out/srt-live-transmit ] || ! [ -f "../build/out/$srt_soname" ] ||
+  [ "$(cat ../build/out/srt.version 2>/dev/null)" != "$srt_version $srt_commit" ]; then
+  ../build/srt.sh
+fi
+cp ../build/out/srt-live-transmit "../build/out/$srt_soname" dist/pkg/
 # Update helper (UPDATES.md §7)
 build dist/pkg/eirl-update ./cmd/eirl-update
 
 # Licences of what the package ships (→ /usr/share/doc/eirl-encoder): ours, the Go toolchain and every
-# Go module linked into the binaries, MediaMTX (MIT) and srtla_send (AGPL-3.0, with where its source is)
+# Go module linked into the binaries, MediaMTX (MIT), srtla_send (AGPL-3.0) and SRT (MPL-2.0), the last two
+# with where their source is
 doc=dist/pkg/doc
-mkdir -p "$doc/licenses/go" "$doc/licenses/mediamtx" "$doc/licenses/srtla"
+mkdir -p "$doc/licenses/go" "$doc/licenses/mediamtx" "$doc/licenses/srtla" "$doc/licenses/srt"
 for f in LICENSE NOTICE; do [ -f "../$f" ] && cp "../$f" "$doc/$f"; done
 # The Go toolchain's licence (Homebrew keeps it next to GOROOT, not inside)
 goroot=$(go env GOROOT)
@@ -78,6 +90,14 @@ Source: https://github.com/BELABOX/srtla/tree/$srtla_commit
 It is built from that commit with one change, applied by build/srtla.sh of eirl-encoder
 (https://github.com/enhanced-irl/eirl-encoder): the socket that receives the local SRT listens on
 127.0.0.1 instead of INADDR_ANY.
+SRC
+cp ../build/out/srt.LICENSE "$doc/licenses/srt/LICENSE"
+cat > "$doc/licenses/srt/SOURCE.txt" <<SRC
+srt-live-transmit and $srt_soname are Haivision SRT (Secure Reliable Transport) $srt_version, licensed under
+the Mozilla Public License 2.0 (LICENSE here).
+Source: https://github.com/Haivision/srt/tree/$srt_commit
+They are built from that commit without changes by build/srt.sh of eirl-encoder
+(https://github.com/enhanced-irl/eirl-encoder), which also gives the build options.
 SRC
 
 # What is installed (UPDATES.md §2) and every path install.sh installs (files.txt, for the OTA helper)

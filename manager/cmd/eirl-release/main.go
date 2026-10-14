@@ -4,10 +4,20 @@
 //	eirl-release pack -dir PKG -out BUNDLE.tar.gz [-mtime RFC3339]
 //	eirl-release manifest -version V -bundle BUNDLE [-min-from V] [-notes DIR] [-released RFC3339] -out manifest.json
 //	eirl-release sign -in manifest.json -out manifest.json.sig [-pubkey B64]   (seed: base64, on stdin)
-//	eirl-release verify -manifest F [-sig F] [-bundle F] [-pubkey B64]
+//	eirl-release verify -manifest F [-sig F] [-bundle F] [-pubkey B64] [-print FIELD]
 //	eirl-release keygen                       a THROWAWAY key pair for tests (seed and public key, base64)
 //	eirl-release check -url URL -current V -dir DIR [-pubkey B64]   what a board does: check, download, verify
 //	eirl-release semver V                    validates a version (no leading "v")
+//
+// The SD card image (IMAGE.md §8):
+//
+//	eirl-release image-manifest -image IMG.img.xz -software manifest.json -commit SHA
+//	    (-raw-size N -raw-sha256 H | -raw-stdin) [-version V] [-built RFC3339] [-min-card-bytes N]
+//	    [-out IMG.img.json] [-sha256-out IMG.img.xz.sha256]
+//	eirl-release sign-image -in IMG.img.json [-out IMG.img.json.sig] [-pubkey B64]   (seed: base64, on stdin)
+//	eirl-release verify-image -manifest IMG.img.json [-sig F] [-image IMG.img.xz] [-raw-stdin] [-pubkey B64] [-print FIELD]
+//	    exit 0 OK, 1 the download does not match (do not flash it), 2 could not check
+//	eirl-release pem [-pubkey B64]           the public key in PEM form, for OpenSSL (release/eirl-release.pem)
 //
 // The signing seed is only ever read from stdin (a pipe from the secret store); it is never written,
 // printed or put in an error message.
@@ -40,7 +50,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: eirl-release pack|manifest|sign|verify|keygen|check …")
+		fmt.Fprintln(os.Stderr, "usage: eirl-release pack|manifest|sign|verify|keygen|check|semver|image-manifest|sign-image|verify-image|pem …")
 		os.Exit(64)
 	}
 	var err error
@@ -51,9 +61,26 @@ func main() {
 	case "manifest":
 		err = manifest(args)
 	case "sign":
-		err = sign(args)
+		err = sign(args, os.Stdin)
 	case "verify":
 		err = verify(args)
+	case "image-manifest":
+		err = imageManifest(args, os.Stdin)
+	case "sign-image":
+		err = signImage(args, os.Stdin)
+	case "verify-image":
+		if err = verifyImage(args, os.Stdin, os.Stdout); err != nil {
+			code := verifyImageExit(err)
+			if code == 1 {
+				fmt.Fprintf(os.Stderr, "eirl-release: FAILED: %v\n"+
+					"Do not flash this image: it is not the one EnhancedIRL published, or it was damaged on the way. Download it again.\n", err)
+			} else {
+				fmt.Fprintf(os.Stderr, "eirl-release: could not check: %v\n", err)
+			}
+			os.Exit(code)
+		}
+	case "pem":
+		err = pemKey(args, os.Stdout)
 	case "keygen":
 		err = keygen()
 	case "check":
@@ -221,8 +248,8 @@ func manifest(args []string) error {
 
 // readSeed reads the base64 seed from stdin (first line, at most 1 KiB) and zeroes the decoded seed. The line
 // itself (a string) cannot be zeroed and lives until the process exits (UPDATES.md §3).
-func readSeed() (ed25519.PrivateKey, error) {
-	r := bufio.NewReader(io.LimitReader(os.Stdin, 1024))
+func readSeed(stdin io.Reader) (ed25519.PrivateKey, error) {
+	r := bufio.NewReader(io.LimitReader(stdin, 1024))
 	line, err := r.ReadString('\n')
 	if err != nil && err != io.EOF {
 		return nil, errors.New("cannot read the seed from stdin")
@@ -242,8 +269,9 @@ func wipe(b []byte) {
 }
 
 // sign signs the exact bytes of the manifest. The key must match -pubkey (default: the production
-// key), so a wrong key never produces a release no board accepts.
-func sign(args []string) error {
+// key), so a wrong key never produces a release no board accepts. It signs only a valid OTA manifest
+// (never an image manifest: that is sign-image), checked before the seed is read.
+func sign(args []string, stdin io.Reader) error {
 	fs := flag.NewFlagSet("sign", flag.ExitOnError)
 	in := fs.String("in", "manifest.json", "manifest to sign")
 	out := fs.String("out", "", "signature file (default <in>.sig)")
@@ -260,7 +288,13 @@ func sign(args []string) error {
 	if err != nil {
 		return err
 	}
-	priv, err := readSeed()
+	if p := productOf(raw); p == update.ImageProduct {
+		return fmt.Errorf("%s is an image manifest (product %q), not an OTA manifest: sign it with eirl-release sign-image", *in, p)
+	}
+	if _, err := update.ParseManifest(raw); err != nil {
+		return fmt.Errorf("%s: %w", *in, err)
+	}
+	priv, err := readSeed(stdin)
 	if err != nil {
 		return err
 	}
@@ -288,6 +322,7 @@ func verify(args []string) error {
 	man := fs.String("manifest", "manifest.json", "manifest")
 	sig := fs.String("sig", "", "signature (default <manifest>.sig)")
 	bundle := fs.String("bundle", "", "bundle to check (optional)")
+	printField := fs.String("print", "", "print only this field of the verified manifest (e.g. version)")
 	pub := keyFlag(fs)
 	fs.Parse(args)
 	if *sig == "" {
@@ -309,7 +344,11 @@ func verify(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("manifest OK: %s %s, key %s\n", m.Product, m.Version, update.KeyID(k))
+	say := io.Writer(os.Stdout)
+	if *printField != "" {
+		say = io.Discard
+	}
+	fmt.Fprintf(say, "manifest OK: %s %s, key %s\n", m.Product, m.Version, update.KeyID(k))
 	if *bundle != "" {
 		sum, err := update.FileSHA256(*bundle, m.Bundle.Size)
 		if err != nil {
@@ -318,7 +357,14 @@ func verify(args []string) error {
 		if sum != m.Bundle.SHA256 {
 			return fmt.Errorf("bundle sha256 %s, manifest says %s", sum, m.Bundle.SHA256)
 		}
-		fmt.Printf("bundle OK: %s (%d bytes)\n", m.Bundle.Name, m.Bundle.Size)
+		fmt.Fprintf(say, "bundle OK: %s (%d bytes)\n", m.Bundle.Name, m.Bundle.Size)
+	}
+	if *printField != "" {
+		v, err := field(m, *printField)
+		if err != nil {
+			return err
+		}
+		fmt.Println(v)
 	}
 	return nil
 }

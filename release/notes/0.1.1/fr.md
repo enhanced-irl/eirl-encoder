@@ -1,0 +1,2 @@
+- Le Wi-Fi de l'encodeur reçoit son nom (EnhancedIRL-XXXX) au premier démarrage, et vous pouvez le changer dans l'assistant et dans les Réglages, sur l'écran tactile et sur la page web.
+- Un encodeur installé de zéro fonctionne désormais d'emblée : il démarre le moteur à l'allumage, dispose des réglages de l'entrée HDMI et de la sortie SRT nécessaires, et ne commence pas à diffuser tant que vous n'appuyez pas sur « Diffuser ».

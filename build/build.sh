@@ -86,8 +86,6 @@ mk dtbs 2>&1 | grep -i "b00-tc358743" || true
 cp $O/arch/arm64/boot/dts/tegra210-p3448-0000-p3449-0000-b00-tc358743.dtb /out/
 modinfo /out/tc358743.ko | grep vermagic
 '
-python3 "$HERE/edid/make_edid.py" "$OUT/edid-1080p30-lpcm48k.bin"
-# Same modes, different preferred one: the app picks one (EDID_PREFERRED) and the engine loads edid-<mode>-…
-python3 "$HERE/edid/make_edid.py" "$OUT/edid-1080p50-lpcm48k.bin" 1080p50
-python3 "$HERE/edid/make_edid.py" "$OUT/edid-720p60-lpcm48k.bin" 720p60
+# The EDIDs (same modes, a different preferred one: the app picks one, EDID_PREFERRED), from edid/*.hex
+OUT="$OUT" "$HERE/build/edid.sh" >/dev/null
 ls -l "$OUT"

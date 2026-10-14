@@ -1,4 +1,4 @@
-> **Status:** IN PROGRESS · **Updated:** 2026-10-14 (board test passed)
+> **Status:** RELEASED (v0.1.0 on GitHub, Oct 14) · **Updated:** 2026-10-14
 
 # Over-the-air updates
 
@@ -20,7 +20,7 @@ files. **Never L4T, the kernel, the bootloader or Ubuntu packages.**
 | API `/update` | `manager/internal/api/update.go`; wiring in `manager/cmd/eirl-encoderd/update.go` |
 | Package and bundle | `manager/build.sh`, `manager/deploy/install.sh` (`--list-files`) |
 | Release tool | `tools/release.sh`, `manager/cmd/eirl-release` |
-| Release key and notes | `release/eirl-release.pub`, `release/notes/<version>/{en,es,fr}.md` |
+| Release key and notes | `release/eirl-release.pub` (and `release/eirl-release.pem`, the same key for OpenSSL), `release/notes/<version>/{en,es,fr}.md` |
 
 ## 1. How an update flows
 
@@ -64,10 +64,12 @@ eirl-update.service (root oneshot, NOT a child of the app)
 ## 3. Trust model
 
 **What is trusted:** one ed25519 public key, **compiled into the binaries**
-(`internal/update.ProductionKey`, also in `release/eirl-release.pub`, and a test checks the two are
-equal). Nothing on the network is trusted: not GitHub, not TLS, not the storage host GitHub redirects
-to. The signature covers the **exact bytes** of `manifest.json`; the manifest pins the bundle's size
-and sha256.
+(`internal/update.ProductionKey`, also in `release/eirl-release.pub` and, in PEM form for OpenSSL, in
+`release/eirl-release.pem`; tests check the three are the same key). Nothing on the network is trusted:
+not GitHub, not TLS, not the storage host GitHub redirects to. The signature covers the **exact bytes** of
+`manifest.json`; the manifest pins the bundle's size and sha256. The SD card image's manifest is signed with
+that same key, with its own `product` (`eirl-encoder-image`, IMAGE.md §8.1): the board's verifier refuses
+it, and `eirl-release sign` refuses to sign it.
 
 **Who can trigger what:**
 
@@ -161,13 +163,14 @@ entries, root:root, fixed modes):
 ```
 install.sh  deploy/  splash/        what install.sh has always installed
 eirl-encoderd  eirl-netsetup  eirl-update  mediamtx  srtla_send
+srt-live-transmit  libsrt.so.1.5    the SRT output (build/srt.sh): /usr/local/bin and /usr/lib/eirl-encoder/lib
 engine/lib/*  engine/units/*        the engine as tools/deploy-engine.sh installs it (its file lists are read
                                     from that script): eirl-engine-go, eirl-engine-start, eirl-enginectl,
-                                    eirl-hdmi-init.sh, units
+                                    eirl-hdmi-init.sh, the EDIDs (edid-<mode>-lpcm48k.bin, from edid/*.hex), units
 engine/retired.txt                  what the engine no longer uses (deploy-engine.sh's RETIRED: the Python
                                     engine), removed by install.sh
 doc/                                licences → /usr/share/doc/eirl-encoder (Go toolchain and modules, MediaMTX,
-                                    srtla_send AGPL-3.0 + where its source is)
+                                    srtla_send AGPL-3.0 and SRT MPL-2.0, each + where its source is)
 VERSION  BUILD  files.txt           files.txt = `install.sh --list-files`
 ```
 
@@ -196,12 +199,35 @@ is streaming.
 tools/release.sh build [--min-from X.Y.Z]
 #    → build/out/release/<version>/{eirl-encoder-<v>-linux-arm64.tar.gz, manifest.json, manifest.json.sig}
 #    It runs the Go tests, builds everything, signs and verifies with the production key.
+#    EIRL_RELEASE_KEY_CMD is the command that prints the signing seed (the maintainers' secret store).
 # 3. Optional: try it on a test board first (§9, with a test build)
-# 4. Publish (separate and explicit: asks you to type the version; every board is offered it within ~6 h)
+# 4. Bring the public repository to that same commit: ONE new commit on top of its history (never a
+#    force-push), with the same excluded paths and public-check. Pushing it publishes the source.
+git clone https://github.com/enhanced-irl/eirl-encoder.git /tmp/eirl-public   # or pull an existing clone
+tools/public-sync.sh --ref <release commit> /tmp/eirl-public && git -C /tmp/eirl-public push origin main
+# 5. Publish (separate and explicit: asks you to type the version; every board is offered it within ~6 h).
+#    It refuses unless the public main says "Exported from internal commit <the bundle's commit>".
 tools/release.sh publish
 git tag -a v<version> -m "eirl-encoder <version>" && git push origin v<version>
-# 5. Check it the way a board does
+# 6. Check it the way a board does
 go -C manager run ./cmd/eirl-release check -url https://github.com/enhanced-irl/eirl-encoder/releases/latest/download/manifest.json -current <previous>
+```
+
+When the release also gets an SD card image (IMAGE.md §8: not every release does, §8.3), after step 6:
+
+```bash
+# 7. Sign the image the recipe built with this release installed (IMAGE.md §3). The raw values are the recipe's;
+#    without them it hashes `xz -dc` itself. Either way it checks them, with the release's manifest, the signature
+#    (EIRL_RELEASE_KEY_CMD, as in step 2) and the .sha256 file
+tools/release.sh image --image <recipe output>/eirl-encoder-<version>-jetson-nano.img.xz \
+  --raw-size <bytes> --raw-sha256 <sha256> --packages <package list> --sources <sources.md> \
+  --commit <recipe commit> --built <when the recipe built it, RFC3339>
+#    → build/out/release/<version>/image/: eirl-encoder-<version>-jetson-nano{.img.xz, .img.json, .img.json.sig,
+#      .img.xz.sha256, -packages.txt, -sources.md}. A rebuild of the image of the same release: <version>-N in its name
+# 8. Add them to the release of step 5 (asks you to type the version). It never creates a release or changes which
+#    one is latest, refuses a file over GitHub's 2 GiB, and never replaces a file unless --clobber
+tools/release.sh publish-image <version>
+# 9. Check the download as a user would (IMAGE.md §8.4)
 ```
 
 ## 6. On the board
@@ -342,6 +368,11 @@ go -C manager run ./cmd/eirl-release check -url http://127.0.0.1:8000/manifest.j
 4. Serve C to see the rollback; `sudo eirl-update rollback` to go back one release.
 5. Afterwards, reinstall a normal build (`manager/build.sh`) and remove `-update-url`.
 
+**The SD card image's signature**: `tools/image-sign-test.sh` (Go and xz, about a minute, no board, no GitHub). A
+throwaway key, a fake 64 MiB image through `tools/release.sh image`, `verify-image`, one byte changed in the image,
+the manifest or the raw stream, OpenSSL 3 with the PEM key, and every refusal of `publish-image` against a stubbed
+`gh` (IMAGE.md §8.1).
+
 **Simulated board (container)**: `tools/ota-sim.sh` (Go and Docker, ~3 min, never touches a board).
 An Ubuntu 18.04 arm64 container runs the real `install.sh`, `eirl-encoderd` and `eirl-update`, with
 fake `systemctl`/`sudo` (`tools/ota-sim/`). The engine is emulated: its restarts are counted.
@@ -362,10 +393,28 @@ Every scenario checks how many times the engine was restarted: 0 for every app-o
 engine install, 2 for its rollback (the new engine, then the restored one), and 1 for a manual
 rollback that changes the engine's code. `--no-engine` skips 8-10 (~2 min).
 
+**Image mode (SD card image)**: the image build runs a bundle's `EIRL_IMAGE=1 ./install.sh` (or `--image`) in an
+arm64 chroot with /proc, /sys and /dev mounted, no systemd running in it and no network (no `--root`: the chroot
+gives the paths). It installs the files, users and groups and runs `systemctl enable`
+(offline), and never `daemon-reload`, start/restart/stop, `udevadm`, `systemd-tmpfiles`, the NetworkManager
+dispatcher or anything under `/sys` and `/dev`; all of that happens at the first boot. It refuses to run where
+systemd runs that root. `tools/image-install-test.sh [BUNDLE]` (Docker, ~1 min; without a bundle it first builds
+a test release with the engine) runs the real `install.sh` in image mode twice in that same setting (a privileged,
+offline Ubuntu 18.04 arm64 container is the build machine, with /run/systemd/system; a copy of its root is the
+chroot) with guards on every forbidden command, and checks files.txt, the SRT output (it runs with the package's
+libsrt), the EDIDs, the licences, a new device's settings (output off), the users, the units enabled for the
+first boot, `eirl-encoderd -print-hardware-id`, that the second run changes nothing and the refusal.
+
 **On the real board (2026-10-14)**: steps 1-8 of the board test passed with app-only test builds
 (hand install, healthy update, automatic rollback in 1 min 58 s, manual rollback, recovery of an
 interrupted install). The engine was never restarted. The board's systemd (237-3ubuntu10.57) re-owns a
 `StateDirectory` recursively when `User=` changes.
+
+**First public release (Oct 14).** `v0.1.0` is published at
+<https://github.com/enhanced-irl/eirl-encoder/releases/tag/v0.1.0>, signed with the production key.
+The test board, on a development build of the same day, then went through the real path on its own:
+check → download (44 MB, ~30 s) → verify → install of the app and the engine → healthy, in 31 s, with
+nothing streaming.
 
 ## 10. Risks and limits
 
@@ -397,10 +446,5 @@ interrupted install). The engine was never restarted. The board's systemd (237-3
 
 ## 11. Pending
 
-- The screen's Updates page shows the `error` code; it should show `message` (already translated).
-- `tools/release.sh` refuses to put the engine in a bundle unless its unit runs as `eirl-engine`. Since
-  `feat/engine-system-user` (`main` 4510b85), it does.
-- The first public release `v0.1.0`. The repo has to be public for
-  `releases/latest` to answer without a token.
 - Key rotation with a list of trusted keys (§3); a free-space check before the backup; a "Wi-Fi/Ethernet
   only" download option.

@@ -78,7 +78,8 @@ HDMI source ─▶ TC358743 ─CSI-2 (2 lanes, 972 Mbps/lane, UYVY)─▶ Jetson
 ```
 
 GStreamer 1.14, the one in L4T 32.7, **has no `srtsink`**. That is why the jump to SRT is made by
-`srt-live-transmit`, from SRT 1.5.7 built on the board, which reads the MPEG-TS from a **named
+`srt-live-transmit` (Haivision SRT 1.5.7, built by `build/srt.sh` and shipped in the app package and the release
+bundle; its `libsrt` in `/usr/lib/eirl-encoder/lib`, found through the binary's RUNPATH), which reads the MPEG-TS from a **named
 FIFO** on its standard input. At first it was a local UDP socket, and the kernel dropped
 datagrams in the bursts of each IDR, which produced artefacts (see [Bugs](#bugs-found-and-fixed)).
 
@@ -156,7 +157,9 @@ eirl-encoder/
 ├─ build/
 │  ├─ Dockerfile             ← ubuntu:18.04 arm64 + toolchain (native gcc 7.5)
 │  ├─ build.sh               ← R32.7.6 sources → module + DTB + EDID in build/out/ (ignored by git)
+│  ├─ edid.sh                ← edid/*.hex → build/out/edid-*.bin (checked against make_edid.py)
 │  ├─ srtla.sh               ← srtla_send (BELABOX, pinned commit) → build/out/srtla_send
+│  ├─ srt.sh                 ← srt-live-transmit + libsrt (Haivision SRT, pinned tag) → build/out/
 │  └─ mediamtx.sh            ← official MediaMTX arm64 (pinned version and sha256) → build/out/mediamtx
 ├─ driver/
 │  ├─ tc358743-jetson.patch  ← patch on drivers/media/i2c/tc358743.c from L4T 32.7.6
@@ -164,8 +167,8 @@ eirl-encoder/
 ├─ dt/tegra210-porg-camera-tc358743.dtsi   ← replaces the B01 DT's imx219/imx477 includes
 ├─ dt/tegra210-porg-tc358743-i2s4.dtsi     ← audio: I2S4 as slave (dai-link-1) + i2s4b pinmux; included at the end
 │                                             (build.sh also generates …-gpio.dtsi: the B01's gpio-input without J4-J7; not enough, see eirl-hdmi-init)
-├─ edid/make_edid.py         ← EDID: modes up to 1080p50 (1080p30 preferred), LPCM stereo 48 kHz only
-├─ edid/edid-1080p30-lpcm48k.hex
+├─ edid/make_edid.py         ← EDID generator: modes up to 1080p50, LPCM stereo 48 kHz only
+├─ edid/edid-<mode>-lpcm48k.hex ← the EDIDs' source of truth (1080p30, 1080p50 and 720p60 preferred), from make_edid.py
 ├─ manager/cmd/eirl-engine     ← the engine (Go, eirl-engine-go; ENGINE_GO.md); its packages in manager/internal/engine/:
 │                               the core actor (sources, scene), output (NVENC + SRT/SRTLA, ABR), audio, phones
 │                               (headphones), usbhub (hung USB card recovery), netcam (F7), screen (touch screen),
@@ -177,7 +180,7 @@ eirl-encoder/
 ├─ scripts/eirl-hdmi-init.sh      ← at boot: DAP4 pins out of GPIO mode + loading the EDID
 ├─ systemd/eirl-hdmi-init.service ← oneshot that runs eirl-hdmi-init.sh
 ├─ systemd/eirl-engine.service  ← the stream as a service (Restart=always)
-├─ systemd/eirl-engine.default  ← its configuration → /etc/default/eirl-engine (destination, bitrate…)
+├─ manager/deploy/eirl-engine.default ← the board settings → /etc/default/eirl-engine (install.sh creates it if missing)
 ├─ tools/                    ← deploy-engine.sh (installs the engine without cutting a live stream),
 │                               tap.py (touches on the touch panel), webproxy.py (the web with a session, for tests),
 │                               engine-cpu.sh + thrcpu.py and engine-watch.py (engine CPU and RAM, MIXER.md §17)
@@ -211,23 +214,27 @@ ls build/out/                       # tc358743.ko · tegra210-p3448-0000-p3449-0
 > `extlinux.conf`, with the original as the alternative, and an OK is requested before rebooting.
 
 ```bash
-scp build/out/{tc358743.ko,tegra210-p3448-0000-p3449-0000-b00-tc358743.dtb,edid-1080p30-lpcm48k.bin} jetson:/tmp/
+scp build/out/{tc358743.ko,tegra210-p3448-0000-p3449-0000-b00-tc358743.dtb} jetson:/tmp/
 ssh jetson '
   sudo install -D -m0644 /tmp/tc358743.ko /lib/modules/4.9.337-tegra/extra/tc358743.ko && sudo depmod -a
   sudo cp /boot/extlinux/extlinux.conf /boot/extlinux/extlinux.conf.bak-$(date +%Y%m%d)
-  sudo install -m0644 /tmp/tegra210-p3448-0000-p3449-0000-b00-tc358743.dtb /boot/
-  sudo install -d -m0755 /usr/lib/eirl-encoder/engine && sudo install -m0644 /tmp/edid-1080p30-lpcm48k.bin /usr/lib/eirl-encoder/engine/'
-# The engine itself: tools/deploy-engine.sh --unit (see "Operating")
+  sudo install -m0644 /tmp/tegra210-p3448-0000-p3449-0000-b00-tc358743.dtb /boot/'
+# The engine itself, with the EDIDs: tools/deploy-engine.sh --unit (see "Operating"), or a release bundle
 ```
 
-Boot service (I2S4 pins + EDID):
+Boot service (I2S4 pins + EDID): `eirl-hdmi-init.service` runs `/usr/lib/eirl-encoder/engine/eirl-hdmi-init.sh`.
+Both come with the engine (`tools/deploy-engine.sh --unit`, or a release bundle, whose `install.sh` also enables
+`eirl-hdmi-init` and `eirl-engine`):
 
 ```bash
-scp scripts/eirl-hdmi-init.sh systemd/eirl-hdmi-init.service jetson:/tmp/
-ssh jetson 'sudo install -m0755 /tmp/eirl-hdmi-init.sh /usr/local/sbin/ && sudo install -m0644 /tmp/eirl-hdmi-init.service /etc/systemd/system/ \
-            && sudo systemctl daemon-reload && sudo systemctl enable --now eirl-hdmi-init.service'
 # journalctl -u eirl-hdmi-init → "GPIO_CNF puerto J 0xf0 -> 0x00" and "EDID … cargado en /dev/v4l-subdev1" (the script's messages, in Spanish)
 ```
+
+**A new device from a release bundle**: `sudo ./install.sh` in the extracted bundle installs the app, the engine
+with its EDIDs, the SRT output and the units, and leaves the output off with no destination (an SD card image
+runs it with `--image`, UPDATES.md §9). The bundle does not carry the TC358743 module, the DTB and its extlinux
+entry (above), nor what L4T itself provides: GStreamer with NVIDIA's plugins, `v4l-utils`, `i2c-tools`, `python3`
+and OpenSSL 1.1 (`libsrt` links it).
 
 Entry added to `/boot/extlinux/extlinux.conf`. The `LABEL primary` one stays untouched:
 
@@ -260,13 +267,14 @@ Check after booting:
 
 The stream runs as a **systemd service** (`eirl-engine.service`, enabled): it starts with the board,
 waits for an HDMI signal with no time limit and, if the pipeline fails (signal lost, mode
-change, video watchdog, SRT), it exits and systemd relaunches it after 2 s. The configuration (destination,
-bitrate…) is in `/etc/default/eirl-engine`.
+change, video watchdog, SRT), it exits and systemd relaunches it after 2 s. The board settings are in
+`/etc/default/eirl-engine` (root only; `install.sh` creates a commented default on a new device and never
+overwrites it); what the app manages (destination, bitrates, output, input) is in `/etc/eirl-encoder/engine.env`.
 
 ```bash
 # Install or update: tests, builds eirl-engine-go, installs it with eirl-engine-start and eirl-enginectl
 # (--unit: also the units) and restarts; refuses to do anything while streaming
-scp systemd/eirl-engine.default jetson:/tmp/ && ssh jetson '[ -f /etc/default/eirl-engine ] || sudo install -m0644 /tmp/eirl-engine.default /etc/default/eirl-engine'
+# (a board without the app's install.sh: scp manager/deploy/eirl-engine.default and install it as /etc/default/eirl-engine, 0644 root)
 JETSON=jetson tools/deploy-engine.sh --unit
 
 # Change the destination: from the app (http://jetson.local, see MANAGER.md) or, by hand, in
@@ -528,7 +536,11 @@ FIFO reaches the level:
 ### HDMI signal and EDID
 
 - Own EDID (`edid/make_edid.py <output.bin> [1080p30|1080p50|720p60|480p]`; the argument is the
-  **preferred** mode, the list is the same):
+  **preferred** mode, the list is the same). What a device gets is `edid/edid-<mode>-lpcm48k.hex`
+  (1080p30, 1080p50, 720p60): `build/edid.sh` decodes them to `build/out/edid-*.bin` and fails if
+  `make_edid.py` no longer produces them, and the engine's install (`tools/deploy-engine.sh`, the release
+  bundle) puts them in `/usr/lib/eirl-encoder/engine/`. To change one, change `make_edid.py` and regenerate its `.hex`
+  (the hex of `make_edid.py out.bin <mode>`, on one line). What they announce:
   - **Video**: 1080p50, 1080p30, 1080p25, 1080p24, 720p60, 720p50, 576p50, 480p and VGA; preferred
     1080p30. No interlaced mode and no 1080p60. Clock cap (VSDB and limits) 150 MHz.
   - **Audio**: **LPCM stereo at 48 kHz and 16 bits only**.
@@ -662,7 +674,7 @@ steps:
 | Mac `~/.ssh/config` | Created, with `Host jetson` | `rm ~/.ssh/config` |
 | Jetson `/etc/sudoers` | The temporary `<user> ALL=(ALL:ALL) NOPASSWD: ALL` was removed on Oct 8 (copy `/etc/sudoers.bak-20261008`) and **the maintainer restored it on Oct 9** in a separate file, `/etc/sudoers.d/90-<user>-nopasswd`, so that deployments do not depend on it. Separately, `eirl-encoderd`'s narrow rule (`/etc/sudoers.d/eirl-encoder`) | `sudo rm /etc/sudoers.d/90-<user>-nopasswd` |
 | Jetson apt | `libssl-dev`, `tcl` (+`tcl8.6`), `v4l-utils` (+`libv4l2rds0`) | `sudo apt-get remove …` |
-| Jetson `/usr/local` | SRT 1.5.7 (sources in `~/build/srt`) | `cd ~/build/srt/_build && sudo xargs rm -f < install_manifest.txt && sudo ldconfig` |
+| Jetson `/usr/local` | SRT 1.5.7 built by hand (sources in `~/build/srt`). Since the app package carries its own SRT, its `/usr/local/bin/srt-live-transmit` is the package's (RUNPATH to `/usr/lib/eirl-encoder/lib`); the hand-built `libsrt` in `/usr/local/lib` and the other SRT tools stay, unused by the engine | `cd ~/build/srt/_build && grep -v '^/usr/local/bin/srt-live-transmit$' install_manifest.txt \| sudo xargs rm -f && sudo ldconfig` (keeps the package's `srt-live-transmit`) |
 | Jetson `/boot` | DTB `…-b00-tc358743.dtb` (video at 972 Mbps + I2S4 audio; copies: `….bak-594mbps` and `….bak-video-only`), `LABEL tc358743`, `DEFAULT tc358743`. Also DTB `…-b00-tc358743-rst.dtb` (with the reset pin), without an entry: `LABEL tc358743-rst` removed on Oct 8 | `sudo cp /boot/extlinux/extlinux.conf.bak-20261005 /boot/extlinux/extlinux.conf` and delete the `*tc358743*` DTBs (intermediate copies: `extlinux.conf.bak-20261007`, `…-20261007-rst` and `…-20261008`, the latter with the reset entry) |
 | Jetson modules | `/lib/modules/4.9.337-tegra/extra/tc358743.ko` (with hardware reset) | `sudo rm …/extra/tc358743.ko && sudo depmod -a` |
 | Jetson `/usr/lib/eirl-encoder/engine/` | Script, EDID, `latency/` and `backup-20261007/` (module, DTB, extlinux and script from before the hardware reset) | `rm -rf /usr/lib/eirl-encoder/engine` |

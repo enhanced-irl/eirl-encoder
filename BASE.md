@@ -21,7 +21,7 @@ done together with it.
 | Validation reboot | ✅ 21:15 | B1, B2, QSPI and B3 are validated by the reboots at 18:23 (another session), 19:03 (the screen's ⏻ menu) and the one at 21:15, after `desktop` (§10) |
 | B4 Boot | — | Not started |
 | B5 IRQs and priority | — | Not started; with the mixer session |
-| B6 Minimal image | — | The last one (D1) |
+| B6 Minimal image | In progress (Oct 14) | [`IMAGE.md`](IMAGE.md): phase 0 decided; I1 (recipe and first image) next |
 
 ## 1. What to expect (being honest about the goal)
 
@@ -99,8 +99,9 @@ loaded (`/proc/<pid>/maps`, 253 libraries).
 - 🔴 **haveged stays**. Kernel 4.9 has no jitter entropy and `getrandom` blocks until
   the CRNG is initialised. Without haveged, `eirl-encoderd`'s `crypto/rand` (TLS and WebRTC's DTLS) and
   SRT encryption could be left waiting after boot.
-- In `/usr/local/bin`: `srt-live-transmit` (and `libsrt` in `/usr/local/lib`), `srtla_send`,
-  `mediamtx`, `eirl-encoderd` and `eirl-splash`.
+- In `/usr/local/bin`: `srtla_send`, `mediamtx`, `eirl-encoderd` and `eirl-splash`. `srt-live-transmit` and
+  `libsrt` 1.5.7 come with the release bundle since Oct 14, in `/usr/lib/eirl-encoder/lib` (until then they were
+  hand-built in `/usr/local` on the test board).
 
 ## 4. Inventory and classification
 
@@ -308,10 +309,12 @@ frames/s), before and after and in the same conditions as B0.
 ### B6 — Minimal image to flash (decided on Oct 13, D1: the last phase)
 
 There will be a version of the encoder for the Jetson Nano, so this phase will be done, at the end,
-when the recipe has been tested on the board. It would be:
+when the recipe has been tested on the board. **Its plan, decisions and results are in [`IMAGE.md`](IMAGE.md).**
+What was foreseen here on Oct 13:
 
 - BSP R32.7.6 with `nv_build_samplefs.sh --flavor minimal` (minimal Ubuntu 18.04) and
-  `apply_binaries.sh`.
+  `apply_binaries.sh`. (R32.7.6's `nv_build_samplefs.sh` turned out to have no minimal flavour: the image starts
+  from Ubuntu's own base instead, IMAGE.md §3.2.)
 - On top, the `base/` recipe (list from §3, `/usr/local` binaries, units, driver, DT and EDID).
 - The product image ships without USB device mode or the development tools (D4 and
   D5 are only for the development board).

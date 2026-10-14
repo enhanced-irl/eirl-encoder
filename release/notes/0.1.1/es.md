@@ -1,0 +1,2 @@
+- La wifi propia del codificador recibe su nombre (EnhancedIRL-XXXX) en el primer arranque, y puedes cambiarlo en el asistente y en Ajustes, en la pantalla táctil y en la web.
+- Un codificador instalado desde cero ya funciona a la primera: arranca el motor al encender, trae los ajustes de la entrada HDMI y la salida SRT que necesita, y no empieza a emitir hasta que pulsas «Emitir».

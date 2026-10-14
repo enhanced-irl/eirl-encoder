@@ -13,15 +13,17 @@
 #
 #   --ignore-hits   for testing this script only: commits even with hits, and then refuses to print the
 #                   publishing steps. Such a tree must never be pushed.
+#   --tree-only     stops after step 3: the checked tree, without git (tools/public-sync.sh uses it).
 set -euo pipefail
 
-usage() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
-ref=HEAD target="" ignore_hits=0
+ref=HEAD target="" ignore_hits=0 tree_only=0
 while [ $# -gt 0 ]; do
   case $1 in
     --ref) [ $# -ge 2 ] || usage; ref=$2; shift ;;
     --ignore-hits) ignore_hits=1 ;;
+    --tree-only) tree_only=1 ;;
     -h|--help) usage ;;
     -*) usage ;;
     *) [ -z "$target" ] || usage; target=$1 ;;
@@ -67,6 +69,12 @@ if [ "$hits" != 0 ]; then
     exit 1
   fi
   echo "public-export: --ignore-hits: committing anyway, FOR TESTING ONLY" >&2
+fi
+
+if [ "$tree_only" = 1 ]; then
+  [ "$hits" = 0 ] || { echo "public-export: --tree-only with hits: not usable" >&2; exit 1; }
+  echo "tree only: $target (internal commit ${commit:0:12})"
+  exit 0
 fi
 
 echo "== 4/4 git init + commit"

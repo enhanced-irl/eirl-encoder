@@ -1,0 +1,2 @@
+- The encoder's own Wi-Fi gets its name (EnhancedIRL-XXXX) on first start, and you can change it in the setup wizard and in Settings, on the touch screen and on the web page.
+- A new encoder installed from scratch now works out of the box: it starts the engine at boot, has the HDMI input settings and the SRT output it needs, and does not start streaming until you press "Go live".

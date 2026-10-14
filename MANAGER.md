@@ -799,7 +799,11 @@ JETSON=jetson manager/build.sh --restart-engine   # and restarts the stream if t
 `systemd-journal`), `/etc/eirl-encoder` (`root:eirl-encoder 3770`), the **first time** migrates the
 destination from `/etc/default/eirl-engine` to `/etc/eirl-encoder/engine.env` (and comments those keys out there,
 with a `.bak-<date>` copy), and installs the binary, unit, drop-in, sudoers (validated with `visudo -cf`) and
-tmpfiles, and the boot splash (`splash/install.sh`, see [`SPLASH.md`](SPLASH.md)). Without `--restart-engine` it **does not cut the stream**. The board no longer has passwordless sudo:
+tmpfiles, the SRT output (`srt-live-transmit` and its `libsrt` in `/usr/lib/eirl-encoder/lib`), and the boot splash (`splash/install.sh`, see [`SPLASH.md`](SPLASH.md)).
+On a **new device** (no `/etc/default/eirl-engine` to migrate) it writes `engine.env` with the output **off** and no
+destination, and creates a commented default `/etc/default/eirl-engine` (root, 0644; `SOURCE=hdmi`), never
+overwritten afterwards. With the engine in the package (a release bundle) it also enables `eirl-engine` and
+`eirl-hdmi-init`. `install.sh --image` is for an SD card image's chroot ([`UPDATES.md` §9](UPDATES.md#9-testing)). Without `--restart-engine` it **does not cut the stream**. The board no longer has passwordless sudo:
 `build.sh` uses `ssh -t` and sudo asks for it (it cannot be deployed without someone in front). It has to be
 launched from a real terminal: a shell without a TTY (such as an AI coding assistant's `!` command) makes sudo fail with `no tty present`.
 

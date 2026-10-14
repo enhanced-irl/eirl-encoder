@@ -21,7 +21,9 @@ Group=eirl-engine
 # screen · i2c: the TC358743 audio PLL watchdog (i2ctransfer). The app's group and the USB hub's, in the
 # drop-in eirl-encoder.conf
 SupplementaryGroups=video audio input i2c
-EnvironmentFile=/etc/default/eirl-engine
+# Board settings (root only). Optional ("-"): install.sh creates a commented default on a new device, and
+# without it the engine runs on its built-in defaults instead of failing to start
+EnvironmentFile=-/etc/default/eirl-engine
 # Outside a session, some library starts its own PulseAudio (autospawn) that grabs the card. Audio is
 # captured from ALSA directly: with an explicit, non-existent server it is not launched.
 Environment=PULSE_SERVER=unix:/nonexistent

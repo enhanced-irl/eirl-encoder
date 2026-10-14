@@ -4,16 +4,21 @@
 #   sudo ./install.sh --restart-engine   # also restarts the engine if its drop-in or its files changed
 #                                        # (never while streaming)
 #   ./install.sh --list-files            # (no root) prints every path this package installs: files.txt
+#   ./install.sh --image                 # (or EIRL_IMAGE=1) into an SD card image: run inside its chroot, as
+#                                        # root, with no systemd running. Files, users, groups and `systemctl
+#                                        # enable` only; nothing that needs a running system (see "Image mode")
 #
 # What it does (and how to undo it, in MANAGER.md §11):
 #   system user eirl-encoder (groups video, i2c, systemd-journal) · /etc/eirl-encoder · udev rule of the
 #   USB capture devices (no autosuspend; the board's hub writable by the group eirl-usbhub, which only
-#   eirl-engine has, to recover a hung device) · app binary · srtla_send + NetworkManager dispatcher
-#   (SRTLA) · narrow sudoers · polkit · tmpfiles of the power readings and /run/eirl-uplinks · network
-#   cameras (eirl-netsetup, MediaMTX and their units; F7) · app unit (+ /etc/default/eirl-encoderd) ·
-#   eirl-engine drop-in · the engine itself when the package carries it (a release bundle: engine/) ·
+#   eirl-engine has, to recover a hung device) · app binary · the SRT output (srt-live-transmit and its
+#   libsrt in /usr/lib/eirl-encoder/lib) · srtla_send + NetworkManager dispatcher (SRTLA) · narrow
+#   sudoers · polkit · tmpfiles of the power readings and /run/eirl-uplinks · network cameras
+#   (eirl-netsetup, MediaMTX and their units; F7) · app unit (+ /etc/default/eirl-encoderd) · eirl-engine
+#   drop-in · the engine itself when the package carries it (a release bundle: engine/; its units enabled) ·
 #   the update helper (eirl-update and its units, UPDATES.md) · one-time migrations (hdmi2srt →
-#   eirl-engine; the destination from /etc/default/eirl-engine to /etc/eirl-encoder/engine.env) · boot
+#   eirl-engine; the destination from /etc/default/eirl-engine to /etc/eirl-encoder/engine.env) · on a
+#   new device, engine.env with the output off and a default /etc/default/eirl-engine (never overwritten) · boot
 #   splash (splash/install.sh: binary, units and extlinux entry; seen at the next boot, SPLASH.md) ·
 #   /usr/lib/eirl-encoder/{VERSION,BUILD,files.txt}.
 # It does NOT restart the engine unless --restart-engine: the drop-in and the engine files apply when
@@ -29,13 +34,17 @@ SRC=.
 [ -f ./deploy/eirl-encoderd.service ] && D=./deploy || D=.
 RESTART_ENGINE=""
 LIST=""
+IMAGE=""
+[ "${EIRL_IMAGE:-}" = 1 ] && IMAGE=1
 for a in "$@"; do
   case "$a" in
     --restart-engine) RESTART_ENGINE=1 ;;
     --list-files) LIST=1 ;;
+    --image) IMAGE=1 ;;
     *) echo "unknown option: $a" >&2; exit 64 ;;
   esac
 done
+if [ -n "$IMAGE" ] && [ -n "$RESTART_ENGINE" ]; then echo "--image and --restart-engine do not go together" >&2; exit 64; fi
 
 LIB=/usr/lib/eirl-encoder
 ENGINE_DIR=$LIB/engine
@@ -59,6 +68,8 @@ retired_names() {
 # release machine too).
 list_files() {
   echo /usr/local/bin/eirl-encoderd
+  for l in "$SRC"/libsrt.so.*; do [ -f "$l" ] && echo "$LIB/lib/$(basename "$l")"; done
+  [ -f "$SRC/srt-live-transmit" ] && echo /usr/local/bin/srt-live-transmit
   [ -f "$SRC/srtla_send" ] && echo /usr/local/bin/srtla_send
   echo /etc/NetworkManager/dispatcher.d/90-eirl-uplinks
   if [ -f "$SRC/eirl-netsetup" ]; then
@@ -101,6 +112,18 @@ if [ -n "$LIST" ]; then
 fi
 
 [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 1; }
+# Image mode: the root being prepared is an SD card image (an arm64 chroot), not a running board. It installs
+# files, users and groups and runs `systemctl enable` (which works offline), and NEVER daemon-reload,
+# start/restart/stop, udevadm, systemd-tmpfiles, the NetworkManager dispatcher or anything under /sys and /dev:
+# none of that exists yet, and in a chroot it would be the host's. Everything skipped happens at the first boot
+# (systemd-tmpfiles-setup, udev, NetworkManager, the enabled units). Refused where systemd runs this very root.
+if [ -n "$IMAGE" ]; then
+  if [ -d /run/systemd/system ] && [ "$(stat -c %d:%i / 2>/dev/null)" = "$(stat -c %d:%i /proc/1/root/. 2>/dev/null)" ]; then
+    echo "--image is for an image or a chroot, not a running system: run install.sh without it" >&2
+    exit 64
+  fi
+  export EIRL_IMAGE=1   # splash/install.sh too
+fi
 USER_=eirl-encoder
 CONF=/etc/eirl-encoder
 APPENV=$CONF/engine.env
@@ -176,6 +199,13 @@ as_app() { runuser -u "$USER_" -- "$@"; }
 # 3. App binary
 put 0755 "$SRC/eirl-encoderd" /usr/local/bin/eirl-encoderd
 
+# 3a. The SRT output (the engine pipes the program into srt-live-transmit): the encoder's own build of
+#     Haivision SRT (build/srt.sh). Its libsrt goes to $LIB/lib under its soname and the binary finds it
+#     through its RUNPATH: no ldconfig, and a libsrt built by hand in /usr/local/lib is left alone and never
+#     used by this binary. The library first: the new binary needs it.
+for l in "$SRC"/libsrt.so.*; do [ -f "$l" ] && put 0644 "$l" "$LIB/lib/$(basename "$l")"; done
+[ -f "$SRC/srt-live-transmit" ] && put 0755 "$SRC/srt-live-transmit" /usr/local/bin/srt-live-transmit
+
 # 3b. SRTLA: srtla_send and the NetworkManager dispatcher that sets the source routing of each link and
 #     leaves the list in /run/eirl-uplinks/available (SRTLA.md). It is run once now (step 5) for the
 #     links already up; afterwards NetworkManager runs it on every change.
@@ -221,27 +251,31 @@ put 0440 "$D/sudoers" /etc/sudoers.d/eirl-encoder
 for p in "$D"/*.pkla; do [ -f "$p" ] && put 0644 "$p" "$PKLA_DIR/$(basename "$p")"; done
 # Power readings (ina3221) readable now and at every boot; /run/eirl-uplinks and /run/eirl-ap
 put 0644 "$D/tmpfiles.conf" /etc/tmpfiles.d/eirl-encoder.conf
-systemd-tmpfiles --create /etc/tmpfiles.d/eirl-encoder.conf || echo "warning: tmpfiles not applied (another ina3221?)" >&2
-/etc/NetworkManager/dispatcher.d/90-eirl-uplinks none resync && echo "SRTLA links: $(tr '\n' ' ' < /run/eirl-uplinks/available)"
+if [ -z "$IMAGE" ]; then
+  systemd-tmpfiles --create /etc/tmpfiles.d/eirl-encoder.conf || echo "warning: tmpfiles not applied (another ina3221?)" >&2
+  /etc/NetworkManager/dispatcher.d/90-eirl-uplinks none resync && echo "SRTLA links: $(tr '\n' ' ' < /run/eirl-uplinks/available)"
+fi
 
 # 5b. USB capture devices and cameras (SOURCES.md): no autosuspend, and their audio out of PulseAudio. The
 #     rule applies to the ones plugged in later; the ones already plugged in get it here (without
 #     `udevadm trigger`, which would rerun the modems' rules).
 put 0644 "$D/70-eirl-capture.rules" /etc/udev/rules.d/70-eirl-capture.rules
-udevadm control --reload || true
-# PULSE_IGNORE on the sound cards already connected: only "change" events of the sound subsystem
-udevadm trigger --action=change --subsystem-match=sound || true
-for i in /sys/bus/usb/devices/*:*; do
-  [ "$(cat "$i/bInterfaceClass" 2>/dev/null)" = 0e ] && [ -w "$i/../power/control" ] && echo on > "$i/../power/control"
-done
-# The board's hub, already enumerated: its node for eirl-usbhub (only eirl-engine), as the rule will do
 getent group eirl-usbhub >/dev/null || groupadd --system eirl-usbhub
-for h in /sys/bus/usb/devices/*; do
-  [ "$(cat "$h/idVendor" 2>/dev/null)" = 0bda ] || continue
-  case "$(cat "$h/idProduct" 2>/dev/null)" in 5411|0411) ;; *) continue ;; esac
-  n=$(printf '/dev/bus/usb/%03d/%03d' "$(cat "$h/busnum")" "$(cat "$h/devnum")") || continue
-  [ -c "$n" ] && chgrp eirl-usbhub "$n" && chmod 0664 "$n"
-done
+if [ -z "$IMAGE" ]; then
+  udevadm control --reload || true
+  # PULSE_IGNORE on the sound cards already connected: only "change" events of the sound subsystem
+  udevadm trigger --action=change --subsystem-match=sound || true
+  for i in /sys/bus/usb/devices/*:*; do
+    [ "$(cat "$i/bInterfaceClass" 2>/dev/null)" = 0e ] && [ -w "$i/../power/control" ] && echo on > "$i/../power/control"
+  done
+  # The board's hub, already enumerated: its node for eirl-usbhub (only eirl-engine), as the rule will do
+  for h in /sys/bus/usb/devices/*; do
+    [ "$(cat "$h/idVendor" 2>/dev/null)" = 0bda ] || continue
+    case "$(cat "$h/idProduct" 2>/dev/null)" in 5411|0411) ;; *) continue ;; esac
+    n=$(printf '/dev/bus/usb/%03d/%03d' "$(cat "$h/busnum")" "$(cat "$h/devnum")") || continue
+    [ -c "$n" ] && chgrp eirl-usbhub "$n" && chmod 0664 "$n"
+  done
+fi
 
 # 6. Units BEFORE the migrations: if something fails later, eirl-engine already reads the new file
 dropin_changed=""
@@ -296,8 +330,15 @@ if [ -f "$SRC/eirl-update" ]; then
   for u in $UPDATE_UNITS; do put 0644 "$D/$u" "/etc/systemd/system/$u"; done
   install -d -m 0755 -o root -g root /var/lib/eirl-update
 fi
-systemctl daemon-reload
+[ -n "$IMAGE" ] || systemctl daemon-reload
 [ -f "$SRC/eirl-update" ] && systemctl enable eirl-update-recover.service >/dev/null 2>&1
+# The engine and its boot preparation (eirl-hdmi-init) start at boot: nothing else enables them, and a new
+# device would never stream. A no-op where they already are.
+if [ -d "$SRC/engine/lib" ]; then
+  for f in "$SRC"/engine/units/*; do
+    [ -f "$f" ] && systemctl enable "$(basename "$f")" >/dev/null 2>&1
+  done
+fi
 
 # 6c. The engine was called hdmi2srt until Oct 13: its app file becomes engine.env (moved by the app's
 #     user, like everything inside $CONF, see step 2) and the board settings of /etc/default/hdmi2srt
@@ -316,9 +357,13 @@ fi
 # 7. Migration of the destination (first time only): the keys the app manages move from
 #    /etc/default/eirl-engine to the app's file and are commented out there (with a copy). An SRT_URL
 #    with a query (?streamid=…&latency=…), which the old script accepted, is split.
+#    Without $DEF there is nothing to migrate: a NEW device. Its file starts with the output off (it
+#    streams when someone presses Go live and has a destination); a migrated device keeps what it had.
 KEYS="SRT_URL SRT_MODE SRT_LATENCY SRT_STREAMID SRT_PASSPHRASE VBITRATE ABITRATE OUTPUT"
 if [ ! -e "$APPENV" ]; then
-  # (without $DEF, a new device: nothing to migrate; sed must not fail the pipeline under pipefail)
+  new_device=""
+  [ -f "$DEF" ] || new_device=1
+  # (sed must not fail the pipeline under pipefail)
   get() { [ -f "$DEF" ] || return 0; sed -nE "s/^[[:space:]]*$1=[\"']?([^\"']*)[\"']?[[:space:]]*$/\1/p" "$DEF" | tail -1; }
   declare -A val
   for k in $KEYS; do val[$k]=$(get "$k"); done
@@ -336,27 +381,43 @@ if [ ! -e "$APPENV" ]; then
     done
     val[SRT_URL]=$url
   fi
-  : "${val[SRT_MODE]:=caller}" "${val[SRT_LATENCY]:=200}" "${val[VBITRATE]:=6000}" "${val[ABITRATE]:=128}" "${val[OUTPUT]:=on}"
+  output_default=on
+  [ -z "$new_device" ] || output_default=off
+  : "${val[SRT_MODE]:=caller}" "${val[SRT_LATENCY]:=200}" "${val[VBITRATE]:=6000}" "${val[ABITRATE]:=128}" "${val[OUTPUT]:=$output_default}"
   tmp=$(mktemp)   # outside the app's directory, root only
   {
     echo "# Written by eirl-encoderd (the encoder's management app). Do not edit by hand: it is overwritten."
-    echo "# Migrated from $DEF on $stamp."
+    if [ -n "$new_device" ]; then
+      echo "# Created by install.sh on $stamp (a new device)."
+    else
+      echo "# Migrated from $DEF on $stamp."
+    fi
     echo "EIRL_MANAGED_BY=local"
     for k in $KEYS; do echo "$k=${val[$k]}"; done
   } > "$tmp"
   # Written AS THE APP'S USER (see step 2)
   as_app sh -c 't=$(mktemp "$1/.engine.env.XXXXXX") && cat > "$t" && chmod 0640 "$t" && mv -f "$t" "$1/engine.env"' sh "$CONF" < "$tmp"
   rm -f "$tmp"
-  if [ -f "$DEF" ]; then
+  if [ -n "$new_device" ]; then
+    echo "new device: $APPENV created with the output off"
+  else
     cp -p "$DEF" "$DEF.bak-$stamp"
     for k in $KEYS; do
       sed -i -E "s|^([[:space:]]*$k=)|# (migrated to $APPENV) \1|" "$DEF"
     done
+    echo "destination migrated to $APPENV (copy of $DEF in $DEF.bak-$stamp)"
   fi
-  echo "destination migrated to $APPENV (copy of $DEF in $DEF.bak-$stamp)"
 fi
 # Files of earlier versions (0600): the engine reads them through the group
 as_app chmod 0640 "$APPENV" "$CONF/admin.hash" 2>/dev/null || true
+
+# 7a. The engine's board settings (its EnvironmentFile; root:root 0644, never in a directory the app can
+#     write: MANAGER.md §5). Only when missing, after step 7 has seen there was nothing to migrate; it is
+#     never overwritten. Without it the engine would start on its built-in defaults (the test bars).
+if [ ! -e "$DEF" ]; then
+  put 0644 "$D/eirl-engine.default" "$DEF"
+  echo "created $DEF (the engine's board settings)"
+fi
 
 # 7b. Boot splash (SPLASH.md). Idempotent: with everything up to date it does not touch /boot; if the
 #     extlinux entry changes, it copies it first. Restarts nothing: it shows at the next boot.
@@ -379,13 +440,20 @@ for f in BUILD files.txt VERSION; do [ -f "$SRC/$f" ] && put 0644 "$SRC/$f" "$LI
 
 # 8. App
 systemctl enable eirl-encoderd.service >/dev/null 2>&1
-systemctl restart eirl-encoderd.service
+[ -n "$IMAGE" ] || systemctl restart eirl-encoderd.service
 
 # 8b. Network of the cameras as their files ask (without cameras: nothing). At boot eirl-ap.service does it
 if [ -x /usr/local/sbin/eirl-netsetup ]; then
   systemctl enable eirl-ap.service >/dev/null 2>&1
-  systemctl start eirl-ap.service || true
-  echo "network cameras: $(cat /run/eirl-ap/state.json 2>/dev/null)"
+  if [ -z "$IMAGE" ]; then
+    systemctl start eirl-ap.service || true
+    echo "network cameras: $(cat /run/eirl-ap/state.json 2>/dev/null)"
+  fi
+fi
+
+if [ -n "$IMAGE" ]; then
+  echo "image: release $(head -1 "$LIB/VERSION" 2>/dev/null || echo '?') installed; its services start at the first boot"
+  exit 0
 fi
 
 # 9. The engine applies a new drop-in or new files when it restarts

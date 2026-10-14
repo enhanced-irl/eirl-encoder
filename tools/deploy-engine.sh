@@ -20,7 +20,9 @@
 # - It leaves in /usr/lib/eirl-encoder/engine/VERSION what was installed (commit, branch, whether there
 #   were uncommitted changes, who and when).
 # - It checks that eirl-engine is active again, with no panic at start-up.
-# It does not touch /etc/default/eirl-engine, the EDID files or the app (manager/build.sh).
+# - It installs the EDID files next to the engine (build/edid.sh, from edid/*.hex): eirl-hdmi-init.sh loads one
+#   at boot and the engine when the preferred mode changes.
+# It does not touch /etc/default/eirl-engine or the app (manager/build.sh).
 set -euo pipefail
 HOST=${JETSON:-jetson}
 cd "$(dirname "$0")/.."
@@ -42,6 +44,7 @@ case "${1:-}" in
   --no-restart) UNIT=1; RESTART=0 ;;
 esac
 build/engine.sh >/dev/null   # engine tests + build/out/eirl-engine (cgo, arm64)
+build/edid.sh >/dev/null     # build/out/edid-*.bin, from edid/*.hex
 
 ver="$(git rev-parse --short HEAD) $(git rev-parse --abbrev-ref HEAD)"
 git diff --quiet HEAD -- scripts/ manager/ || ver="$ver +uncommitted changes"
@@ -52,14 +55,19 @@ FILES644=""   # none today (the Python engine had its modules here)
 # The Python engine's files (retired on Oct 14): removed from the board, with their .bak copies
 RETIRED="eirl-engine.sh engine-run.py engine_mixer.py engine_output.py engine_audio.py engine_phones.py engine_usb.py engine_net.py engine_app.py eirl-logo.png __pycache__"
 UNITS="eirl-engine.service eirl-hdmi-init.service"
+# The EDIDs of the TC358743 (build/edid.sh → build/out; data, 0644). The modes are the app's (config.EDIDModes)
+EDIDS="edid-1080p30-lpcm48k.bin edid-1080p50-lpcm48k.bin edid-720p60-lpcm48k.bin"
+# (tools/release.sh reads FILES755, FILES644, RETIRED, UNITS and EDIDS from here: one list for both)
 tmp=$(ssh "$HOST" mktemp -d /tmp/eirl-engine.XXXXXX)
 # shellcheck disable=SC2086
 scp -q $(for f in ${FILES755/ eirl-engine-go/}; do printf 'scripts/%s ' "$f"; done) "$HOST:$tmp/"
 scp -q build/out/eirl-engine "$HOST:$tmp/eirl-engine-go"
 # shellcheck disable=SC2086
+scp -q $(for f in $EDIDS; do printf 'build/out/%s ' "$f"; done) "$HOST:$tmp/"
+# shellcheck disable=SC2086
 [ "$UNIT" = 1 ] && scp -q $(for u in $UNITS; do printf 'systemd/%s ' "$u"; done) "$HOST:$tmp/"
 
-ssh "$HOST" bash -s -- "$tmp" "'$ver'" "'$FILES755'" "'$FILES644'" "$UNIT" "$RESTART" "'$UNITS'" "$DEST" "'$RETIRED'" <<'EOF'
+ssh "$HOST" bash -s -- "$tmp" "'$ver'" "'$FILES755'" "'$FILES644 $EDIDS'" "$UNIT" "$RESTART" "'$UNITS'" "$DEST" "'$RETIRED'" <<'EOF'
 set -eu
 tmp=$1; ver=$2; f755=$3; f644=$4; unit=$5; restart=$6; units=$7; D=$8; retired=$9
 # Streaming? With the current name and with the old one (a board not migrated yet)
