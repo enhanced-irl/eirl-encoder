@@ -106,7 +106,7 @@ func TestSourcesPage(t *testing.T) {
 	}
 	// Leaving the page drops unsaved edits
 	h.u.srcEdit()[2].Assign = "off"
-	h.press("s_page_about", 0.1)
+	h.openPage("about")
 	if h.u.srcDraft != nil {
 		t.Fatal("the draft stays on another page")
 	}

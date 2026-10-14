@@ -6,6 +6,8 @@
 #
 #   JETSON=jetson ./build/build.sh        → artefactos en build/out/
 #
+# It also builds the cellular modem modules into build/out/modules/ (MODEMS.md §4).
+#
 # Variables: JETSON (host ssh, para leer /proc/config.gz la primera vez), CACHE (descargas),
 # OUT (salida). El volumen Docker "l4t-src" guarda fuentes y kernel compilado (~3 GB).
 set -euo pipefail
@@ -51,6 +53,24 @@ cp $K/drivers/media/i2c/tc358743.c $K/drivers/media/i2c/tc358743_regs.h /proj/dr
 (cd /tmp/mod && patch -s tc358743.c < /proj/driver/tc358743-jetson.patch)
 mk M=/tmp/mod modules 2>&1 | grep -vi "clock skew\|modification time" || true
 cp /tmp/mod/tc358743.ko /out/
+
+echo "== modem modules (MODEMS.md §4)"
+# qmi_wwan, cdc_mbim and huawei_cdc_ncm are not set in the board config, and option lacks the 5G
+# Quectel IDs: built from the same sources, installed under /lib/modules/<release>/updates/ so they
+# take precedence over the stock option.ko.
+rm -rf /tmp/modem && mkdir /tmp/modem
+cp $K/drivers/net/usb/qmi_wwan.c $K/drivers/net/usb/cdc_mbim.c $K/drivers/net/usb/huawei_cdc_ncm.c \
+   $K/drivers/usb/serial/option.c $K/drivers/usb/serial/usb-wwan.h /proj/driver/modems/Makefile /tmp/modem/
+(cd /tmp/modem && patch -s qmi_wwan.c < /proj/driver/modems/qmi_wwan-ids.patch \
+  && patch -s option.c < /proj/driver/modems/option-ids.patch)
+mk M=/tmp/modem modules 2>&1 | grep -vi "clock skew\|modification time" || true
+# The pipe hides the status of make: check every module was built, and never leave an older one behind
+rm -rf /out/modules && mkdir -p /out/modules
+for m in qmi_wwan cdc_mbim huawei_cdc_ncm option; do
+  [ -f /tmp/modem/$m.ko ] || { echo "modem module $m.ko was not built"; exit 1; }
+  cp /tmp/modem/$m.ko /out/modules/
+done
+for m in /out/modules/*.ko; do printf "%s: " "$(basename $m)"; modinfo -F vermagic $m; done
 
 echo "== DTB b00 + TC358743 en CAM1"
 P=/src/hardware/nvidia/platform/t210/porg/kernel-dts

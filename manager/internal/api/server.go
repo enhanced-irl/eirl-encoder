@@ -20,6 +20,7 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/config"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/device"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/hw"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/links"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/mixer"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/network"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/service"
@@ -64,6 +65,9 @@ type Server struct {
 	ABRPath string
 	// Uplinks: internet uplinks for SRTLA (nil = no uplinks card)
 	Uplinks *uplinks.Reader
+	// Links: the 2-second round that judges every link and watches the modems (MODEMS.md §4); with it,
+	// /status serves its cached snapshot. nil = /status reads the uplinks itself, and no modems
+	Links *links.Service
 	// Sources: detection of video and audio sources (nil = GET /sources answers 503)
 	Sources *sources.Scanner
 	// VideoPath: /run/eirl-engine/video, the real capture fps (written by the engine)
@@ -107,12 +111,17 @@ type Server struct {
 	lan   lanNets
 	// mux: the route table (Handler); the local socket forwards its whitelist to it
 	mux *http.ServeMux
-	// setupMu serialises the first password; codeLimit: attempts at the setup code (like the login)
-	setupMu   sync.Mutex
-	codeLimit attemptLimiter
+	// setupMu serialises the first password; codeLimit: attempts at the setup code (like the login);
+	// passwordLimit: attempts at the current password of PUT /password (the web's IP, or the screen)
+	setupMu       sync.Mutex
+	codeLimit     attemptLimiter
+	passwordLimit attemptLimiter
 }
 
 const cookieName = "eirl_sess"
+
+// maxBody: the body limit of a mutation (web and local socket), except /live.
+const maxBody = 16 << 10
 
 func (s *Server) Handler() http.Handler {
 	s.hub = newHub(s)
@@ -139,6 +148,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/destination", s.putDestination)
 	mux.HandleFunc("PUT /api/v1/output", s.putOutput)
 	mux.HandleFunc("PUT /api/v1/uplinks/{name}", s.putUplink)
+	mux.HandleFunc("GET /api/v1/modems", s.getModems)
 	mux.HandleFunc("PUT /api/v1/input", s.putInput)
 	mux.HandleFunc("GET /api/v1/sources", s.getSources)
 	mux.HandleFunc("POST /api/v1/service/{action}", s.serviceAction)
@@ -393,7 +403,7 @@ func csrf(next http.Handler) http.Handler {
 			fail(w, r, 415, "content_type", "access.content_type")
 			return
 		}
-		limit := int64(16 << 10)
+		limit := int64(maxBody)
 		if r.URL.Path == "/api/v1/live" {
 			limit = 64 << 10 // a Chrome SDP offer with audio and video is about 6 KB
 		}

@@ -30,7 +30,7 @@ import (
 type Uplink struct {
 	Name     string `json:"name"`
 	IP       string `json:"ip"`
-	Kind     string `json:"kind"`     // ethernet | usb | wifi
+	Kind     string `json:"kind"`     // ethernet | usb | wifi | modem (modem: set by internal/links, MODEMS.md)
 	InUse    bool   `json:"inUse"`    // the running stream uses it
 	Disabled bool   `json:"disabled"` // disabled from the app
 	// Conflict: same IP as another link (two factory-default HiLink modems both hand out 192.168.8.100).
@@ -40,8 +40,30 @@ type Uplink struct {
 	// NoInternet: the Wi-Fi client is connected to a network without internet access (a captive portal):
 	// left out of the SRTLA share until it comes back (WIFI.md §13). The app decides it, not the user
 	NoInternet bool `json:"noInternet,omitempty"`
-	TxKbps     int  `json:"txKbps"` // upload since the previous read (0 on the first)
-	RxKbps     int  `json:"rxKbps"`
+	// TxKbps and RxKbps: over the last sample, at least MinSample long (0 on the first); every caller sees the same
+	TxKbps int `json:"txKbps"`
+	RxKbps int `json:"rxKbps"`
+	// Set by internal/links (MODEMS.md §4-5); absent from an app without it.
+	// Label: the modem's operator (or its alias); empty = the client names it by its kind
+	Label string `json:"label,omitempty"`
+	// Health: good | weak | bad | off, and HealthCode why (internal/linkhealth): the dot's colour
+	Health     string `json:"health,omitempty"`
+	HealthCode string `json:"healthCode,omitempty"`
+	// ModemID: the modem behind this link (Status.Modems), if any
+	ModemID string `json:"modemId,omitempty"`
+}
+
+// Addr: an available link's interface and IPv4.
+type Addr struct{ Name, IP string }
+
+// Addrs: the available links (only reads the dispatcher's file, in tmpfs).
+func (r *Reader) Addrs() []Addr {
+	pairs, _ := readPairs(r.Available)
+	out := make([]Addr, 0, len(pairs))
+	for _, p := range pairs {
+		out = append(out, Addr{Name: p.name, IP: p.ip})
+	}
+	return out
 }
 
 var reName = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,15}$`)
@@ -61,7 +83,7 @@ type Reader struct {
 	SysNet     string // /sys/class/net
 
 	mu   sync.Mutex
-	prev map[string]counters
+	prev map[string]sample
 
 	wmu sync.Mutex // serializes SetDisabled (read, change and write the file)
 }
@@ -70,6 +92,18 @@ type counters struct {
 	tx, rx uint64
 	at     time.Time
 }
+
+// sample: an uplink's baseline (the counters it was taken with) and the rates computed then, in kbps.
+type sample struct {
+	base   counters
+	tx, rx int
+}
+
+// MinSample: a new baseline for the rates is only taken this long after the previous one. Several callers read at
+// once (the web's SSE every 2 s, the screen's GET /status every 2 s, the cloud): with the delta since the LAST call,
+// each one would see a shorter interval and the rates would jump around or read 0. A call sooner than this gets the
+// rates computed last time and does not move the baseline.
+const MinSample = 1500 * time.Millisecond
 
 // Read returns the available links (nil if no dispatcher is installed). inUse: whether the running
 // stream goes over SRTLA (otherwise /run/eirl-engine/uplinks is from another run and does not count).
@@ -99,24 +133,38 @@ func (r *Reader) Read(now time.Time, inUse bool) []Uplink {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	next := map[string]counters{}
+	next := map[string]sample{}
 	out := make([]Uplink, 0, len(avail))
 	for _, p := range avail {
 		u := Uplink{Name: p.name, IP: p.ip, Kind: r.kind(p.name), InUse: used[p.name], Disabled: off[p.name], Conflict: p.conflict,
 			NoInternet: nonet[p.name]}
-		c, ok := r.counters(p.name, now)
-		if ok {
-			next[p.name] = c
-			if pc, had := r.prev[p.name]; had && c.at.After(pc.at) && c.tx >= pc.tx && c.rx >= pc.rx {
-				secs := c.at.Sub(pc.at).Seconds()
-				u.TxKbps = int(float64(c.tx-pc.tx) * 8 / 1000 / secs)
-				u.RxKbps = int(float64(c.rx-pc.rx) * 8 / 1000 / secs)
-			}
+		if c, ok := r.counters(p.name, now); ok {
+			sm := nextSample(r.prev[p.name], c)
+			next[p.name] = sm
+			u.TxKbps, u.RxKbps = sm.tx, sm.rx
 		}
 		out = append(out, u)
 	}
 	r.prev = next
 	return out
+}
+
+// nextSample: the sample after reading c. The first one (zero prev) has no rates; one less than MinSample after the
+// baseline keeps it, with its rates; after that, the rates since the baseline and c as the new one. Counters that went
+// back (the interface was reset) or a clock that went back: c as the new baseline, without rates.
+func nextSample(prev sample, c counters) sample {
+	if prev.base.at.IsZero() {
+		return sample{base: c}
+	}
+	d := c.at.Sub(prev.base.at)
+	switch {
+	case d >= 0 && d < MinSample:
+		return prev
+	case d < 0 || c.tx < prev.base.tx || c.rx < prev.base.rx:
+		return sample{base: c}
+	}
+	secs := d.Seconds()
+	return sample{base: c, tx: int(float64(c.tx-prev.base.tx) * 8 / 1000 / secs), rx: int(float64(c.rx-prev.base.rx) * 8 / 1000 / secs)}
 }
 
 // AvailableNames: names of the available links (only reads the dispatcher's file, in tmpfs).

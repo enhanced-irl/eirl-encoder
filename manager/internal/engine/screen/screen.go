@@ -68,7 +68,7 @@ type Host interface {
 	BaseTime() uint64
 	// AttachScreen: the screen's pipeline is PLAYING. The engine points each slot's bridge at mvs[i]
 	// (SetScreen(mvs[i], MVGap)), pushes black into those without a source (attach_screen), and sends pgmtap to
-	// mvp through a BridgeShared bridge with Extra = latency + MVMargin.
+	// mvp through a BridgeShared bridge with Extra = ProgramDelay(latency).
 	AttachScreen(mvs []gst.Element, mvp gst.Element)
 	// DetachScreen: before the pipeline closes; once it returns no bridge pushes into it. Neither this nor
 	// AttachScreen may wait for the engine's actor (Stop may be called from it).
@@ -85,6 +85,7 @@ type Options struct {
 	// The program: slots, size, rate and latency (MIXER_LATENCY)
 	Slots, Width, Height, FPS int
 	Latency                   time.Duration
+	Sync                      time.Duration // MIXER_SYNC: sizes the tiles' delay queues
 	// RunDir: where screen.jpg goes ("" = no snapshot)
 	RunDir string
 	// PauseSupported: the program has the Pause layer
@@ -101,6 +102,8 @@ type Options struct {
 	SysRoot string
 	// WifiFile: wifi.json for an older app ("" = appapi.WiFiFile)
 	WifiFile string
+	// LinksFile: the app's links.json, the header's dots (MODEMS.md §6; "" = appapi.LinksFile)
+	LinksFile string
 }
 
 // Info is the screen's part of the published state.
@@ -179,6 +182,7 @@ func New(o Options) *Screen {
 	u := ui.New(nil, o.Strings, o.Net)
 	u.Fonts, u.Levels, u.Logo, u.PauseSupported = fonts, o.Host, ui.DefaultLogo(), o.PauseSupported
 	u.LinkInfo, u.Sensors, u.Legacy = o.Host.LinkInfo, sensors.Read, legacyWifi(o.WifiFile)
+	u.Links = linkDots(o.LinksFile)
 	u.State = StateOff
 	u.Send = func(c ui.Command) {
 		select {
@@ -445,7 +449,7 @@ func (s *Screen) show(w, h int) string {
 	tShow := time.Now()
 	o := s.o
 	lay := ui.NewLayout(w, h, o.Slots)
-	desc := Describe(o.Platform, lay, Pipeline{Width: o.Width, Height: o.Height, FPS: o.FPS, Latency: o.Latency,
+	desc := Describe(o.Platform, lay, Pipeline{Width: o.Width, Height: o.Height, FPS: o.FPS, Latency: o.Latency, Sync: o.Sync,
 		Snapshot: o.RunDir != ""})
 	p, err := o.Media.Parse("screen", desc)
 	if err != nil {
@@ -460,6 +464,10 @@ func (s *Screen) show(w, h int) string {
 	mvs := make([]gst.Element, o.Slots)
 	for i := range mvs {
 		mvs[i] = p.ByName(fmt.Sprintf("mvs%d", i))
+		// The tile as late as the program: the same frame of a source on its tile and on the program
+		if q := p.ByName(fmt.Sprintf("mvd%d", i)); q == nil || !q.SetPadOffset("src", TileDelay(o.Latency, o.FPS)) {
+			elog.Event("mixer", "screen_tile_delay_missing", "tile", i)
+		}
 	}
 	s.mu.Lock()
 	s.w, s.h = w, h

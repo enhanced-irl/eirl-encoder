@@ -14,10 +14,15 @@ import (
 // its unit). No session or CSRF: the socket's permissions are the authentication. Only the whitelisted routes, with
 // the same handlers, validation and errors as the web; the rest, 403 local_forbidden. Restart and power off do NOT go
 // through here (they stay in screen.power): they must work even if the API hangs.
+//
+// Since Oct 14 everything the web configures can be configured on the screen (the owner's decision), secrets
+// included: the screen shows them as dots and reveals them with an eye button, through the two local-only routes
+// below. The screen is physical access: it already shows the Wi-Fi password and the setup code, and the engine
+// already holds the stream key to stream it.
 
 // localRoutes: the whitelist, as method and path patterns of the route table (Handler), where the request is
-// forwarded. Every route was reviewed for secrets before being added (SETUP.md §8): the Wi-Fi credentials have their
-// own handler below (without the cameras' keys); the rest carry nothing secret.
+// forwarded. Every route was reviewed before being added (SETUP.md §8): what secret it returns and what it can break.
+// The secrets in clear only come from the local-only routes registered in LocalHandler.
 var localRoutes = []string{
 	// Board network and Wi-Fi (WIFI.md §5; the password typed on the screen goes straight to NetworkManager)
 	"GET /api/v1/network", "PUT /api/v1/network", "PUT /api/v1/network/ap", "PUT /api/v1/network/lan",
@@ -33,9 +38,23 @@ var localRoutes = []string{
 	"GET /api/v1/sources/slots", "PUT /api/v1/sources/slots",
 	// Updates (UPDATES.md; the handlers are the updater's). Until they exist, the route table answers 404
 	"GET /api/v1/update", "POST /api/v1/update/check", "POST /api/v1/update/install",
-	// Linking with EnhancedIRL from the wizard: the state and the pairing code (?qr=rows: its QR in rows). Never the
-	// token or the pollSecret (cloud.View does not carry them). Unlinking stays in the web
-	"GET /api/v1/cloud", "POST /api/v1/cloud/pair",
+	// Linking with EnhancedIRL: the state and the pairing code (?qr=rows: its QR in rows), and unlinking or cancelling a
+	// code. Never the token or the pollSecret (cloud.View does not carry them)
+	"GET /api/v1/cloud", "POST /api/v1/cloud/pair", "DELETE /api/v1/cloud",
+	// The stream destination. GET masks the key as on the web; its value in clear is /destination/secrets (below)
+	"GET /api/v1/destination", "PUT /api/v1/destination",
+	// The status snapshot (uplinks, the saved input, pendingRestart, transport): the same as the web's SSE, without
+	// secrets (collect: no destination, no key, no Wi-Fi password)
+	"GET /api/v1/status",
+	// SRTLA uplinks, the input and the sources it can be
+	"PUT /api/v1/uplinks/{name}", "PUT /api/v1/input", "GET /api/v1/sources",
+	// "Apply" of saved changes (the web's pending banner). Only restart: starting and stopping the engine stay in
+	// the web. It restarts the engine, so the screen that asks for it does not see the answer
+	"POST /api/v1/service/restart",
+	// Network cameras: add, rename or new key, remove. Their answers carry the camera's URLs with its key, as on the web
+	"POST /api/v1/cameras", "PATCH /api/v1/cameras/{id}", "DELETE /api/v1/cameras/{id}",
+	// The admin password, with the current one (no session to keep: every web session is closed)
+	"PUT /api/v1/password",
 }
 
 // LocalHandler: the handler of the local socket. Handler must have been called (it builds the route table).
@@ -48,12 +67,59 @@ func (s *Server) LocalHandler() http.Handler {
 	for _, p := range localRoutes {
 		mux.Handle(p, routes)
 	}
-	// Only the Wi-Fi: the cameras' keys are not shown on the screen (they go to the web, with a session)
-	mux.HandleFunc("GET /api/v1/network/credentials", s.getWiFiCredentials)
+	// Local-only (never on the web): what the screen's eye buttons reveal
+	mux.HandleFunc("GET /api/v1/network/credentials", s.getLocalCredentials)
+	mux.HandleFunc("GET /api/v1/destination/secrets", s.getDestinationSecrets)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, 403, "local_forbidden", "access.local_forbidden")
 	})
-	return s.logLocal(securityHeaders(s.withLang(markLocal(mux))))
+	return s.logLocal(securityHeaders(s.withLang(markLocal(limitBody(mux)))))
+}
+
+// limitBody: the web's body limit for mutations (csrf), over the socket too: what comes from the engine is bounded.
+func limitBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// getLocalCredentials: GET /network/credentials over the socket. Only the Wi-Fi ({"wifi": …}, the screen's Wi-Fi
+// panel); with ?cameras=1, the same as the web (the Wi-Fi and every camera's URLs with their keys), for a camera's
+// eye button. ?qr=rows works in both (wifi.qrRows); the screen draws a camera's QR from its URL.
+func (s *Server) getLocalCredentials(w http.ResponseWriter, r *http.Request) {
+	cameras := false
+	switch r.URL.Query().Get("cameras") {
+	case "":
+	case "1":
+		cameras = true
+	default:
+		fail(w, r, 400, "bad_request", "network.bad_cameras")
+		return
+	}
+	cr, ok := s.credentials(w, r)
+	switch {
+	case !ok:
+	case cameras:
+		writeJSON(w, 200, cr)
+	default:
+		writeJSON(w, 200, map[string]any{"wifi": cr.WiFi})
+	}
+}
+
+// getDestinationSecrets: GET /destination/secrets, only over the socket: the stream key and the passphrase in clear
+// ("" when unset), for the screen's eye button. Also with the destination managed by EnhancedIRL (the owner's
+// decision: the screen shows everything; the web never reveals them). no-store, and never logged.
+func (s *Server) getDestinationSecrets(w http.ResponseWriter, r *http.Request) {
+	cfg, err := s.Config.Load()
+	if err != nil {
+		fail(w, r, 500, "internal", "config.read_failed")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, 200, map[string]string{"streamId": cfg.StreamID, "passphrase": cfg.Passphrase})
 }
 
 type localKey struct{}

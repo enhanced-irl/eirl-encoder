@@ -35,6 +35,12 @@ var puts = map[string][2]string{
 // Connect and forget, with {"ssid"} (and the password).
 var posts = map[string]string{"connect": "/network/wifi/connect", "forget": "/network/wifi/forget"}
 
+// netActions are the device API's actions (MIXER.md §21) that change the network: when one ends, GET /network and
+// the Wi-Fi to join are asked again at once (a camera added or removed, a new Wi-Fi password, a switch…) instead of
+// at the next poll.
+var netActions = map[string]bool{"cam_add": true, "cam_rename": true, "cam_rotate": true, "cam_remove": true,
+	"ap_enabled": true, "ap_channel": true, "ap_rotate": true, "lan_enabled": true}
+
 // APIState says whether the app answers (Python NetState.api: None, True, False). It also holds whether the app has
 // GET /network/wifi (Python wifi_api).
 type APIState int8
@@ -147,6 +153,7 @@ type NetState struct {
 	want     *Change
 	secret   secret // the password of a queued connect, only until it is sent (not in Snapshot)
 	kick     bool
+	lastAct  *ui.AppResult // the device API's last result seen (devChanged)
 }
 
 // New makes a NetState for the app at sock ("" = Sock). changed may be nil. Start runs it.
@@ -160,13 +167,32 @@ func New(changed func(), sock string) *NetState {
 	ctx, cancel := context.WithCancel(context.Background())
 	lang := &language{}
 	n := &NetState{
-		changed: changed, sock: sock, lang: lang, dev: NewDeviceState(changed, sock, lang),
+		changed: changed, sock: sock, lang: lang,
 		getTimeout: GetTimeout, putTimeout: PutTimeout, postTimeout: PostTimeout,
 		ctx: ctx, cancel: cancel, wake: make(chan struct{}, 1), done: make(chan struct{}),
 		kick: true,
 	}
+	n.dev = NewDeviceState(func() { n.devChanged(); changed() }, sock, lang)
 	n.putFn, n.postFn = n.put, n.post
 	return n
+}
+
+// devChanged runs when the device API has news (from its goroutine, without its lock): after one of netActions,
+// the network is asked again now.
+func (n *NetState) devChanged() {
+	last := n.dev.AppSnapshot().Last
+	n.mu.Lock()
+	news := last != nil && last != n.lastAct && netActions[last.What]
+	if last != nil {
+		n.lastAct = last
+	}
+	if news {
+		n.kick = true
+	}
+	n.mu.Unlock()
+	if news {
+		n.poke()
+	}
 }
 
 // Start runs the polling goroutine (once), and the device API's.

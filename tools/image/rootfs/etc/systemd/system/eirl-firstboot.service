@@ -1,0 +1,19 @@
+[Unit]
+Description=EnhancedIRL image: first boot (grow the card, host name)
+Documentation=https://github.com/enhanced-irl/eirl-encoder/blob/main/IMAGE.md
+# Until both steps are done (each has its own marker; this one is written when both are)
+ConditionPathExists=!/var/lib/eirl-image/firstboot.done
+DefaultDependencies=no
+After=local-fs.target systemd-remount-fs.service eirl-splash.service
+Before=network-pre.target NetworkManager.service avahi-daemon.service eirl-encoderd.service eirl-engine.service eirl-hdmi-init.service eirl-splash-quit.service nvfb.service multi-user.target shutdown.target
+Wants=network-pre.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/eirl-image/eirl-firstboot
+TimeoutStartSec=10min
+
+[Install]
+WantedBy=multi-user.target

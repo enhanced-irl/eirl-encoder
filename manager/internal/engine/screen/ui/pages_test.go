@@ -19,7 +19,7 @@ func pagesHarness(t *testing.T, page string) (*harness, *fakeApp) {
 	h.u.App = app
 	h.net.snap.API, h.net.snap.Status = Yes, camStatus()
 	h.press("settings", 0.1)
-	h.press("s_page_"+page, 0.1)
+	h.openPage(page)
 	if h.u.settingsPage != page {
 		t.Fatalf("page %q", h.u.settingsPage)
 	}
@@ -29,7 +29,7 @@ func pagesHarness(t *testing.T, page string) (*harness, *fakeApp) {
 func TestSettingsPagesList(t *testing.T) {
 	h, app := pagesHarness(t, "wifi")
 	for _, p := range SettingsPages {
-		h.press("s_page_"+p, 0.1)
+		h.openPage(p)
 		h.u.Tick()
 		if h.u.settingsPage != p || !h.u.settingsOpen {
 			t.Fatalf("%s: page %q open %v", p, h.u.settingsPage, h.u.settingsOpen)
@@ -47,7 +47,7 @@ func TestSettingsPagesList(t *testing.T) {
 		t.Fatal("networks")
 	}
 	// In the network list only ← and X answer (the list's entries are not keys there)
-	h.press("s_page_about", 0.1)
+	h.press("s_page_system", 0.1)
 	if h.u.settingsPage != "wifi" || h.u.settingsView != "networks" {
 		t.Fatal("an entry answered in the network list")
 	}
@@ -223,8 +223,8 @@ func TestSettingsPagesLayout(t *testing.T) {
 		}
 		groups := map[string][]string{"list": nil, "language": nil, "time": nil, "zones": {"s_prev", "s_next"},
 			"updates": {"s_up_check", "s_up_install"}, "about": {"s_setup_again"}}
-		for _, p := range SettingsPages {
-			groups["list"] = append(groups["list"], "s_page_"+p)
+		for _, g := range SettingsGroups {
+			groups["list"] = append(groups["list"], "s_page_"+g.ID)
 		}
 		for _, c := range Languages {
 			groups["language"] = append(groups["language"], "s_lang_"+c)

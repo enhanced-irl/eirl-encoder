@@ -31,6 +31,9 @@ type UI struct {
 	Levels  Levels
 	// LinkInfo: the output's transport ("srt" | "srtla") and, with SRTLA, its uplinks (the header words them)
 	LinkInfo func() (transport string, links int)
+	// Links: the internet connections' dots for the header (the app's links.json, MODEMS.md §6), and whether they
+	// can be trusted now; nil or false: the header words the link as before («SRTLA · 2 links»).
+	Links func() ([]LinkDot, bool)
 	// Sensors: the CPU temperature (°C) and the board's input voltage (V), when known.
 	Sensors func() (temp float64, okTemp bool, volts float64, okVolts bool)
 	// Legacy: the board's wifi from wifi.json, for an older app without the local API (nil = none).
@@ -53,6 +56,7 @@ type UI struct {
 	hold         *hold
 	menuOpen     bool
 	settingsOpen bool
+	linksZone    Rect      // the header's dots, as last drawn: a tap there opens Settings › Streaming › Connections
 	settingsPage string    // the page on the right: SettingsPages (the last one stays)
 	settingsView string    // main | networks | zones | keyboard
 	pageSince    time.Time // when the page was opened: older results are not its own
@@ -85,6 +89,23 @@ type UI struct {
 	hint         string
 	hintUntil    time.Time
 	secretUntil  time.Time
+	// groupPage is the last page seen of each Settings group (its tab): the list's entry goes back to it
+	groupPage map[string]string
+	// chooser is the generic picker open in the page area (settingsView "pick")
+	chooser *picker
+	// reveal: the secrets whose eye is open, by their field's key. Closed when the page changes, Settings closes or
+	// the screen locks
+	reveal map[string]bool
+	pnote  pageNote // a page's own notice (pageNoteText)
+	// The state of each area's pages (their own files)
+	inp  inputState
+	camp camsState
+	aset audioSetState
+	dst  destState
+	acct accountState
+	// the uplink being switched (its row's switch halfway meanwhile) and to what
+	uplinkPend    string
+	uplinkPendOff bool
 
 	lastAppLang string    // the device language the app last said (a change there is applied once)
 	lastResult  time.Time // the last action result handled (a failed language change goes back)
@@ -108,13 +129,14 @@ type hold struct {
 	done  bool
 }
 
-// keyboard is the open keyboard: a secret (the wifi password; the wizard's web password) typed into buf, drawn
-// only as dots, which ONLY lives here; or a visible text (an alias, the device name, the AP's name) in text.
+// keyboard is the open keyboard: a secret (the wifi password; the wizard's web password; a stream key…) typed
+// into buf, drawn as dots unless its eye is open (show), which ONLY lives here; or a visible text (an alias, the
+// device name, the AP's name, a URL…) in text. The modes after the first ones are described by a spec (kbSpec).
 type keyboard struct {
-	mode   string // wifi | alias | name | ssid | webpw | webpw2
+	mode   string // wifi | alias | name | ssid | webpw | webpw2 | spec
 	ssid   string // wifi: the network
 	slot   int    // alias: the slot
-	buf    [PSKMax]byte
+	buf    []byte // a secret: PSKMax bytes, or its spec's max
 	n      int
 	first  [PSKMax]byte // webpw2: the web password typed the first time, to compare
 	firstN int
@@ -122,15 +144,35 @@ type keyboard struct {
 	max    int // the most characters (runes) of a visible text
 	layer  string
 	err    string
+	show   bool    // the secret's eye is open: its characters are drawn
+	spec   *kbSpec // mode spec
+}
+
+// kbSpec describes a keyboard of a page (MIXER.md §21): what it is for, what it takes and what OK does.
+type kbSpec struct {
+	title, help, ok string
+	secret          bool
+	max             int // the most runes (a text) or bytes (a secret)
+	min             int // OK needs at least this many
+	layer           string
+	// allow says which characters it takes (nil: all of the keyboard's)
+	allow func(r rune) bool
+	// done is OK with what was typed (text, or the secret's bytes: the callee copies what it keeps, the keyboard is
+	// wiped after); it returns the error to show, or "" to close the keyboard
+	done func(u *UI, text string, secret []byte) string
+	// cancel runs when the keyboard is closed with X (nil: nothing to undo)
+	cancel func(u *UI)
 }
 
 func (k *keyboard) chars() []byte { return k.buf[:k.n] }
 
-// secret: what is typed is drawn as dots and never kept anywhere else.
-func (k *keyboard) secret() bool { return k.mode == "wifi" || k.mode == "webpw" || k.mode == "webpw2" }
+// secret: what is typed is drawn as dots (unless its eye is open) and never kept anywhere else.
+func (k *keyboard) secret() bool {
+	return k.mode == "wifi" || k.mode == "webpw" || k.mode == "webpw2" || (k.spec != nil && k.spec.secret)
+}
 
 func (k *keyboard) wipe() {
-	clear(k.buf[:])
+	clear(k.buf)
 	k.n = 0
 	clear(k.first[:])
 	k.firstN = 0
@@ -203,9 +245,13 @@ func (u *UI) appWatch() AppWatch {
 		page = u.settingsPage
 	}
 	wiz := u.wizardOn()
-	return AppWatch{Device: u.settingsOpen || wiz, Setup: wiz, Update: page == "updates", Slots: page == "sources",
+	w := AppWatch{Device: u.settingsOpen || wiz, Setup: wiz, Update: page == "updates", Slots: page == "sources",
 		Zones: (u.settingsOpen || wiz) && u.settingsView == "zones", About: page == "about" || wiz,
 		Cloud: wiz && u.wizardStep() == "cloud"}
+	if p := pageDefs[page]; p != nil && p.watch != nil && !wiz {
+		p.watch(u, &w)
+	}
+	return w
 }
 
 // SetStatus takes the engine's newly published state (redraws on the next tick).
@@ -263,9 +309,21 @@ func (u *UI) CommandDone(c Command, ok bool, code string) {
 	switch c.Origin {
 	case "hold":
 		u.say(sprintf(u.Tx.CannotF, code), 3*time.Second)
+	case "page": // a Settings page's change: the page says it could not
+		u.notePage(sprintf(u.Tx.CannotF, u.commandError(code)), true)
+	case originAudioSet: // the audio view's settings: that view says it could not
+		u.audioSetRefused(c, code)
 	default:
 		elog.Event("mixer", "touch_command_failed", "x", c.X, "y", c.Y, "cmd", cmd, "error", code)
 	}
+}
+
+// commandError is an engine refusal's code in words (the code itself if it has none).
+func (u *UI) commandError(code string) string {
+	if t, ok := u.Tx.CmdErrors[code]; ok {
+		return t
+	}
+	return code
 }
 
 // OnTouch is a finger going down ("down") or up ("up", after held) at (fx, fy), in fractions of the screen.
@@ -293,7 +351,7 @@ func (u *UI) OnTouch(ev string, fx, fy float64, held time.Duration) {
 		snap := u.Net.Snapshot()
 		keys = u.settingsKeys(&snap)
 	}
-	h := lay.Hit(x, y, u.menuOpen, u.view, u.settingsOpen || u.wizardOn(), keys)
+	h := lay.Hit(x, y, u.menuOpen, u.hitView(), u.settingsOpen || u.wizardOn(), keys)
 	if h.Key == "a_follow" && u.st.audioMode() == "mix" {
 		h = Hit{} // «Sigue al vídeo» is not shown in the mix
 	}
@@ -346,9 +404,22 @@ func (u *UI) OnTouch(ev string, fx, fy float64, held time.Duration) {
 		u.openSettings(true)
 		return
 	}
+	if h.Kind == HitNone && u.linksZone.W > 0 && u.linksZone.Inside(x, y, 4) { // the header's dots → their tab
+		u.openSettings(true)
+		u.openPage("uplinks")
+		return
+	}
+	if u.view == "audioset" { // the audio view's settings (audioset.go)
+		u.audioSetTouch(h.Key, held, x, y)
+		return
+	}
 	if u.view == "audio" {
 		if h.Key == "a_back" {
 			u.view = "video"
+			return
+		}
+		if h.Key == "a_settings" {
+			u.openAudioSet()
 			return
 		}
 		if msg := AudioCommand(h.Key, y, u.st.Audio, lay); msg != nil {
@@ -403,6 +474,11 @@ func (u *UI) settingsTouch(ev string, h Hit, x, y int, now time.Time) {
 				u.pick, u.hasPick = u.candShown[i], true
 			}
 		}
+		if s, ok := strings.CutPrefix(h.Key, "s_pick_"); ok && u.chooser != nil {
+			if i, err := strconv.Atoi(s); err == nil && i < len(u.chooser.shown) {
+				u.pick, u.hasPick = u.chooser.shown[i], true
+			}
+		}
 		return
 	}
 	p := u.press
@@ -431,7 +507,9 @@ func (u *UI) settingsTouch(ev string, h Hit, x, y int, now time.Time) {
 	case what == "s_close" || (what == "" && !u.Lay.SettingsPanel.Inside(x, y, 0)):
 		u.openSettings(false)
 	case strings.HasPrefix(what, "s_page_"):
-		u.openPage(what[len("s_page_"):])
+		u.openGroup(what[len("s_page_"):])
+	case strings.HasPrefix(what, "s_tab_"):
+		u.openPage(what[len("s_tab_"):])
 	default:
 		u.pageTouch(what, pick, hasPick)
 	}
@@ -439,6 +517,16 @@ func (u *UI) settingsTouch(ev string, h Hit, x, y int, now time.Time) {
 
 // pageTouch is a tap on a page's button (Settings, and the wizard's pages).
 func (u *UI) pageTouch(what, pick string, hasPick bool) {
+	if u.settingsView == "pick" {
+		u.pickerTouch(what, pick, hasPick)
+		return
+	}
+	if p := pageDefs[u.settingsPage]; p != nil && p.touch != nil && !u.wizardOn() {
+		if p.touch(u, what) {
+			u.Dirty = true
+			return
+		}
+	}
 	if u.srcTouch(what, pick, hasPick) {
 		return
 	}
@@ -453,6 +541,12 @@ func (u *UI) pageTouch(what, pick string, hasPick bool) {
 		u.openNetworks()
 	case what == "s_ssid":
 		u.renameAP()
+	case what == wifiPwEye:
+		u.toggleWifiPw()
+	case what == "s_wifi_ch":
+		u.openChannelPicker()
+	case what == "s_wifi_rotate":
+		u.rotateWifi()
 	case what == "s_back" && u.settingsView == "zones":
 		u.settingsView = "main"
 	case what == "s_back":
@@ -517,9 +611,11 @@ func (u *UI) openSettings(on bool) {
 	u.settingsOpen = on
 	if !on { // closed: what was typed out of memory, and back to the page
 		u.kbClear()
-		u.settingsView, u.confirm = "main", nil
+		u.leavePage(u.settingsPage)
+		u.settingsView, u.confirm, u.chooser = "main", nil, nil
 		u.pick, u.hasPick = "", false
 		u.timeDraftSet, u.srcDraft = false, nil
+		clear(u.reveal)
 	} else {
 		u.pageSince = u.now()
 	}
@@ -527,7 +623,23 @@ func (u *UI) openSettings(on bool) {
 	u.Dirty = true
 }
 
-// openPage shows a Settings page (the list's entry).
+// openGroup shows a Settings group (the list's entry): the page of it last seen, else its first.
+func (u *UI) openGroup(id string) {
+	g := groupByID(id)
+	if g == nil {
+		return
+	}
+	page := g.Pages[0]
+	if p, ok := u.groupPage[id]; ok {
+		page = p
+	}
+	if cur := groupOf(u.settingsPage); cur != nil && cur.ID == id {
+		page = u.settingsPage // its own entry again: back to the page's main view (out of a sub-view)
+	}
+	u.openPage(page)
+}
+
+// openPage shows a Settings page (a list's entry or a tab).
 func (u *UI) openPage(page string) {
 	if page == u.settingsPage && u.settingsView == "main" {
 		return
@@ -535,9 +647,32 @@ func (u *UI) openPage(page string) {
 	if u.settingsView == "networks" {
 		u.Net.SetScan(false)
 	}
-	u.settingsPage, u.settingsView, u.confirm = page, "main", nil
+	if page != u.settingsPage {
+		u.leavePage(u.settingsPage)
+		clear(u.reveal)
+	}
+	u.settingsPage, u.settingsView, u.confirm, u.chooser = page, "main", nil, nil
 	u.pageSince, u.timeDraftSet, u.srcDraft = u.now(), false, nil
+	if g := groupOf(page); g != nil {
+		if u.groupPage == nil {
+			u.groupPage = map[string]string{}
+		}
+		u.groupPage[g.ID] = page
+	}
 	u.Dirty = true
+}
+
+// revealed: the secret of a field's eye is shown.
+func (u *UI) revealed(key string) bool { return u.reveal[key] }
+
+// toggleReveal opens or closes a secret's eye.
+func (u *UI) toggleReveal(key string) bool {
+	if u.reveal == nil {
+		u.reveal = map[string]bool{}
+	}
+	u.reveal[key] = !u.reveal[key]
+	u.Dirty = true
+	return u.reveal[key]
 }
 
 func (u *UI) kbClear() {
@@ -561,7 +696,7 @@ func (u *UI) closeNetworks() {
 
 func (u *UI) openKeyboard(ssid, err string) {
 	u.kbClear()
-	u.kb = &keyboard{mode: "wifi", ssid: ssid, layer: "lower", err: err}
+	u.kb = &keyboard{mode: "wifi", ssid: ssid, layer: "lower", err: err, buf: make([]byte, PSKMax)}
 	u.settingsView = "keyboard"
 	u.Net.SetScan(false) // while typing the list is not needed
 	u.Dirty = true
@@ -571,7 +706,27 @@ func (u *UI) openKeyboard(ssid, err string) {
 func (u *UI) openTextKeyboard(mode string, slot int, text string, maxLen int) {
 	u.kbClear()
 	r := []rune(text)
-	u.kb = &keyboard{mode: mode, slot: slot, text: r[:min(len(r), maxLen)], max: maxLen, layer: "lower"}
+	u.kb = &keyboard{mode: mode, slot: slot, text: r[:min(len(r), maxLen)], max: maxLen, layer: "lower",
+		buf: make([]byte, PSKMax)}
+	u.settingsView = "keyboard"
+	u.Dirty = true
+}
+
+// openSpecKeyboard opens a page's keyboard: a visible text starts with text; a secret, empty.
+func (u *UI) openSpecKeyboard(sp *kbSpec, text string) {
+	u.kbClear()
+	layer := sp.layer
+	if layer == "" {
+		layer = "lower"
+	}
+	kb := &keyboard{mode: "spec", spec: sp, max: sp.max, layer: layer}
+	if sp.secret {
+		kb.buf = make([]byte, sp.max)
+	} else {
+		r := []rune(text)
+		kb.text = r[:min(len(r), sp.max)]
+	}
+	u.kb = kb
 	u.settingsView = "keyboard"
 	u.Dirty = true
 }
@@ -596,6 +751,9 @@ func (u *UI) kbTouch(ev string, x, y int, held time.Duration) {
 		key := ""
 		if u.kb != nil {
 			key = u.Lay.KBHit(x, y, u.kb.layer)
+			if key == "k_eye" && !u.kb.secret() {
+				key = ""
+			}
 		}
 		u.press = nil
 		if key != "" {
@@ -620,7 +778,12 @@ func (u *UI) kbKey(key string, held time.Duration) {
 	}
 	switch key {
 	case "k_cancel":
+		if kb.spec != nil && kb.spec.cancel != nil {
+			kb.spec.cancel(u)
+		}
 		u.closeKeyboard()
+	case "k_eye":
+		kb.show = !kb.show
 	case "SHIFT":
 		if kb.layer == "lower" {
 			kb.layer = "upper"
@@ -650,8 +813,11 @@ func (u *UI) kbKey(key string, held time.Duration) {
 		if len(key) != 1 {
 			return
 		}
+		if kb.spec != nil && kb.spec.allow != nil && !kb.spec.allow(rune(key[0])) {
+			return
+		}
 		switch {
-		case kb.secret() && kb.n < PSKMax:
+		case kb.secret() && kb.n < len(kb.buf):
 			kb.buf[kb.n] = key[0]
 			kb.n++
 			kb.err = ""
@@ -665,6 +831,18 @@ func (u *UI) kbKey(key string, held time.Duration) {
 // kbSend is «OK»: each mode's.
 func (u *UI) kbSend() {
 	switch u.kb.mode {
+	case "spec":
+		kb := u.kb
+		if ok, _ := u.kbReady(); !ok || kb.spec.done == nil {
+			return
+		}
+		if e := kb.spec.done(u, strings.TrimSpace(string(kb.text)), kb.chars()); e != "" {
+			kb.err = e
+			return
+		}
+		if u.kb == kb { // done may have opened another keyboard (the next step): that one stays
+			u.closeKeyboard()
+		}
 	case "alias":
 		u.aliasDone()
 	case "wifi":
@@ -702,7 +880,7 @@ func (u *UI) renameAP() {
 	if !SSIDEditable(&snap) {
 		return
 	}
-	if snap.Pending != nil { // another change under way: it says so instead of a keyboard that could not send
+	if snap.Pending != nil || u.apBusy() { // another change under way: it says so instead of a keyboard that could not send
 		u.busySay(false)
 		return
 	}
@@ -789,15 +967,16 @@ func (u *UI) forgetNetwork(ssid string) {
 
 func (u *UI) toggleNet() {
 	snap := u.Net.Snapshot()
-	if st := snap.Status; st != nil && st.Cameras > 0 {
-		u.busySay(u.Net.SetEnabled(!st.Enabled))
+	if NetSwitch(&snap) {
+		u.busySay(u.Net.SetEnabled(!snap.Status.Enabled))
 	}
 }
 
 func (u *UI) toggleAP() {
 	snap := u.Net.Snapshot()
 	if APSwitch(&snap) {
-		u.busySay(u.Net.SetAP(snap.Status.AccessPoint.Policy != "always"))
+		u.busySay(!strings.HasPrefix(u.app().AppSnapshot().Pending, "ap_") &&
+			u.Net.SetAP(snap.Status.AccessPoint.Policy != "always"))
 	}
 }
 
@@ -862,9 +1041,22 @@ func (u *UI) settingsKeys(n *NetSnapshot) []string {
 		return append(keys, u.zoneKeys()...)
 	case "cands":
 		return append(keys, u.candKeys()...)
+	case "pick":
+		return append(keys, u.pickerKeys()...)
 	}
-	for _, p := range u.pages() {
-		keys = append(keys, "s_page_"+p)
+	if p := pageDefs[u.settingsPage]; p != nil && p.title != nil {
+		if _, _, sub := p.title(u); sub { // a page's own sub-view: only its buttons (its ← among them)
+			app := u.app().AppSnapshot()
+			return append(keys, p.keys(u, &app)...)
+		}
+	}
+	for _, g := range SettingsGroups {
+		keys = append(keys, "s_page_"+g.ID)
+	}
+	if g := groupOf(u.settingsPage); g != nil && len(g.Pages) > 1 {
+		for _, p := range g.Pages {
+			keys = append(keys, "s_tab_"+p)
+		}
 	}
 	return append(keys, u.pageKeys(u.settingsPage, n)...)
 }
@@ -873,6 +1065,12 @@ func (u *UI) settingsKeys(n *NetSnapshot) []string {
 func (u *UI) pageKeys(page string, n *NetSnapshot) []string {
 	var keys []string
 	app := u.app().AppSnapshot()
+	if p := pageDefs[page]; p != nil {
+		if p.keys != nil {
+			keys = p.keys(u, &app)
+		}
+		return keys
+	}
 	switch page {
 	case "wifi":
 		u.Lay.SettingsRows(ClientSwitch(n))
@@ -888,10 +1086,12 @@ func (u *UI) pageKeys(page string, n *NetSnapshot) []string {
 		if SSIDEditable(n) {
 			keys = append(keys, "s_ssid")
 		}
-	case "cams":
-		u.Lay.SettingsRows(ClientSwitch(n))
-		if NetSwitch(n) {
-			keys = append(keys, "s_net")
+		legacy := u.legacyCreds(n)
+		if u.wifiShown(n, legacy) {
+			keys = append(keys, wifiPwEye)
+		}
+		if u.wifiExtras(n, legacy) {
+			keys = append(keys, "s_wifi_ch", "s_wifi_rotate")
 		}
 	case "language":
 		if app.DeviceAPI == Yes && app.Device != nil {

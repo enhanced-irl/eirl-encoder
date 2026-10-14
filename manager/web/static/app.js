@@ -540,7 +540,9 @@ function renderLiveBtn() {
 
 // Internet uplinks (SRTLA). Only shown if the device has the uplinks dispatcher and the stream goes
 // (or will go) over SRTLA, or if there is more than one uplink: that is how one finds out it can.
-const KINDS = ['ethernet', 'usb', 'wifi'];
+const KINDS = ['ethernet', 'usb', 'wifi', 'modem'];
+// The levels of a link's dot (MODEMS.md §5); its codes are translated as health.<code>
+const HEALTH = ['good', 'weak', 'bad', 'off'];
 const kindLabel = (k) => (KINDS.includes(k) ? t('kind.' + k) : k);
 
 // --- Network cameras (F7, NETWORK_SOURCES.md §6.7 and §6.11) ---------------------------------
@@ -1273,7 +1275,10 @@ function renderUplinks(st, running) {
       const info = document.createElement('div');
       const name = document.createElement('span');
       name.className = 'name';
-      name.textContent = u.name;
+      const dot = document.createElement('i'); // the app's judgement of the link (MODEMS.md §5): its colour
+      dot.className = 'hdot';
+      dot.hidden = true;
+      name.append(dot, document.createElement('span'));
       const meta = document.createElement('span');
       meta.className = 'meta';
       info.append(name, meta);
@@ -1288,11 +1293,21 @@ function renderUplinks(st, running) {
     const [cb, info, rate] = li.children;
     li.className = u.disabled ? 'off' : '';
     if (!cb.disabled) cb.checked = !u.disabled; // disabled = being saved: what was tapped wins
-    info.lastChild.textContent = `${kindLabel(u.kind)} · ${u.ip}`;
-    // No internet (the client Wi-Fi behind a captive portal): out of the share until it comes back (WIFI.md §13)
-    rate.textContent = u.conflict ? t('uplinks.dupIp') : u.disabled ? t('uplinks.disabled') : u.noInternet ? t('uplinks.noInternet')
-      : live && !u.inUse ? t('common.connecting') : t('uplinks.rate', { v: num(u.txKbps / 1000, 1) });
-    rate.classList.toggle('warn', !!u.conflict || (!u.disabled && !!u.noInternet));
+    // A modem: its operator (or alias) as the title, its interface on the second line (MODEMS.md §4.2)
+    const [dot, title] = info.firstChild.children;
+    title.textContent = u.label || u.name;
+    info.lastChild.textContent = u.label ? `${kindLabel(u.kind)} · ${u.name}` : `${kindLabel(u.kind)} · ${u.ip}`;
+    const health = HEALTH.includes(u.health) ? u.health : '';
+    dot.hidden = !health;
+    dot.className = `hdot ${health}`;
+    dot.title = health ? t('health.' + (u.healthCode || 'ok')) : '';
+    // With the app's judgement, the reason of an amber or red dot; else (an older app) as before. No internet (the
+    // client Wi-Fi behind a captive portal): out of the share until it comes back (WIFI.md §13)
+    const why = (health === 'weak' || health === 'bad') && u.healthCode && u.healthCode !== 'ok' ? t('health.' + u.healthCode) : '';
+    rate.textContent = why || (u.conflict ? t('uplinks.dupIp') : u.disabled ? t('uplinks.disabled') : u.noInternet ? t('uplinks.noInternet')
+      : live && !u.inUse ? t('common.connecting') : t('uplinks.rate', { v: num(u.txKbps / 1000, 1) }));
+    rate.classList.toggle('warn', why ? health === 'weak' : !!u.conflict || (!u.disabled && !!u.noInternet));
+    rate.classList.toggle('bad', !!why && health === 'bad');
   });
 }
 

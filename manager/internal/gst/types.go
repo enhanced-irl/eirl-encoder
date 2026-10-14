@@ -1,6 +1,9 @@
 package gst
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 // The engine works against these interfaces: the real implementation is cgo (gst.go, linux only) and
 // the tests use internal/gst/fake. The constants are GStreamer's ABI values (checked against the C
@@ -61,6 +64,36 @@ type Media interface {
 	NewFeeder(appsrc Element, size, buffers int) Feeder
 	// NewTap attaches to an appsink for good: measures lateness and passes buffers untouched (headphones).
 	NewTap(appsink Element) Tap
+	// NewAnimator sets the compositor's pads sink_0 … sink_<pads-1> from its own thread (frame: the
+	// program's frame duration).
+	NewAnimator(comp Element, pads int, frame time.Duration) Animator
+}
+
+// Layer is where one compositor pad goes: its rectangle, alpha and zorder.
+type Layer struct {
+	X, Y, W, H int
+	Alpha      float64
+	Z          int
+}
+
+// Props are the compositor pad's properties for l, in their string form (Element.SetPad).
+func (l Layer) Props() [][2]string {
+	return [][2]string{{"xpos", strconv.Itoa(l.X)}, {"ypos", strconv.Itoa(l.Y)}, {"width", strconv.Itoa(l.W)},
+		{"height", strconv.Itoa(l.H)}, {"alpha", strconv.FormatFloat(l.Alpha, 'g', -1, 64)}, {"zorder", strconv.Itoa(l.Z)}}
+}
+
+// Animator sets the compositor's pads between two output frames, from the compositor's own thread (C, a
+// probe on its src pad): every property of every pad changes at once, and a fade moves one step per
+// output frame by the frame's timestamp, whatever the load on the engine's goroutines.
+type Animator interface {
+	// Play replaces whatever is playing. The probe after the next frame out of the compositor sets
+	// steps[0] (one Layer per pad) for the frame after it, then steps[k] for each following frame by its
+	// timestamp; the last step stays. One step is a cut.
+	Play(steps [][]Layer)
+	// Busy: a table is still being played (the program is not producing frames, or a fade is running).
+	Busy() bool
+	// Free once the compositor's pipeline is in NULL.
+	Free()
 }
 
 // Tap passes what reaches an appsink, untouched and by reference, to the current destination, and
@@ -112,6 +145,9 @@ type Element interface {
 	Set(prop, value string) bool
 	// SetPad sets a property of one of its pads (the compositor's sink_N: xpos, alpha…).
 	SetPad(pad, prop, value string) bool
+	// SetPadOffset shifts what goes through one of its pads that much later on the running time
+	// (gst_pad_set_offset); false if there is no such pad.
+	SetPadOffset(pad string, d time.Duration) bool
 	SetBool(prop string, v bool)
 	SetFloat(prop string, v float64)
 	// PullBytes takes the next appsink sample as bytes (JPEGs); nil after the timeout.

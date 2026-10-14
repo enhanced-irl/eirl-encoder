@@ -1,4 +1,4 @@
-> **Status:** PLAN (phase 0 decided on Oct 14; I1, the recipe and first image, is next)
+> **Status:** IN PROGRESS (I1 done on Oct 14: the recipe builds the image and its offline checks pass; I2 and I3, on a board, are next)
 > **Updated:** 2026-10-14
 
 # A minimal microSD image for the Jetson Nano
@@ -15,7 +15,7 @@ recipe (B0-B3), applied from scratch to NVIDIA's own base instead of by hand on 
 | Phase | Status | What |
 |---|---|---|
 | F0 Research and proposal | ✅ Oct 14 | This document; the maintainer's decisions are in §12 |
-| I1 Recipe and first image | — | `tools/image/`, the first image and the offline checks on the mounted image (§10.1) |
+| I1 Recipe and first image | ✅ Oct 14 | `tools/image/`: test and debug images of release 0.1.1, every offline check passes (§10.1) |
 | I2 First boot and uniqueness | — | Two boots from scratch: every per-device value is different (§10.2) |
 | I3 Test on a real card | — | On another microSD, never the test board's own card (§10.3) |
 | I4 Publish | — | Signed image on GitHub Releases, flashing and verification instructions (§10.4) |
@@ -42,7 +42,7 @@ is updated over the air). A new L4T or kernel means a new image and reflashing.
 | Root filesystem (p1 `APP`, physically the last partition, grown at first boot) | Ubuntu 18.04 arm64: `ubuntu-base-18.04.5` + the packages of `tools/image/packages.txt` from `ports.ubuntu.com` (§3.2) | Ubuntu base sha256; the exact package list with versions, checked on every build (bionic no longer changes in its public pockets) |
 | NVIDIA BSP | The `nvidia-l4t-*` packages of the Driver Package, installed with `apply_binaries.sh` (§3.3), minus the ones the encoder does not use | BSP sha256 `865717ee…0212` (279 MB) |
 | Kernel | NVIDIA's stock `Image` and `initrd` (package `nvidia-l4t-kernel`), **not rebuilt** | BSP |
-| Our kernel bits | `tc358743.ko` (patched, `driver/`) in `/lib/modules/4.9.337-tegra/extra/`, the B01 DTB with the TC358743 (`dt/`) in `/boot/`, an extlinux entry with that `FDT` (README, "Installing on the Jetson") | `build/build.sh` (kernel sources by sha256) |
+| Our kernel bits | `tc358743.ko` (patched, `driver/`) in `/lib/modules/4.9.337-tegra/extra/`; the cellular modem modules (`qmi_wwan`, `cdc_mbim`, `huawei_cdc_ncm`, `option` with the Quectel IDs: MODEMS.md §4) in `updates/eirl-modems/`, which wins over the kernel's own; the B01 DTB with the TC358743 (`dt/`) in `/boot/`; an extlinux entry with that `FDT` (README, "Installing on the Jetson") | `build/build.sh` (kernel sources by sha256) |
 | Our software | The **latest signed release** (the OTA bundle of UPDATES.md §4): downloaded, verified with `release/eirl-release.pub`, installed with its own `install.sh` in image mode (§3.4) | The release's signed manifest |
 | Fan | The kernel's own thermal control, until our own controller exists (§12, D-I7); temperatures measured in I3 | — |
 
@@ -59,8 +59,29 @@ TC358743 module, the DTB and the `tc358743` extlinux entry.
 
 ## 3. How it is built
 
-`tools/image/build.sh` (to be written in I1) runs every step in containers, from downloads pinned by sha256,
-and writes `build/out/image/<version>/`. Nothing is installed on the build machine.
+`tools/image/build.sh` runs every step in containers, from downloads pinned by sha256, and writes
+`build/out/image/`. Nothing is installed on the build machine.
+
+```bash
+# A test image (the board's firmware is only read) of the release in DIR (manifest.json, .sig and bundle):
+tools/image/build.sh --release DIR --test
+# A debug image for a board test: as --test, plus a key-only eirl-debug user and ssh on (never published):
+tools/image/build.sh --release DIR --debug-ssh-key ~/.ssh/id_ed25519.pub
+# A product image (the release must be signed with the production key; it can update the QSPI once, §4):
+tools/image/build.sh --release DIR
+```
+
+| File | What |
+|---|---|
+| `tools/image/build.sh` | The steps below, on the build machine: verifies the release (`eirl-release verify`), runs `build/build.sh` if the kernel bits are missing, downloads and checks the pinned inputs, runs the stages in a Docker volume |
+| `tools/image/pins.sh` | Every input: BSP and Ubuntu base (URL, sha256), the tool containers' base (by digest), kernel release |
+| `tools/image/Dockerfile`, `boot.Dockerfile` | The work containers: `linux/arm64` (root filesystem, assembly, checks) and `linux/amd64` (NVIDIA's i386 tools) |
+| `tools/image/stages/bootparts.sh` | The card's signed boot partitions with NVIDIA's `flash.sh --no-flash --sign` (§3.6) |
+| `tools/image/stages/rootfs.sh` | The root filesystem (§3.2-§3.6) |
+| `tools/image/stages/assemble.sh` | The card image and its `xz` (§3.6) |
+| `tools/image/stages/check.py` | The offline checks (§10.1); writes a report next to the image |
+| `tools/image/packages.txt`, `packages.lock` | What is installed, and the exact result with versions (a change fails the build until `--update-lock` and a review) |
+| `tools/image/rootfs/` | Files copied into the image: the first boot (`eirl-firstboot`, `eirl-firmware` and their unit), the persistent journal, NetworkManager's cable override |
 
 ### 3.1 Build host
 
@@ -115,8 +136,10 @@ same desktop. Starting from it means purging ~1,000 packages again, as B3 did on
 - Kept (20): `core`, `init`, `tools`, `firmware`, `xusb-firmware`, `initrd`, `configs`, `apt-source`,
   `bootloader`, `kernel`, `kernel-dtbs`, `libvulkan`, `wayland`, `x11`, `3d-core`, `cuda`, `multimedia-utils`,
   `multimedia`, `camera`, `gstreamer`. Left out (removed from the package folders before applying): `weston`,
-  `graphics-demos`, `oem-config`, `kernel-headers`, `jetson-io`, `gputools` and the `jetson-gpio` Python packages
-  (one needs python2). Nothing kept depends on them. The hardware encode chain (gstreamer → camera → multimedia →
+  `graphics-demos`, `oem-config`, `kernel-headers` (its package is in the BSP's `kernel/` folder), `jetson-io`,
+  `gputools` and the two `jetson-gpio` Python packages (one needs python2). `jetson-gpio-common` (udev rules and the
+  `gpio` group, no dependencies) stays: `nv-apply-debs.sh` copies `tools/*.deb` and fails if there is none. Nothing
+  kept depends on what is left out. The hardware encode chain (gstreamer → camera → multimedia →
   cuda → 3d-core) pulls X11, EGL, cairo and GTK **libraries** (36 direct Ubuntu dependencies, `libgtk-3-0` the
   biggest), not an X server.
 - `nvidia-l4t-cuda` is NVIDIA's driver library (`libcuda`, 16 MB), part of the Driver Package, and it cannot go:
@@ -125,9 +148,13 @@ same desktop. Starting from it means purging ~1,000 packages again, as B3 did on
 - 🪤 The `nvidia-l4t-init` postinst rewrites `/etc/fstab`, `/etc/hosts` and `/etc/hostname`: the system
   configuration (§3.5) goes **after** `apply_binaries.sh`.
 - `/etc/nv/nvfirstboot` stays in the image: at first boot NVIDIA's `nvfb-early` sets up the EGL/GL library
-  paths with it.
-- The apt sources (`nvidia-l4t-apt-source`) carry a `<SOC>` placeholder that NVIDIA replaces at first boot:
-  the build replaces it with `t210` so apt works in the chroot.
+  paths with it, rewriting NVIDIA's `/etc/ld.so.conf.d/nvidia-tegra.conf` and running `ldconfig`. Until then
+  `libcuda.so.1` and NVIDIA's other libraries would not resolve, so the image adds its own
+  `/etc/ld.so.conf.d/00-eirl-tegra.conf` with the same paths and runs `ldconfig` at build time. NVIDIA's file is not
+  touched (it carries NVIDIA's notice, §9.1).
+- The apt sources (`nvidia-l4t-apt-source`) carry a `<SOC>` placeholder that NVIDIA's `nvfb.sh` replaces with
+  `t210` at first boot. The build does not need NVIDIA's repository after `apply_binaries.sh`, so it is left to
+  NVIDIA's script.
 - 🪤 The `nvidia-l4t-kernel` postinst runs `nv-update-extlinux generic`, which forces `DEFAULT primary`. Our
   `FDT` therefore goes into `LABEL primary` too, so a stray reinstall cannot boot the stock DT (no HDMI
   capture, no splash). And every `nvidia-l4t-*` is put on hold, as on the board.
@@ -217,26 +244,38 @@ is **masked** (as on the test board), and a one-shot step of ours does the updat
 2. Otherwise the screen (and the web) says that the Jetson's firmware has to be updated once, that it takes
    about 2 minutes and that the power must stay connected, and NVIDIA's own updater writes NVIDIA's own payloads
    from the BSP (`bl_update_payload`, then `xusb_only_payload`). Then `VER` = `VER_b` = 32.7.6 is checked and the
-   board reboots by itself. If `VER_b` ≠ `VER` at boot (an interrupted update), it resumes the same way.
+   board reboots by itself. An update that fails or is cut (`VER_b` is written first, `VER` last) is tried
+   again at the next boots, at most 3 times; after that it stays `failed` and needs a person (USB recovery).
 3. The result is written to the journal and to `/var/lib/eirl-image/firmware.json` (the app can show it).
 4. **Test images** (I1-I3) are built with the write disabled at build time (`check` only): the test board's QSPI
    is never written, whatever the check reads.
 
 ## 5. First boot
 
-Order (a oneshot `eirl-firstboot.service`, `ConditionFirstBoot=`-like marker in `/var/lib/eirl-image/`,
-before `eirl-encoderd`, `eirl-engine` and `eirl-splash-quit`, with the splash on):
+Two oneshot units, each running until its work is done (markers in `/var/lib/eirl-image/`: a step that fails or is
+cut by a power loss is retried at the next boot), with the splash on:
+
+- `eirl-firstboot.service`, early (no default dependencies; before the network, avahi, NVIDIA's `nvfb` and the
+  app): steps 1, 2 and 4 below, each with its own marker (`grow.done`, `hostname.done`).
+- `eirl-firmware.service`, after `sysinit` (udev, modules: NVIDIA's updater needs the partition links and the board
+  EEPROM) and after NVIDIA's `nvfb.service` (both use debconf), before the app and the engine: step 3
+  (`firmware.done`; an update that fails is tried again at most 3 times, then it stays `failed` for a person).
+
+The steps:
 
 1. `machine-id`: systemd generates it (empty `/etc/machine-id` in the image) and commits it. The app's hardware
    id, and from it the access point's name, come from it.
 2. Grow `APP` to the whole card and `resize2fs` online. NVIDIA's `nvresizefs.sh` comes with the oem-config package,
    which the image leaves out, so ours does the same steps: check that p1 is the last partition, move the backup GPT
-   header, recreate p1 with the same start, name, type, UUID and attributes, `partprobe`, `resize2fs`.
+   header, recreate p1 with the same start (no realignment), name, type, UUID and attributes, tell the kernel
+   (`partx -u`), `resize2fs`. `resize2fs` also runs whenever the filesystem is smaller than its partition, so a power
+   cut between the table and the filesystem is finished at the next boot.
 3. The firmware check (§4).
 4. Hostname `eirl-encoder-<xxxx>`, with the same four characters as the Wi-Fi name `EnhancedIRL-XXXX`
    (`eirl-encoderd -print-hardware-id`), so that each new device on a LAN has its own `.local` name
    (§12, D-I5). The wizard's device name renames it later, as today (SETUP.md §2).
-5. SSH host keys, only if SSH is in the image (§7).
+5. SSH host keys: NVIDIA's own first-boot script (`nvfb.sh`, `dpkg-reconfigure openssh-server`) makes them per
+   device. With `ssh.service` masked nothing listens; the debug image uses them.
 6. Marker; the splash goes on until the app is up and the screen shows the wizard (SETUP.md §4). Without a
    screen, the web on `http://eirl-encoder-<xxxx>.local` (or the IP) shows it, with the setup code.
 
@@ -343,7 +382,7 @@ The real manifest is that, pretty-printed in the same field order, with a final 
 
 | File | What |
 |---|---|
-| `eirl-encoder-<v>-jetson-nano.img.xz` | The image: a raw disk image of the whole card (the card's equivalent of an ISO), cloned to the card as it is by Etcher or `dd`. Compressed because the raw image (~4 GB) is over GitHub's 2 GiB per file |
+| `eirl-encoder-<v>-jetson-nano.img.xz` | The image: a raw disk image of the whole card (the card's equivalent of an ISO), cloned to the card as it is by Etcher or `dd`. Compressed: the raw image is ~2.5 GB, the `.img.xz` ~300 MB (GitHub allows 2 GiB per file) |
 | `eirl-encoder-<v>-jetson-nano.img.json` + `.sig` | Signed manifest (§8.1) |
 | `eirl-encoder-<v>-jetson-nano.img.xz.sha256` | For people who only check a hash |
 | `eirl-encoder-<v>-jetson-nano-packages.txt` | Every package with its source package and version (§9.3) |
@@ -447,6 +486,31 @@ affect your rights under any open source licence…". Our image is a modified Ub
 - `base/check-engine.sh`-like checks that can run offline (libraries resolve with `ldd` in the chroot).
 - Two builds from the same inputs give the same package list and the same files except the expected ones.
 
+`stages/check.py` runs them on every build (about 80 checks) and writes a report next to the image
+(`<name>.report/`: `check.json`, `packages.txt`, `units.txt`, the partition layout and the raw image's sha256).
+A failing check fails the build.
+
+**Results (Oct 14)**: release 0.1.1 (production-signed, from GitHub), a `-test` and a `-debug` image, **0 failed**.
+
+| | Image | Test board |
+|---|---|---|
+| Packages | 493 | 1310 |
+| Root filesystem | 1.18 GB | 4.4 GB |
+| Raw image · `.img.xz` | 2.48 GB · 297 MB | — |
+| Build | ~10 min on the Mac (apt in the chroot is most of it) | — |
+
+What the first builds taught (each one fixed in the recipe):
+- The BSP ships `rootfs/` empty, and `flash.sh` then writes `nv_boot_control.conf` as a *file* called `etc`.
+- `nv-apply-debs.sh` fails if `tools/` has no `.deb` left (hence `jetson-gpio-common` stays, §3.3).
+- `dpkg-query -W 'nvidia-l4t-*'` also lists packages dpkg knows but did not install: hold only the installed ones.
+- `libcuda.so.1` is a link `ldconfig` makes; without the tegra paths at build time it does not exist (§3.3).
+- `adwaita-icon-theme` pulls `ubuntu-mono` (Ubuntu-branded icons) unless `adwaita-icon-theme-full` is asked for.
+- The checks caught the comment of the debug key (a person's name) in `authorized_keys`: only the key goes in now.
+- Python 3.6 in the containers writes ASCII unless told `LC_ALL=C.UTF-8`.
+
+Not yet exercised: the signature of the image (§8.1, the app session's tool, tested on its own), the reproducibility
+of two builds (the second item above), and everything that only runs on a board (§10.2, §10.3).
+
 ### 10.2 I2, first boot and uniqueness
 
 Boot the image from scratch twice (two flashes of the same image): different machine-id, hardware id, Wi-Fi name,
@@ -490,8 +554,8 @@ Same sources and conditions as B0 (BASE.md §10): output off, preview off.
 
 | | Test board (Oct 14, read only) | Image |
 |---|---|---|
-| Packages | 1310 | to measure (estimate: ~600-800) |
-| Disk used | 4.4 GB (with the development tools and kernel headers) | to measure (estimate: 2-2.5 GB) |
+| Packages | 1310 | 493 (measured in the image, I1) |
+| Disk used | 4.4 GB (with the development tools and kernel headers) | 1.18 GB (I1) |
 | Boot | 2.2 s kernel + 8.2 s user space; multiview at ~13 s | `systemd-analyze`, `critical-chain eirl-engine`, splash, app and multiview times |
 | Available RAM (engine running, no stream) | ~2.6 GB | `MemAvailable` with the same sources |
 | Running services | 25 | count and list |
@@ -518,7 +582,7 @@ Each with the recommendation first. The maintainer's answer goes in the last col
 | Who | What |
 |---|---|
 | Image session (owner) | This document, `tools/image/`, the kernel layer, first boot, the firmware step, the checks |
-| App session | Done on Oct 14: a fresh device's needs in the bundle (`/etc/default/eirl-engine`, `srt-live-transmit` + `libsrt`, the EDIDs, `OUTPUT=off` by default), `install.sh` image mode, `eirl-encoderd -print-hardware-id`, the public repository sync (`tools/public-sync.sh`). To do once §12 is decided: `eirl-release sign-image`/`verify-image` |
+| App session | Done on Oct 14: a fresh device's needs in the bundle (`/etc/default/eirl-engine`, `srt-live-transmit` + `libsrt`, the EDIDs, `OUTPUT=off` by default), `install.sh` image mode, `eirl-encoderd -print-hardware-id`, the public repository sync (`tools/public-sync.sh`), the image's signature and publication (§8.1), release 0.1.1. That session is closed: changes to the app, the installer or the release tools now go through the maintainer |
 | Cloud session | D-I8 (hardware id after a reflash); with the app session, remote support (§7.1) when the maintainer starts it |
 | To be assigned | The fan controller (D-I7): the daemon (a root helper writing the PWM, with profiles and the "camera" mode) and its interface in Settings and the web |
 | Maintainer | The decisions in §12, the card swaps and the slots of I3, every publication |

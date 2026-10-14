@@ -152,6 +152,9 @@ deletes its own, but the permission does not limit it.
   requested and is not up. **Approved with the PNG mock-ups on Oct 13**, with one addition: connected without internet, the
   arcs in amber.
 - The engine never calls NetworkManager nor `eirl-netsetup`: only the app does.
+- Since Oct 14 (MIXER.md §21) the Wi-Fi page also has what was only on the web: the password of «Create my Wi-Fi» as
+  dots with an eye (the QR still carries it), its 2.4 GHz channel (Auto, 1-11: `PUT /network/ap {"channel"}`) and «New
+  password» (a second tap: `{"rotatePassword": true}`).
 
 ## 7. Cloud (cloud workstream)
 
@@ -333,6 +336,8 @@ one more link, so the stream said "in use" and, if it was the only one, it staye
 - While it is "no internet", the app puts `wlan0` in **`/run/eirl-encoder/uplinks-nointernet`** (WriteAtomic,
   0640, group `eirl-encoder`; the format of `uplinks-disabled`). It empties it when internet comes back or on disconnecting. It does not touch the
   user's list of disabled links.
+- Since the modems (MODEMS.md §5), the file has one writer, the links service: the Wi-Fi's monitor reports to it
+  (`network.Manager.OnNoInternet`) and it adds the modems' and phones' own checks; the format does not change.
 - **Engine**: `selectUplinks(available, excluded...)` (excluded = disabled ∪ no internet), in `internal/engine/output`,
   with `UPLINKS_NOINTERNET`. **If the last link goes away** while streaming,
   the uplinks watcher stops `srtla_send` and the session ends in `no_uplinks`, transient: "connecting · no

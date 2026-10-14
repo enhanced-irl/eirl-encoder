@@ -405,8 +405,9 @@ outside those whitelists (the rule of MANAGER.md §5).
   - `GET /network` every 2 s with Settings open and every 10 s closed (the gear's amber dot:
     `accessPoint.enabled` with cameras and `state` `off`/`error`).
   - `GET /network/credentials?qr=rows` only with the panel open (when opening it and every 10 s): the Wi-Fi (`ssid`,
-    `password`, `qrRows`), **without the cameras' keys**, which do not go out over the socket. When the panel closes, the
-    password leaves memory.
+    `password`, `qrRows`), **without the cameras' keys**. When the panel closes, the password leaves memory. Since
+    Oct 14 (MIXER.md §21) a camera's URLs with its key are asked for only when its eye is opened on the screen
+    (`GET /network/credentials?cameras=1`) and dropped when its page goes.
   - `PUT /network {"enabled"}` when the switch is tapped, one at a time and with a 150 s margin. While it lasts,
     "Switching off…"/"Switching on…"; a `202` says "Saved, but it could not be applied: <reason>"; an error shows
     its `message` as is (e.g. the `409 on_air`).
@@ -415,6 +416,14 @@ outside those whitelists (the rule of MANAGER.md §5).
   (`ssid`, `password`, `qr` in rows, `on`; the app still writes it, 0640 `eirl-encoder`) and shows no switch.
   The file bridge agreed on earlier (`enabled`/`seq`/`lastError` in `wifi.json` and `screen.network`
   in the engine's state) was dropped without ever being written in the app.
+
+- **On the screen, everything the web does** (Oct 14, MIXER.md §21): the Network cameras page has, besides the
+  reception switch, «Through the encoder's Wi-Fi» (`PUT /network/ap {"enabled"}`) and «By cable» (`PUT /network/lan
+  {"enabled"}`), the list of cameras and «Add camera» (`POST /cameras`); each camera opens its own view: rename
+  (`PATCH {"name"}`), «New key» (`PATCH {"rotateKey"}`) and «Remove» (`DELETE`), both with a second tap, and its SRT and
+  RTMP URLs and the SRT QR behind an eye (`GET /network/credentials?cameras=1`, asked when the eye opens and dropped
+  when the view goes). Without cameras and with the reception off, the reception switch shows only to turn it on (the
+  app adds a camera only with it on).
 
 ### 6.5 Socket (MIXER.md §5) — additive
 

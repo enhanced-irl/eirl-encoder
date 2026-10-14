@@ -1,6 +1,8 @@
 package screen
 
 import (
+	"time"
+
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/appapi"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/screen/ui"
 )
@@ -51,10 +53,16 @@ func fromApp(s appapi.Snapshot) ui.NetSnapshot {
 		}
 		out.Status = &ui.NetStatus{Enabled: st.Enabled, LANEnabled: st.LAN.Enabled, Cameras: len(st.Cameras.Items),
 			AccessPoint: ui.AccessPoint{Enabled: enabled, Policy: ap.Policy, State: ap.State, SSID: ap.SSID,
-				Channel: ap.Channel, Clients: ap.Clients, Error: ap.Error}}
+				Channel: ap.Channel, Clients: ap.Clients, Error: ap.Error},
+			LAN:    ui.LANStatus{State: st.LAN.State, Iface: st.LAN.Iface, IP: st.LAN.IP, Error: st.LAN.Error},
+			CamMax: st.Cameras.Max, CamItems: make([]ui.NetCamera, len(st.Cameras.Items))}
+		for i, c := range st.Cameras.Items {
+			out.Status.CamItems[i] = ui.NetCamera{ID: c.ID, Name: c.Name, Connected: c.Connected, Via: c.Via,
+				Protocol: c.Protocol, Codec: c.Codec, Kbps: c.Kbps, RTTMs: c.RTTMs, LossPct: c.LossPct}
+		}
 	}
 	if w := s.WiFi; w != nil {
-		out.Wifi = &ui.WifiCreds{SSID: w.SSID, Password: w.Password, QR: w.QR}
+		out.Wifi = &ui.WifiCreds{SSID: w.SSID, Password: w.Password, QR: w.QR, Channel: w.Channel}
 	}
 	if c := s.Client; c != nil {
 		out.Client = &ui.WifiClient{Enabled: c.Enabled, State: c.State, SSID: c.SSID, Signal: c.Signal, Band: c.Band,
@@ -85,5 +93,22 @@ func legacyWifi(path string) func() *ui.WifiCreds {
 			return nil
 		}
 		return &ui.WifiCreds{SSID: w.SSID, Password: w.Password, QR: w.QR, On: w.On}
+	}
+}
+
+// linkDots: the header's dots from the app's links.json (appapi.Links validates it and rereads it only when it
+// changes), as ui types: ui never imports appapi.
+func linkDots(path string) func() ([]ui.LinkDot, bool) {
+	return func() ([]ui.LinkDot, bool) {
+		links, ok := appapi.Links(path, time.Now())
+		if !ok {
+			return nil, false
+		}
+		out := make([]ui.LinkDot, 0, len(links))
+		for _, l := range links {
+			out = append(out, ui.LinkDot{Name: l.Name, Kind: l.Kind, Label: l.Label, Tech: l.Tech, Health: l.Health,
+				Disabled: l.Disabled})
+		}
+		return out, true
 	}
 }

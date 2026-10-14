@@ -70,6 +70,10 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 
+// changePassword: PUT /password, from the web (its session is kept, the others are closed) or from the screen over
+// the local socket (no session to keep: every web session is closed). Attempts at the current password are limited
+// like the login's (5 per minute per IP, or for the screen, and 20 in total), counted before comparing; a right
+// current password clears them.
 func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Current string `json:"current"`
@@ -79,20 +83,43 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, 400, "bad_request", "common.bad_body")
 		return
 	}
-	c, _ := r.Cookie(cookieName)
-	err := s.Auth.ChangePassword(c.Value, body.Current, body.New)
+	// The web never gets here without a password (requireAuth); the socket has no requireAuth: the same answers
+	switch {
+	case s.Auth.LoadErr != nil:
+		fail(w, r, 503, "password_unreadable", "access.password_unreadable")
+		return
+	case !s.Auth.Configured():
+		fail(w, r, 503, "setup_required", "access.setup_required")
+		return
+	}
+	keep, key := "", "screen"
+	if !isLocal(r) {
+		if c, err := r.Cookie(cookieName); err == nil {
+			keep = c.Value
+		}
+		key = limitKey(remoteIP(r))
+	}
+	if !s.passwordLimit.take(key, time.Now()) {
+		fail(w, r, 429, "rate_limited", "auth.rate_limited")
+		return
+	}
+	err := s.Auth.ChangePassword(keep, body.Current, body.New)
+	if !errors.Is(err, auth.ErrBadPassword) {
+		s.passwordLimit.clear(key) // the current password was right
+	}
 	if ref, ok := passwordError(err); ok {
 		apiError(w, 400, "validation", i18n.Text(reqLang(r), ref))
 		return
 	}
 	switch {
 	case errors.Is(err, auth.ErrBadPassword):
+		s.Log.Warn("password change: wrong current password", "via", via(r))
 		fail(w, r, 403, "bad_password", "auth.bad_current")
 	case err != nil:
 		s.Log.Error("password change", "err", err)
 		fail(w, r, 500, "internal", "common.save_failed")
 	default:
-		s.Log.Info("password changed")
+		s.Log.Info("password changed", "via", via(r))
 		w.WriteHeader(204)
 	}
 }
@@ -239,7 +266,10 @@ func (s *Server) saveAndApply(w http.ResponseWriter, r *http.Request, apply bool
 	s.logConfig("configuration saved", cfg)
 	restarted := false
 	if apply { // the same rule as the cloud (applySaved)
-		if restarted, err = s.applySaved(r.Context(), before); err != nil {
+		// Not cut if the caller hangs up: over the socket the caller is the engine, which this restart stops
+		ctx, cancel := s.applyCtx(r)
+		defer cancel()
+		if restarted, err = s.applySaved(ctx, before); err != nil {
 			s.Log.Error("restart", "err", err)
 			fail(w, r, 500, "restart_failed", "apply.restart_failed")
 			return
@@ -294,13 +324,16 @@ func (s *Server) serviceAction(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, 404, "not_found", "common.unknown_action")
 		return
 	}
-	if err := s.Unit.Control(r.Context(), action); err != nil {
+	// Not cut if the caller hangs up: a restart from the screen stops the engine, the caller, halfway
+	ctx, cancel := s.applyCtx(r)
+	defer cancel()
+	if err := s.Unit.Control(ctx, action); err != nil {
 		s.Log.Error("service", "action", action, "err", err)
 		fail(w, r, 500, "control_failed", "service."+action+"_failed")
 		return
 	}
-	s.Log.Info("service", "action", action)
-	st, _ := s.Unit.Status(r.Context())
+	s.Log.Info("service", "action", action, "via", via(r))
+	st, _ := s.Unit.Status(ctx)
 	writeJSON(w, 202, map[string]string{"state": st.State})
 }
 

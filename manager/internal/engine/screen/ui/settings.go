@@ -1,20 +1,22 @@
 package ui
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// pageIcon is each Settings page's icon in the list.
-var pageIcon = map[string]string{"wifi": "wifi", "cams": "camera", "sources": "grid", "language": "globe",
-	"time": "clock", "updates": "update", "about": "info"}
+// groupIcon is each Settings group's icon in the list.
+var groupIcon = map[string]string{"stream": "stream", "sources": "grid", "wifi": "wifi", "cams": "camera",
+	"cloud": "cloud", "device": "sliders", "system": "info"}
 
 // drawSettings is the Settings panel: the list of pages on the left (CONTRACT §0: only on the touch screen) and
-// the selected page on the right. The Wi-Fi page («Conectarse a una wifi», «Crear mi wifi» and its QR) and the
-// Network cameras page (the RTMP/SRT reception switch and each camera) are the two tabs of before (WIFI.md §6,
-// NETWORK_SOURCES.md §6.4), unchanged; each switch is done by the app (Net). The device pages (language, date
-// and time, updates, about) are the app's device API (App).
+// the selected page on the right. The Wi-Fi page («Connect to a Wi-Fi», «Create my Wi-Fi» and its QR, password,
+// channel and new password) and the Network cameras page (cams.go: the RTMP/SRT reception, the ways in, each camera
+// and its own view) were the two tabs of before (WIFI.md §6, NETWORK_SOURCES.md §6.4); their switches are done by
+// the app (Net, and App for MIXER.md §21's). The device pages (language, date and time, updates, about) are the
+// app's device API (App).
 func (u *UI) drawSettings(d *dc, net *NetSnapshot, app *AppSnapshot, cams []SourceStatus, legacy *WifiCreds) {
 	lay, tx, c, s := u.Lay, u.Tx, d.c, d.s
 	m := float64(lay.M)
@@ -29,19 +31,17 @@ func (u *UI) drawSettings(d *dc, net *NetSnapshot, app *AppSnapshot, cams []Sour
 	u.icon(c, "gear", float64(hd.X)+m+12*s, mid, 12*s, max(2.0, 2.4*s), cInk)
 	d.text(float64(hd.X)+m+34*s, mid+8*s, tx.Settings, 22*s, textOpt{col: cInk, bold: true,
 		width: float64(hd.W) - m - 34*s})
-	for _, id := range u.pages() {
+	cur := groupOf(u.settingsPage)
+	for _, g := range SettingsGroups {
 		dot := ""
-		switch {
-		case id == "wifi" && WifiDown(net, legacy):
-			dot = "warn"
-		case id == "updates" && updateAvailable(app):
-			dot = "brand"
-		case id == "about" && setupPending(app):
-			dot = "warn"
+		for _, p := range g.Pages {
+			if t := u.pageDot(p, net, app, legacy); t == "warn" || (t != "" && dot == "") {
+				dot = t
+			}
 		}
-		u.drawEntry(d, "s_page_"+id, pageIcon[id], tx.PageTitle[id], id == u.settingsPage, dot)
+		u.drawEntry(d, "s_page_"+g.ID, groupIcon[g.ID], tx.GroupTitle[g.ID], cur != nil && cur.ID == g.ID, dot)
 	}
-	// The page: its title row, then its content
+	// The page: its title row (the tabs of its group, or its name), then its content
 	switch u.settingsView {
 	case "networks":
 		u.drawPageTitle(d, tx.NetworksTitle, true)
@@ -55,16 +55,65 @@ func (u *UI) drawSettings(d *dc, net *NetSnapshot, app *AppSnapshot, cams []Sour
 		u.drawPageTitle(d, sprintf(tx.SourceF, u.srcPick), true)
 		u.drawCandidates(d, app)
 		return
+	case "pick":
+		if u.chooser != nil {
+			u.drawPageTitle(d, u.chooser.title, true)
+			u.drawPicker(d)
+			return
+		}
 	}
-	u.drawPageTitle(d, tx.PageTitle[u.settingsPage], false)
+	if p := pageDefs[u.settingsPage]; p != nil && p.title != nil {
+		if t, back, ok := p.title(u); ok {
+			u.drawPageTitle(d, t, back)
+			p.draw(u, d, app)
+			return
+		}
+	}
+	if cur != nil && len(cur.Pages) > 1 {
+		u.drawTabs(d, cur, net, app, legacy)
+	} else {
+		u.drawPageTitle(d, tx.PageTitle[u.settingsPage], false)
+	}
 	u.drawPage(d, u.settingsPage, net, app, cams, legacy)
+}
+
+// pageDot is a page's dot in the list and on its tab: "warn" (something to fix), "brand" (news), "" none.
+func (u *UI) pageDot(page string, net *NetSnapshot, app *AppSnapshot, legacy *WifiCreds) string {
+	switch {
+	case page == "wifi" && WifiDown(net, legacy):
+		return "warn"
+	case page == "updates" && updateAvailable(app):
+		return "brand"
+	case page == "about" && setupPending(app):
+		return "warn"
+	}
+	return ""
+}
+
+// drawTabs is the title row of a group of several pages: one tab per page (the one on view highlighted, each with
+// its dot), and the X.
+func (u *UI) drawTabs(d *dc, g *SettingsGroup, net *NetSnapshot, app *AppSnapshot, legacy *WifiCreds) {
+	lay, tx, c, s := u.Lay, u.Tx, d.c, d.s
+	for _, p := range g.Pages {
+		key := "s_tab_" + p
+		d.button(key, btn{label: tx.TabTitle[p], active: p == u.settingsPage, size: 19})
+		if dot := u.pageDot(p, net, app, legacy); dot != "" {
+			col := cWarn
+			if dot == "brand" {
+				col = cBrand
+			}
+			r := lay.Buttons[key]
+			c.FillCircle(float64(r.X+r.W)-10*s, float64(r.Y)+10*s, 5*s, col)
+		}
+	}
+	d.button("s_close", btn{icon: "close"})
 }
 
 // drawPage draws one page's content in the page area (Settings, and the wizard's steps that are Settings pages).
 func (u *UI) drawPage(d *dc, page string, net *NetSnapshot, app *AppSnapshot, cams []SourceStatus, legacy *WifiCreds) {
 	switch page {
-	case "wifi", "cams":
-		u.drawNetPage(d, page, net, cams, legacy)
+	case "wifi":
+		u.drawNetPage(d, "wifi", net, cams, legacy)
 	case "language":
 		u.drawLanguagePage(d, app)
 	case "time":
@@ -75,11 +124,12 @@ func (u *UI) drawPage(d *dc, page string, net *NetSnapshot, app *AppSnapshot, ca
 		u.drawAboutPage(d, app)
 	case "sources":
 		u.drawSourcesPage(d, app)
+	default:
+		if p := pageDefs[page]; p != nil {
+			p.draw(u, d, app)
+		}
 	}
 }
-
-// pages are the Settings list's entries.
-func (u *UI) pages() []string { return SettingsPages }
 
 // drawEntry is one entry of the list: its icon and name, the selected one highlighted, a dot if it has news.
 func (u *UI) drawEntry(d *dc, key, icon, label string, active bool, dot string) {
@@ -165,6 +215,12 @@ func (u *UI) devicePageReady(d *dc, api Tri, have bool) bool {
 // row is a Settings row: its icon, title and sub-text, and its switch; the whole row is the switch. rightX0, if
 // not 0, is where the text must end (a button inside the row).
 func (u *UI) row(d *dc, key, icon, title string, rs RowState, live bool, rightX0 float64) {
+	u.rowDot(d, key, icon, title, rs, "", live, rightX0)
+}
+
+// rowDot is row with a coloured dot before the icon: a connection's health (MODEMS.md §5), good | weak | bad | off
+// (a ring: switched off, not a fault); "" none.
+func (u *UI) rowDot(d *dc, key, icon, title string, rs RowState, dot string, live bool, rightX0 float64) {
 	lay, c, s := u.Lay, d.c, d.s
 	m := float64(lay.M)
 	r := lay.Buttons[key]
@@ -179,8 +235,18 @@ func (u *UI) row(d *dc, key, icon, title string, rs RowState, live bool, rightX0
 	if live {
 		ic = cGood
 	}
-	u.icon(c, icon, float64(r.X)+2*m+10*s, rmid, 12*s, max(2.0, 2.4*s), ic)
-	tx0 := float64(r.X) + 2*m + 34*s
+	ix, tx0 := float64(r.X)+2*m+10*s, float64(r.X)+2*m+34*s
+	if col, ok := healthDot[dot]; ok {
+		dx := float64(r.X) + m + 7*s
+		if dot == "off" {
+			c.FillCircle(dx, rmid, 7*s, col)
+			c.FillCircle(dx, rmid, 4.5*s, cPanel) // a ring: switched off, not a fault
+		} else {
+			c.FillCircle(dx, rmid, 7*s, col)
+		}
+		ix, tx0 = ix+10*s, tx0+10*s
+	}
+	u.icon(c, icon, ix, rmid, 12*s, max(2.0, 2.4*s), ic)
 	rightX := float64(r.X+r.W) - 2*m
 	if rs.Knob != KnobNone {
 		sw, shh := 64*s, 34*s
@@ -204,18 +270,19 @@ func (u *UI) row(d *dc, key, icon, title string, rs RowState, live bool, rightX0
 	if rightX0 > 0 {
 		rightX = min(rightX, rightX0)
 	}
-	tone := map[string]Color{"good": cGood, "warn": cWarn, "quiet": cQuiet}
+	tone := map[string]Color{"good": cGood, "warn": cWarn, "bad": cBad, "quiet": cQuiet}
 	d.text(tx0, rmid-2*s, title, 19*s, textOpt{col: cInk, bold: true, width: rightX - tx0})
-	d.text(tx0, rmid+17*s, rs.Sub, 14*s, textOpt{col: tone[rs.Tone], bold: rs.Tone == "warn", width: rightX - tx0})
+	d.text(tx0, rmid+17*s, rs.Sub, 14*s, textOpt{col: tone[rs.Tone], bold: rs.Tone == "warn" || rs.Tone == "bad", width: rightX - tx0})
 }
 
-// drawNetPage is the Wi-Fi page or the Network cameras page (the two tabs of before).
-func (u *UI) drawNetPage(d *dc, page string, net *NetSnapshot, cams []SourceStatus, legacy *WifiCreds) {
-	lay, tx, c, s := u.Lay, u.Tx, d.c, d.s
-	m := float64(lay.M)
-	keys := u.settingsKeys(net)
-	st, api := net.Status, net.API
-	if api == Unknown || (api == Yes && st == nil) { // asking, or the app does not answer: only that
+// healthDot: the colour of a connection's dot (MODEMS.md §5), the same green, amber and red as the meters.
+var healthDot = map[string]Color{"good": cGood, "weak": cWarn, "bad": cBad, "off": cQuiet}
+
+// netPageReady: the app's network state is known; else the page says why not (asking, or the app does not
+// answer) and is not drawn.
+func (u *UI) netPageReady(d *dc, net *NetSnapshot) bool {
+	tx := u.Tx
+	if api := net.API; api == Unknown || (api == Yes && net.Status == nil) {
 		msg, warn := tx.AskingApp, false
 		if api != Unknown {
 			msg, warn = net.Error, true
@@ -224,172 +291,68 @@ func (u *UI) drawNetPage(d *dc, page string, net *NetSnapshot, cams []SourceStat
 			}
 		}
 		u.pageMessage(d, msg, "", warn)
-		return
-	}
-	pend := net.Pending
-	hasKey := func(k string) bool {
-		for _, x := range keys {
-			if x == k {
-				return true
-			}
-		}
 		return false
 	}
-	var notes []string
-	if net.Message != "" && d.now.Before(net.MsgUntil) {
-		notes = append(notes, net.Message)
-	}
-	if page == "wifi" {
-		if ClientSwitch(net) {
-			rs := ClientRow(net, tx)
-			right := 0.0
-			if hasKey("s_networks") {
-				right = float64(lay.Buttons["s_networks"].X) - m
-			}
-			u.row(d, "s_client", "wifi", tx.ClientRow, rs, rs.Tone == "good", right)
-			if hasKey("s_networks") { // inside the row: drawn on top of it
-				d.button("s_networks", btn{label: tx.NetworksButton})
-			}
-			if net.Warning == "two_channels" {
-				notes = append(notes, tx.TwoChannels)
-			}
-		}
-		ap := APRow(net, legacy, tx)
-		u.row(d, "s_ap", "hotspot", tx.APRow, ap, ap.Tone == "good", 0)
-		// What goes under the row: the QR with the wifi up; else why it is not
-		qr := "off"
-		switch {
-		case ap.Tone == "good":
-			qr = "on"
-		case ap.Tone == "warn":
-			qr = "error"
-		case ap.Knob == KnobOn && ap.Sub == tx.TurningOn:
-			qr = "starting"
-		}
-		u.drawWifiQR(d, net, legacy, qr, notes)
-		return
-	}
-	// Network cameras: the whole row is the RECEPTION switch (RTMP/SRT and the network source); the board's wifi
-	// is apart and does not follow it
-	var ap AccessPoint
-	var hasCams, viaWifi, viaLAN bool
-	if st != nil {
-		ap = st.AccessPoint
-		hasCams = st.Cameras > 0
-		viaWifi, viaLAN = ap.Enabled != nil && *ap.Enabled, st.LANEnabled
-	} else {
-		hasCams = legacy != nil
-		viaWifi = hasCams
-	}
-	busy := pend != nil && pend.What == "net"
-	on := st == nil || st.Enabled // the reception, as it is
-	kn := KnobNone
-	if NetSwitch(net) {
-		kn = knob(on)
-		if busy {
-			kn = knob(pend.On)
-		}
-	}
-	apOff := viaWifi && APSwitch(net) && ap.Policy == "rescue"
-	var sub, t string
-	switch {
-	case api == No:
-		sub, t = tx.CamsSubOldApp, "quiet"
-	case !hasCams:
-		sub, t = tx.CamsSubNone, "quiet"
-	case busy:
-		sub, t = tx.CamsSubTurningOff, "quiet"
-		if kn == KnobOn {
-			sub = tx.CamsSubTurningOn
-		}
-	case !on:
-		sub, t = tx.CamsSubOff, "warn"
-	case apOff && !viaLAN:
-		sub, t = tx.CamsSubAPOff, "warn"
-	default:
-		via := tx.CamsViaNone
-		switch {
-		case viaWifi && viaLAN:
-			via = tx.CamsViaBoth
-		case viaWifi:
-			via = tx.CamsViaWifi
-		case viaLAN:
-			via = tx.CamsViaCable
-		}
-		sub, t = tx.CamsSubOnPrefix+via, "warn"
-		if viaWifi || viaLAN {
-			t = "good"
-		}
-	}
-	u.row(d, "s_net", "camera", tx.CamsRow, RowState{kn, busy, sub, t}, hasCams && on && !busy, 0)
-	cr := lay.SettingsCams
-	x0, y0, w0, h0 := float64(cr.X), float64(cr.Y), float64(cr.W), float64(cr.H)
-	y := y0 + 22*s
-	for _, n := range notes {
-		d.text(x0+4*s, y, n, 16*s, textOpt{col: cWarn, bold: true, width: w0 - 8*s})
-		y += 30 * s
-	}
-	if api != No && !hasCams {
-		d.text(x0+w0/2, y0+h0/2-10*s, tx.NoCameras, 20*s, textOpt{col: cInk, bold: true, align: center})
-		d.text(x0+w0/2, y0+h0/2+18*s, tx.NoCamerasHelp, 15*s, textOpt{col: cQuiet, align: center, width: w0 - 8*s})
-		return
-	}
-	if len(cams) > 4 {
-		cams = cams[:4]
-	}
-	for _, cam := range cams { // each camera, as in its tile
-		live := cam.State == "live"
-		stTxt := tx.CamLive
-		if !live {
-			stTxt = u.notLiveText(cam.State, cam.DetailCode, cam.DetailArgs, cam.Detail, true)
-		}
-		if live && cam.Mode != "" {
-			stTxt += tx.Sep + ModeLabel(cam.Mode, cam.FPS, tx)
-		}
-		dc := cQuiet
-		if live {
-			dc = cGood
-		}
-		c.FillCircle(x0+10*s, y-6*s, 5*s, dc)
-		w1 := d.text(x0+24*s, y, cam.Name, 18*s, textOpt{col: cInk, bold: true, width: w0 * 0.5})
-		d.text(x0+24*s+w1+12*s, y, stTxt, 16*s, textOpt{col: dc, width: w0 - w1 - 40*s})
-		y += 32 * s
-	}
-	y += 10 * s
-	var how []string
-	if viaWifi {
-		ssid := ap.SSID
-		if st == nil && legacy != nil {
-			ssid = legacy.SSID
-		}
-		if ssid != "" && !apOff {
-			how = append(how, sprintf(tx.HowWifiF, ssid))
-		} else {
-			how = append(how, tx.HowWifiOff)
-		}
-	}
-	if viaLAN {
-		how = append(how, tx.HowCable)
-	}
-	how = append(how, tx.HowURL)
-	for _, h := range how {
-		for _, line := range d.wrap(h, 15*s, Sans, w0-8*s) {
-			d.text(x0+4*s, y, line, 15*s, textOpt{col: cQuiet, width: w0 - 8*s})
-			y += 21 * s
-		}
-		y += 3 * s
-	}
+	return true
 }
 
-// drawWifiQR: under «Crear mi wifi», the QR to join (the WIFI: format of iOS's and Android's cameras) and, at
-// its side, the network, the password and the notes. state: on | starting | error | off (no QR: says so). With the
-// app's API, «Rename» at the bottom right; with the AP not on, the name it has goes next to it (it is there from the
-// first start: the wizard's network step shows it this way).
-func (u *UI) drawWifiQR(d *dc, net *NetSnapshot, legacy *WifiCreds, state string, notes []string) {
-	lay, tx, c, s := u.Lay, u.Tx, d.c, d.s
+// netNotes are the network's notices for a page: the last change's (the app's message) for 6 s.
+func netNotes(d *dc, net *NetSnapshot) []string {
+	if net.Message != "" && d.now.Before(net.MsgUntil) {
+		return []string{net.Message}
+	}
+	return nil
+}
+
+// drawNetPage is the Wi-Fi page: «Connect to a Wi-Fi», «Create my Wi-Fi» and, under them, its QR with the network,
+// its password (dots, with an eye), its channel and «New password», and «Rename». The Network cameras page is
+// cams.go's (drawCamsPage).
+func (u *UI) drawNetPage(d *dc, page string, net *NetSnapshot, cams []SourceStatus, legacy *WifiCreds) {
+	lay, tx := u.Lay, u.Tx
 	m := float64(lay.M)
-	q0 := lay.SettingsQR
-	x0, y0, w0, h0 := float64(q0.X), float64(q0.Y), float64(q0.W), float64(q0.H)
+	if page == "cams" {
+		u.drawCamsPage(d, net, cams, legacy)
+		return
+	}
+	if !u.netPageReady(d, net) {
+		return
+	}
+	keys := u.settingsKeys(net)
+	notes := netNotes(d, net)
+	if ClientSwitch(net) {
+		rs := ClientRow(net, tx)
+		right := 0.0
+		if slices.Contains(keys, "s_networks") {
+			right = float64(lay.Buttons["s_networks"].X) - m
+		}
+		u.row(d, "s_client", "wifi", tx.ClientRow, rs, rs.Tone == "good", right)
+		if slices.Contains(keys, "s_networks") { // inside the row: drawn on top of it
+			d.button("s_networks", btn{label: tx.NetworksButton})
+		}
+		if net.Warning == "two_channels" {
+			notes = append(notes, tx.TwoChannels)
+		}
+	}
+	ap := APRow(net, legacy, tx)
+	u.row(d, "s_ap", "hotspot", tx.APRow, ap, ap.Tone == "good", 0)
+	// What goes under the row: the QR with the wifi up; else why it is not
+	qr, _ := u.wifiQR(net, legacy)
+	u.drawWifiQR(d, net, legacy, qr, append(notes, u.wifiNotes()...))
+}
+
+// wifiQR is what goes under «Create my Wi-Fi»: the QR's state (on | starting | error | off: no QR, it says why) and
+// the Wi-Fi to join (nil: not known). The drawing and the page's buttons agree on it.
+func (u *UI) wifiQR(net *NetSnapshot, legacy *WifiCreds) (string, *WifiCreds) {
+	ap := APRow(net, legacy, u.Tx)
+	qr := "off"
+	switch {
+	case ap.Tone == "good":
+		qr = "on"
+	case ap.Tone == "warn":
+		qr = "error"
+	case ap.Knob == KnobOn && ap.Sub == u.Tx.TurningOn:
+		qr = "starting"
+	}
 	creds := net.Wifi
 	if net.Status == nil {
 		creds = nil
@@ -397,6 +360,157 @@ func (u *UI) drawWifiQR(d *dc, net *NetSnapshot, legacy *WifiCreds, state string
 			creds = legacy
 		}
 	}
+	return qr, creds
+}
+
+// legacyCreds is wifi.json's Wi-Fi for an older app without the local API (nil otherwise).
+func (u *UI) legacyCreds(n *NetSnapshot) *WifiCreds {
+	if n.API == No && u.Legacy != nil {
+		return u.Legacy()
+	}
+	return nil
+}
+
+// wifiShown: the QR and the password are on view.
+func (u *UI) wifiShown(net *NetSnapshot, legacy *WifiCreds) bool {
+	qr, creds := u.wifiQR(net, legacy)
+	return qr == "on" && creds != nil
+}
+
+// wifiExtras: beside the QR, the channel and «New password» (an app with the board's Wi-Fi, in Settings: the
+// wizard's network step stays as simple as it was).
+func (u *UI) wifiExtras(net *NetSnapshot, legacy *WifiCreds) bool {
+	return u.wifiShown(net, legacy) && APSwitch(net) && !u.wizardOn()
+}
+
+// wifiPwEye is the Wi-Fi password's eye.
+const wifiPwEye = "s_wifi_pw_eye"
+
+// wifiPwShown: the Wi-Fi password is shown (its eye open here: one opened in the wizard does not stay open in
+// Settings, nor the other way round).
+func (u *UI) wifiPwShown() bool {
+	return u.revealed(wifiPwEye) && u.camp.wifiEyeWiz == u.wizardOn()
+}
+
+func (u *UI) toggleWifiPw() {
+	if u.camp.wifiEyeWiz != u.wizardOn() { // opened in the other place: here it starts closed
+		u.camp.wifiEyeWiz = u.wizardOn()
+		if u.revealed(wifiPwEye) {
+			u.toggleReveal(wifiPwEye)
+		}
+	}
+	u.toggleReveal(wifiPwEye)
+}
+
+// wifiNotes are the Wi-Fi page's own notices: «New password» waiting for its second tap, the app's error for the
+// channel or the new password (8 s), what to do after a new password, and the page's own notice.
+func (u *UI) wifiNotes() []string {
+	app := u.app().AppSnapshot()
+	tx := u.Tx.NetX
+	var out []string
+	if u.confirming("ap_rotate") {
+		out = append(out, tx.NewPasswordAsk)
+	}
+	if t := u.resultNote(&app, "ap_channel", "ap_rotate"); t != "" {
+		out = append(out, t)
+	}
+	if u.okNote(&app, "ap_rotate") {
+		out = append(out, tx.NewPasswordDone)
+	}
+	if t, _ := u.pageNoteText(); t != "" {
+		out = append(out, t)
+	}
+	return out
+}
+
+// okNote: the last action is what, taken by the app less than 8 s ago, on this page.
+func (u *UI) okNote(app *AppSnapshot, what string) bool {
+	l := app.Last
+	return l != nil && l.OK && l.What == what && u.now().Sub(l.At) <= 8*time.Second && !l.At.Before(u.pageSince)
+}
+
+// channelText is the channel's field: the saved one (Automatic or its number) and, if different or automatic, the
+// one in use.
+func (u *UI) channelText(net *NetSnapshot) string {
+	tx := u.Tx.NetX
+	saved := ""
+	if net.Wifi != nil {
+		saved = net.Wifi.Channel
+	}
+	base := tx.ChannelAuto
+	if saved != "" && saved != "auto" {
+		base = saved
+	}
+	var inUse *int
+	if net.Status != nil {
+		inUse = net.Status.AccessPoint.Channel
+	}
+	if inUse == nil || *inUse <= 0 || base == strconv.Itoa(*inUse) {
+		return base
+	}
+	return sprintf(tx.ChannelInUseF, base, *inUse)
+}
+
+// openChannelPicker: the 2.4 GHz channel, automatic or 1-11 (PUT /network/ap {"channel"}).
+func (u *UI) openChannelPicker() {
+	snap := u.Net.Snapshot()
+	if !u.wifiExtras(&snap, nil) {
+		return
+	}
+	if u.apBusy() {
+		u.appBusy(false)
+		return
+	}
+	tx := u.Tx.NetX
+	cur := "auto"
+	if snap.Wifi != nil && snap.Wifi.Channel != "" {
+		cur = snap.Wifi.Channel
+	}
+	opts := []pickOpt{{ID: "auto", Title: tx.ChannelAuto, Sub: tx.ChannelAutoSub}}
+	for ch := 1; ch <= 11; ch++ {
+		opts = append(opts, pickOpt{ID: strconv.Itoa(ch), Title: sprintf(tx.ChannelNumF, ch)})
+	}
+	u.openPicker(tx.Channel, cur, opts, func(u *UI, id string) {
+		if id == cur {
+			return
+		}
+		if u.apBusy() { // another change of the Wi-Fi started while the list was open
+			u.appBusy(false)
+			return
+		}
+		ok := u.app().Do(AppAction{What: "ap_channel", Body: map[string]any{"channel": id}})
+		u.appBusy(ok)
+		if ok {
+			u.notePage(u.Tx.NetX.ChannelApplying, false)
+		}
+	})
+}
+
+// rotateWifi: «New password», with a second tap (every camera and phone on the Wi-Fi has to join it again).
+func (u *UI) rotateWifi() {
+	snap := u.Net.Snapshot()
+	if !u.wifiExtras(&snap, nil) {
+		return
+	}
+	if u.apBusy() {
+		u.appBusy(false)
+		return
+	}
+	if u.confirmTap("ap_rotate") {
+		u.appBusy(u.app().Do(AppAction{What: "ap_rotate"}))
+	}
+}
+
+// drawWifiQR: under «Create my Wi-Fi», the QR to join (the WIFI: format of iOS's and Android's cameras) and, at
+// its side, the network, the password (dots, with its eye), the channel, «New password» and the notes. state: on |
+// starting | error | off (no QR: says so). With the app's API, «Rename» at the bottom right; with the AP not on, the
+// name it has goes next to it (it is there from the first start: the wizard's network step shows it this way).
+func (u *UI) drawWifiQR(d *dc, net *NetSnapshot, legacy *WifiCreds, state string, notes []string) {
+	lay, tx, c, s := u.Lay, u.Tx, d.c, d.s
+	m := float64(lay.M)
+	q0 := lay.SettingsQR
+	x0, y0, w0, h0 := float64(q0.X), float64(q0.Y), float64(q0.W), float64(q0.H)
+	_, creds := u.wifiQR(net, legacy)
 	edit := SSIDEditable(net)
 	if edit {
 		label, busy := tx.SSIDRename, net.Pending != nil && net.Pending.What == "ssid"
@@ -452,29 +566,50 @@ func (u *UI) drawWifiQR(d *dc, net *NetSnapshot, legacy *WifiCreds, state string
 		}
 		return
 	}
-	n := u.drawQR(c, creds.QR, q0.X, q0.Y, int(h0))
-	tx0 := float64(q0.X+n) + 30*s
-	tw := x0 + w0 - tx0 - 12*s
-	ty := float64(q0.Y) + 26*s
-	nl := noteLines(tw, 4)
-	for _, l := range nl {
-		d.text(tx0, ty, l, 16*s, textOpt{col: cWarn, bold: true, width: tw})
-		ty += 22 * s
+	u.drawQR(c, creds.QR, q0.X, q0.Y, int(h0))
+	// The column beside it: the password's field and the rest under it; above, the notes or the network's name
+	pw := lay.Buttons["s_wifi_pw"]
+	tx0 := float64(pw.X)
+	tw := x0 + w0 - tx0
+	headH := float64(pw.Y-q0.Y) - m/2
+	if nl := noteLines(tw, max(1, int((headH-8*s)/(22*s)))); len(nl) > 0 {
+		ty := y0 + 18*s
+		for _, l := range nl { // the network's name is also in «Create my Wi-Fi»'s row: the notes take its place
+			d.text(tx0, ty, l, 16*s, textOpt{col: cWarn, bold: true, width: tw})
+			ty += 22 * s
+		}
+	} else {
+		d.text(tx0+4*s, y0+18*s, tx.QRNetwork, 15*s, textOpt{col: cQuiet, width: tw})
+		d.text(tx0+4*s, y0+min(headH-8*s, 52*s), creds.SSID, 24*s, textOpt{col: cInk, bold: true, width: tw})
 	}
-	if len(nl) > 0 {
-		ty += 8 * s
-	}
-	d.text(tx0, ty, tx.QRNetwork, 15*s, textOpt{col: cQuiet})
-	d.text(tx0, ty+32*s, creds.SSID, 24*s, textOpt{col: cInk, bold: true, width: tw})
-	d.text(tx0, ty+70*s, tx.QRPassword, 15*s, textOpt{col: cQuiet})
-	// Monospaced: the password has l, I, 1, O and 0
-	c.Text(tx0, ty+102*s, creds.Password, 23*s, MonoBold, cInk)
-	ty += 146 * s
-	if len(nl) > 0 { // while there is a note, the help gives way to it (the column is short)
+	// Monospaced: the password has l, I, 1, O and 0. Dots until its eye is opened (the QR carries it anyway: it is
+	// how cameras and phones join)
+	shown := u.wifiPwShown()
+	u.field(d, "s_wifi_pw", tx.QRPassword, creds.Password, fieldOpt{secret: true, set: true, shown: shown, dim: true})
+	u.eye(d, wifiPwEye, shown)
+	if u.wifiExtras(net, legacy) {
+		app := u.app().AppSnapshot()
+		val, busy := u.channelText(net), app.Pending == "ap_channel"
+		if busy {
+			val = tx.NetX.Applying
+		}
+		u.field(d, "s_wifi_ch", tx.NetX.Channel, val, fieldOpt{chevron: !busy, placeholder: busy})
+		conf := u.confirming("ap_rotate")
+		label := tx.NetX.NewPassword
+		switch {
+		case app.Pending == "ap_rotate":
+			label = tx.NetX.Applying
+		case conf:
+			label = tx.TapAgain
+		}
+		d.button("s_wifi_rotate", btn{label: label, active: conf, col: colp(cWarn), dim: app.Pending == "ap_rotate"})
 		return
 	}
+	// The wizard and an older app: the help where the channel and «New password» go
+	ch := lay.Buttons["s_wifi_ch"]
+	ty := float64(ch.Y) + 18*s
 	for _, t := range tx.QRHelp {
-		d.text(tx0, ty, t, 15*s, textOpt{col: cQuiet, width: tw})
+		d.text(tx0+4*s, ty, t, 15*s, textOpt{col: cQuiet, width: tw - 4*s})
 		ty += 21 * s
 	}
 }
@@ -1212,4 +1347,14 @@ func (d *dc) wrap(t string, size float64, style FontStyle, width float64) []stri
 // setupPending: the setup is not done and its wizard was left for later (the gear's and About's amber dot).
 func setupPending(app *AppSnapshot) bool {
 	return app.SetupAPI == Yes && app.Setup != nil && !app.Setup.Done
+}
+
+// apBusy: a change of the board's access point is under way, by either of the screen's clients: NetState (its name,
+// «Create my Wi-Fi») or the device client (its channel, its password, the cameras' way over it). The app applies them
+// on the same netcfg: one at a time, so the AP does not restart twice under the cameras.
+func (u *UI) apBusy() bool {
+	if p := u.Net.Snapshot().Pending; p != nil && (p.What == "ssid" || p.What == "ap") {
+		return true
+	}
+	return strings.HasPrefix(u.app().AppSnapshot().Pending, "ap_")
 }

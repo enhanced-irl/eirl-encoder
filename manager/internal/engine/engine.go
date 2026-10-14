@@ -40,7 +40,8 @@ const (
 	slateEvery    = 250 * time.Millisecond // «Sin señal» in slots whose source gives no image
 	periodicEvery = 2 * time.Second
 	discoverEvery = 2 * time.Second
-	fadeStep      = 20 * time.Millisecond
+	fadeStep      = 20 * time.Millisecond   // the actor's check of a running fade (the audio's steps too)
+	fadeGrace     = time.Second             // a video fade's table no longer holds the actor after its length + this
 	mvGap         = 25 * time.Millisecond   // one frame per source to the screen every MV_GAP (30/s)
 	stopBudget    = 4 * time.Second         // for the sources to end
 	stopTotal     = 9500 * time.Millisecond // all of Stop: the unit gives 10 (TimeoutStopSec)
@@ -93,7 +94,9 @@ type Engine struct {
 
 	// The program
 	pgm         gst.Pipeline
-	comp        gst.Element // the compositor: its sink pads are the layers
+	comp        gst.Element  // the compositor: its sink pads are the layers
+	anim        gst.Animator // sets those pads from the compositor's thread once it plays
+	playing     bool         // the program reached PLAYING: layers go through anim
 	bridges     []gst.Bridge
 	pauseBridge gst.Bridge
 	thumbsMu    sync.Mutex // thumbs is set by its own goroutine at start (startThumbs) and taken by Stop
@@ -139,10 +142,8 @@ type Engine struct {
 }
 
 type fadeState struct {
-	t0       time.Time
-	old, new map[int]scene.Layer
-	roles    map[int]scene.Role
-	length   time.Duration
+	t0     time.Time
+	length time.Duration
 }
 
 // New builds the engine. Start makes the program and the sources; Run is the actor.
@@ -235,6 +236,7 @@ func (e *Engine) Start(withScreen bool) error {
 		return fmt.Errorf("%w: no compositor pgm", ErrProgram)
 	}
 	pgm.FixBase(e.media.Now())
+	e.anim = e.media.NewAnimator(e.comp, e.npads(), time.Second/time.Duration(max(1, e.fps)))
 	e.bridges = make([]gst.Bridge, e.nslots)
 	for i := range e.bridges {
 		src := pgm.ByName(fmt.Sprintf("m%d", i))
@@ -268,6 +270,7 @@ func (e *Engine) Start(withScreen bool) error {
 	if err := pgm.SetState(gst.StatePlaying); err != nil {
 		return fmt.Errorf("%w: does not start", ErrProgram)
 	}
+	e.playing = true
 	mark("program_ms")
 	if e.audio != nil {
 		e.audio.Start(e.scene.Pause.On && e.scene.Pause.Mute)
@@ -794,6 +797,9 @@ func (e *Engine) Stop() {
 		}
 		if sideDone && e.mvBridge != nil {
 			e.mvBridge.Free()
+		}
+		if e.anim != nil {
+			e.anim.Free()
 		}
 	}
 	elog.Event("mixer", "engine_stopped", "sources_s", fmt.Sprintf("%.1f", srcSecs), "total_s", fmt.Sprintf("%.1f", time.Since(t0).Seconds()))

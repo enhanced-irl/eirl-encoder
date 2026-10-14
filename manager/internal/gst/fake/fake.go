@@ -5,6 +5,7 @@ package fake
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ type Media struct {
 	mu         sync.Mutex
 	Pipelines  []*Pipeline
 	Bridges    []*Bridge
+	Animators  []*Animator
 	Elements   map[string]bool // factories that exist (HasElement)
 	ParseErr   map[string]error
 	mono       time.Duration
@@ -127,6 +129,54 @@ func (f *Feeder) Push(frame []byte) bool {
 func (f *Feeder) Free() { f.mu.Lock(); f.Freed = true; f.mu.Unlock() }
 
 func (m *Media) NewTap(appsink gst.Element) gst.Tap { return &Tap{} }
+
+func (m *Media) NewAnimator(comp gst.Element, pads int, frame time.Duration) gst.Animator {
+	a := &Animator{comp: comp.(*Element), NPads: pads, Frame: frame}
+	m.mu.Lock()
+	m.Animators = append(m.Animators, a)
+	m.mu.Unlock()
+	return a
+}
+
+// Animator is a fake animator: the last step of each table lands on the compositor's pads at once (as
+// strings, like SetPad), unless Hold keeps it busy.
+type Animator struct {
+	mu    sync.Mutex
+	comp  *Element
+	NPads int
+	Frame time.Duration
+	Plays [][][]gst.Layer
+	Hold  bool
+	Freed bool
+}
+
+func (a *Animator) Play(steps [][]gst.Layer) {
+	if len(steps) == 0 {
+		return
+	}
+	a.mu.Lock()
+	a.Plays = append(a.Plays, steps)
+	a.mu.Unlock()
+	for i, l := range steps[len(steps)-1] {
+		for _, kv := range l.Props() {
+			a.comp.SetPad("sink_"+strconv.Itoa(i), kv[0], kv[1])
+		}
+	}
+}
+
+func (a *Animator) Busy() bool { a.mu.Lock(); defer a.mu.Unlock(); return a.Hold }
+
+func (a *Animator) Free() { a.mu.Lock(); a.Freed = true; a.mu.Unlock() }
+
+// Last is the last table played (nil if none).
+func (a *Animator) Last() [][]gst.Layer {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.Plays) == 0 {
+		return nil
+	}
+	return a.Plays[len(a.Plays)-1]
+}
 
 // Tap is a fake tap.
 type Tap struct {
@@ -258,6 +308,7 @@ type Element struct {
 	Pulls   [][]byte
 	Select  string
 	Missing map[string]bool // properties that do not exist
+	Offsets map[string]time.Duration
 }
 
 func (e *Element) Name() string { return e.name }
@@ -280,6 +331,23 @@ func (e *Element) SetPad(pad, prop, value string) bool {
 	}
 	e.Pads[pad][prop] = value
 	return true
+}
+
+func (e *Element) SetPadOffset(pad string, d time.Duration) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.Offsets == nil {
+		e.Offsets = map[string]time.Duration{}
+	}
+	e.Offsets[pad] = d
+	return true
+}
+
+// Offset is a pad's offset as set.
+func (e *Element) Offset(pad string) time.Duration {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.Offsets[pad]
 }
 
 // Pad is a pad's property as set.

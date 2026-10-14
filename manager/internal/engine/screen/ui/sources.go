@@ -149,8 +149,19 @@ func (u *UI) drawSourcesPage(d *dc, app *AppSnapshot) {
 		ak, lk := "s_src_"+n, "s_alias_"+n
 		ar := lay.Buttons[ak]
 		mid := float64(ar.Y) + float64(ar.H)/2
-		d.text(float64(lay.SettingsPage.X)+4*s, mid+7*s, sprintf(tx.SourceF, i+1), 19*s, textOpt{col: cInk, bold: true,
-			width: float64(ar.X-lay.SettingsPage.X) - m})
+		lw := float64(ar.X-lay.SettingsPage.X) - m
+		src := u.slotSource(i + 1)
+		if src != nil && src.State == "hidden" { // its number, and «hidden» under it
+			d.text(float64(lay.SettingsPage.X)+4*s, mid-1*s, sprintf(tx.SourceF, i+1), 19*s, textOpt{col: cInk, bold: true,
+				width: lw})
+			d.text(float64(lay.SettingsPage.X)+4*s, mid+16*s, tx.Input.Hidden, 14*s, textOpt{col: cWarn, bold: true, width: lw})
+		} else {
+			d.text(float64(lay.SettingsPage.X)+4*s, mid+7*s, sprintf(tx.SourceF, i+1), 19*s, textOpt{col: cInk, bold: true,
+				width: lw})
+		}
+		if src != nil {
+			u.drawHide(d, "s_hide_"+n, src)
+		}
 		label, sub, warn := u.assignLabel(app, sl)
 		ea, el := u.srcFieldError(app, sl.Slot, "assign"), u.srcFieldError(app, sl.Slot, "alias")
 		col := cBrand
@@ -174,13 +185,18 @@ func (u *UI) drawSourcesPage(d *dc, app *AppSnapshot) {
 			}
 		}
 	}
-	// The rule, under the rows
+	// The rules, under the rows: what a slot is, and Hide
 	if last := lay.Buttons["s_alias_"+strconv.Itoa(len(slots))]; len(slots) > 0 {
 		pg := lay.SettingsPage
 		y := float64(last.Y+last.H) + 30*s
-		for _, line := range d.wrap(tx.SrcHelp, 15*s, Sans, float64(pg.W)-8*s) {
-			d.text(float64(pg.X)+4*s, y, line, 15*s, textOpt{col: cQuiet, width: float64(pg.W) - 8*s})
-			y += 21 * s
+		for i, help := range []string{tx.SrcHelp, tx.Input.HideHelp} {
+			if i > 0 {
+				y += 6 * s
+			}
+			for _, line := range d.wrap(help, 15*s, Sans, float64(pg.W)-8*s) {
+				d.text(float64(pg.X)+4*s, y, line, 15*s, textOpt{col: cQuiet, width: float64(pg.W) - 8*s})
+				y += 21 * s
+			}
 		}
 	}
 	dirty := u.srcDirty(app)
@@ -190,7 +206,10 @@ func (u *UI) drawSourcesPage(d *dc, app *AppSnapshot) {
 	l := app.Last
 	fresh := l != nil && l.What == "slots" && l.At.After(u.srcSavedAt) && !l.At.Before(u.pageSince) &&
 		u.now().Sub(l.At) < 8*time.Second
+	pnote, pwarn := u.pageNoteText() // the engine refused a Hide (the source on air)
 	switch {
+	case pnote != "":
+		note, warn = pnote, pwarn
 	case len(errs) > 0:
 		note = errs[0]
 	case fresh && !l.OK && l.Code == "on_air":
@@ -335,6 +354,9 @@ func (u *UI) sourcesKeys(app *AppSnapshot) []string {
 	for i := range u.Lay.N {
 		n := strconv.Itoa(i + 1)
 		keys = append(keys, "s_src_"+n, "s_alias_"+n)
+		if u.slotSource(i+1) != nil {
+			keys = append(keys, "s_hide_"+n)
+		}
 	}
 	return append(keys, "s_src_save")
 }
@@ -367,6 +389,10 @@ func (u *UI) srcTouch(what, pick string, hasPick bool) bool {
 		u.openTextKeyboard("alias", n, slots[n-1].Alias, AliasMax)
 	case what == "s_src_save":
 		u.srcSave()
+	case strings.HasPrefix(what, "s_hide_"):
+		if n, err := strconv.Atoi(what[len("s_hide_"):]); err == nil {
+			u.hideSlot(n)
+		}
 	case strings.HasPrefix(what, "s_cand_") && hasPick:
 		u.srcChoose(pick)
 	case what == "s_back" && u.settingsView == "cands":
@@ -438,4 +464,36 @@ func (u *UI) srcSave() {
 
 func (u *UI) srcSay(t string) {
 	u.srcNote, u.srcNoteUntil = t, u.now().Add(6*time.Second)
+}
+
+// --- Hide: a source out of the mixer (the web's Hide/Show on each tile), live: not part of the draft ---
+
+// slotSource is the source the engine has in a slot now (nil: none).
+func (u *UI) slotSource(slot int) *SourceStatus {
+	for i := range u.st.Sources {
+		if u.st.Sources[i].Slot == slot {
+			return &u.st.Sources[i]
+		}
+	}
+	return nil
+}
+
+// drawHide is a slot's Hide (Show while hidden, in amber). The source on air is dimmed (the engine refuses hiding
+// it; a tap says so).
+func (u *UI) drawHide(d *dc, key string, src *SourceStatus) {
+	tx := u.Tx.Input
+	if src.State == "hidden" {
+		d.button(key, btn{label: tx.Show, active: true, col: colp(cWarn)})
+		return
+	}
+	d.button(key, btn{label: tx.Hide, dim: src.ID == u.st.mainID()})
+}
+
+// hideSlot hides the slot's source, or shows it again: the engine's command (a refusal shows on the page).
+func (u *UI) hideSlot(slot int) {
+	src := u.slotSource(slot)
+	if src == nil {
+		return
+	}
+	u.send("page", map[string]any{"cmd": "hide", "source": src.ID, "hidden": src.State != "hidden"}, 0, 0)
 }

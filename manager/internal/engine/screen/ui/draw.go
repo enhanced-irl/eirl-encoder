@@ -154,7 +154,8 @@ type btn struct {
 	dim      bool
 	icon     string
 	tint     *Color
-	subCol   *Color // the sub-text's colour (else quiet)
+	subCol   *Color  // the sub-text's colour (else quiet)
+	size     float64 // the label's size before scaling (0: 21)
 }
 
 func (d *dc) button(key string, b btn) {
@@ -194,6 +195,9 @@ func (d *dc) button(key string, b btn) {
 		return
 	}
 	size := 21 * s
+	if b.size > 0 {
+		size = b.size * s
+	}
 	cy := y + h/2 + size*0.36
 	if b.hasSub {
 		cy = y + h/2 - 2*s
@@ -326,35 +330,42 @@ func (u *UI) draw(c *Canvas, now time.Time) {
 			low = volts < 4.8
 		}
 	}
-	rightEdge := float64(lay.Buttons["lock"].X) - m
-	if len(hw) > 0 {
-		col := cQuiet
-		if low {
-			col = cWarn
-		}
-		rightEdge -= d.text(rightEdge, base, strings.Join(hw, tx.Sep), 16*s, textOpt{col: col, align: right})
+	hwCol := cQuiet
+	if low {
+		hwCol = cWarn
 	}
-	// At its left, the CLIENT wifi (WIFI.md §6; not a button)
-	if level, tone, ok := Antenna(&net); ok {
-		ar, alw := 13*s, max(2.0, 2.4*s)
-		ax := rightEdge - m - ar
-		ay := mid + 2*s
-		base := cLine
-		if level == 0 {
-			base = cQuiet
-			if tone == "warn" {
-				base = cWarn
-			}
+	rightEdge := float64(lay.Buttons["lock"].X) - m
+	// With the connections' dots (MODEMS.md §6) the middle has two lines: the dots, and below them, smaller, the
+	// network with the temperature and voltage; the whole area opens their tab. The client wifi is one of the dots.
+	dots, withDots := u.linkDots()
+	dotsDrawn := withDots && u.drawLinkDots(d, leftEdge+2*m, rightEdge-2*m, mid-9*s, dots)
+	u.linksZone = Rect{}
+	if !dotsDrawn {
+		if len(hw) > 0 {
+			rightEdge -= d.text(rightEdge, base, strings.Join(hw, tx.Sep), 16*s, textOpt{col: hwCol, align: right})
 		}
-		u.icon(c, "wifi", ax, ay, ar, alw, base)
-		if level > 0 {
-			arcs := cInk
-			if tone == "warn" {
-				arcs = cWarn
+		// At its left, the CLIENT wifi (WIFI.md §6; not a button)
+		if level, tone, ok := Antenna(&net); ok && !withDots {
+			ar, alw := 13*s, max(2.0, 2.4*s)
+			ax := rightEdge - m - ar
+			ay := mid + 2*s
+			base := cLine
+			if level == 0 {
+				base = cQuiet
+				if tone == "warn" {
+					base = cWarn
+				}
 			}
-			u.icon(c, sprintf("wifi%d", level), ax, ay, ar, alw, arcs)
+			u.icon(c, "wifi", ax, ay, ar, alw, base)
+			if level > 0 {
+				arcs := cInk
+				if tone == "warn" {
+					arcs = cWarn
+				}
+				u.icon(c, sprintf("wifi%d", level), ax, ay, ar, alw, arcs)
+			}
+			rightEdge = ax - ar - m
 		}
-		rightEdge = ax - ar - m
 	}
 	// In the middle, the network: what really goes out (2 s average), the link and the RTT. If it does not fit,
 	// whole parts go (first the RTT, then the link), never half a word
@@ -365,24 +376,54 @@ func (u *UI) draw(c *Canvas, now time.Time) {
 	if live && out.RTTMs != nil {
 		rtt = sprintf(tx.RTTF, *out.RTTMs)
 	}
-	link := ""
+	link, transport := "", ""
 	if u.LinkInfo != nil {
-		link = u.linkText(u.LinkInfo())
+		var n int
+		transport, n = u.LinkInfo()
+		link = u.linkText(transport, n)
 	}
 	x0, x1 := leftEdge+2*m, rightEdge-2*m
-	last := []string{link}
-	if mbps != "" {
-		last = []string{mbps}
-	}
-	var netText string
-	for _, parts := range [][]string{{mbps, link, rtt}, {mbps, link}, last} {
-		netText = joinNonEmpty(parts, tx.Sep)
-		if d.advance(netText, 16*s, false) <= x1-x0 {
-			break
+	if dotsDrawn {
+		u.linksZone = Rect{int(x0), lay.M, int(x1 - x0), lay.HB}
+		if transport == "srtla" { // the dots already say how many: only the protocol
+			link = "SRTLA"
 		}
-	}
-	if x1-x0 > 40*s {
-		d.text((x0+x1)/2, base, netText, 16*s, textOpt{col: cQuiet, align: center, width: x1 - x0})
+		hwText := strings.Join(hw, tx.Sep)
+		size := 13 * s
+		var netText string
+		for _, parts := range [][]string{{mbps, link, rtt}, {mbps, link}, {mbps}, {}} {
+			netText = joinNonEmpty(parts, tx.Sep)
+			if d.advance(joinNonEmpty([]string{netText, hwText}, tx.Sep), size, false) <= x1-x0 {
+				break
+			}
+		}
+		y := mid + 18*s
+		w := d.advance(joinNonEmpty([]string{netText, hwText}, tx.Sep), size, false)
+		x := (x0+x1)/2 - w/2
+		if netText != "" {
+			x += d.text(x, y, netText, size, textOpt{col: cQuiet})
+			if hwText != "" {
+				x += d.text(x, y, tx.Sep, size, textOpt{col: cQuiet})
+			}
+		}
+		if hwText != "" {
+			d.text(x, y, hwText, size, textOpt{col: hwCol, width: x1 - x})
+		}
+	} else {
+		last := []string{link}
+		if mbps != "" {
+			last = []string{mbps}
+		}
+		var netText string
+		for _, parts := range [][]string{{mbps, link, rtt}, {mbps, link}, last} {
+			netText = joinNonEmpty(parts, tx.Sep)
+			if d.advance(netText, 16*s, false) <= x1-x0 {
+				break
+			}
+		}
+		if x1-x0 > 40*s {
+			d.text((x0+x1)/2, base, netText, 16*s, textOpt{col: cQuiet, align: center, width: x1 - x0})
+		}
 	}
 	var hd *hold
 	held := 0.0
@@ -426,6 +467,8 @@ func (u *UI) draw(c *Canvas, now time.Time) {
 	case u.settingsOpen && !locked && u.powering == "":
 	case u.view == "audio":
 		u.drawAudioView(d)
+	case u.view == "audioset":
+		u.drawAudioSet(d)
 	default:
 		u.drawVideoView(d, live, trying, holding)
 	}
@@ -433,7 +476,7 @@ func (u *UI) draw(c *Canvas, now time.Time) {
 	// --- locked: everything off but the program and the padlock ---
 	if locked {
 		shade := cBlack.WithAlpha(0.62)
-		if u.view == "audio" {
+		if u.view == "audio" || u.view == "audioset" {
 			c.FillRect(0, sh, float64(lay.DW), float64(lay.DH)-sh, shade)
 		} else {
 			x0 := float64(lay.PGM.X + lay.PGM.W + lay.M/2)
@@ -681,6 +724,7 @@ func (u *UI) drawAudioView(d *dc) {
 	if !mix { // in the mix it does not apply: neither seen nor touched (OnTouch)
 		d.button("a_follow", btn{label: tx.FollowVideo, active: au.Follow, col: colp(cGood)})
 	}
+	d.button("a_settings", btn{label: tx.AudioX.Button}) // each input's delay and each camera's audio
 	srcs := au.Sources
 	if len(srcs) > 4 {
 		srcs = srcs[:4]
@@ -737,15 +781,7 @@ func (u *UI) drawAudioView(d *dc) {
 		} else {
 			d.frame(ax, ay, aw, ah, cLine, 1.25, 10*s)
 		}
-		name := u.sourceName(a.ID, a.Name)
-		if a.VideoSlot != 0 {
-			for j := range st.Sources {
-				if x := &st.Sources[j]; x.Slot == a.VideoSlot && x.Alias != "" {
-					name = u.srcLabel(x) // the slot's alias names its audio too
-				}
-			}
-			name = sprintf(tx.TileNameF, a.VideoSlot, name)
-		}
+		name := u.audioName(&a)
 		d.text(nx+sw/2, ny+18*s, name, 15*s, textOpt{col: cInk, bold: true, align: center, width: sw - 14*s})
 		sub, ok := tx.AudioState[a.State]
 		if !ok {
@@ -794,6 +830,21 @@ func (u *UI) drawAudioView(d *dc) {
 		d.button(sprintf("a_minus_%d", i), btn{label: tx.Minus})
 		d.button(sprintf("a_plus_%d", i), btn{label: tx.Plus})
 	}
+}
+
+// audioName is how the screen names an audio input: by its name (the engine's own, translated), or its camera's
+// slot alias (the slot's alias names its audio too), with that camera's number.
+func (u *UI) audioName(a *AudioInput) string {
+	name := u.sourceName(a.ID, a.Name)
+	if a.VideoSlot == 0 {
+		return name
+	}
+	for j := range u.st.Sources {
+		if x := &u.st.Sources[j]; x.Slot == a.VideoSlot && x.Alias != "" {
+			name = u.srcLabel(x)
+		}
+	}
+	return sprintf(u.Tx.TileNameF, a.VideoSlot, name)
 }
 
 // drawKeyboard is the password keyboard, full screen (WIFI.md §6). Its base (background and the layer's
@@ -874,8 +925,12 @@ func (u *UI) drawKeyboard(d *dc) {
 		}
 	}
 	d.button("k_cancel", btn{icon: "close"})
-	d.text(m, m+float64(lay.HB)/2+8*s, u.kbTitle(), 22*s,
-		textOpt{col: cInk, bold: true, width: float64(lay.Buttons["k_cancel"].X) - 2*m})
+	titleEnd := float64(lay.Buttons["k_cancel"].X) - 2*m
+	if kb.secret() {
+		u.eye(d, "k_eye", kb.show)
+		titleEnd = float64(lay.Buttons["k_eye"].X) - 2*m
+	}
+	d.text(m, m+float64(lay.HB)/2+8*s, u.kbTitle(), 22*s, textOpt{col: cInk, bold: true, width: titleEnd})
 	f := lay.KBField
 	fx, fy, fw, fh := float64(f.X), float64(f.Y), float64(f.W), float64(f.H)
 	fq := RR{fx, fy, fw, fh, 10 * s}
@@ -886,7 +941,17 @@ func (u *UI) drawKeyboard(d *dc) {
 	var count string
 	var cc Color
 	n := kb.n
-	if kb.secret() {
+	if kb.secret() && kb.show && n > 0 {
+		// Its eye open: the characters, monospaced (l, I, 1, O and 0), the end of it if it does not fit
+		style := MonoBold
+		t := d.fitTail(string(kb.chars()), 24*s, style, fw-2*pad-cw)
+		w := d.text(fx+pad, cy+9*s, t, 24*s, textOpt{col: cInk, style: &style})
+		c.FillRect(fx+pad+w+2*s, cy-15*s, 2, 30*s, cBrand)
+		count, cc = u.kbCount(), cQuiet
+		if !ok {
+			cc = cWarn
+		}
+	} else if kb.secret() {
 		// ONLY dots, never a character of it
 		sp := min(26*s, (fw-2*pad-cw)/float64(max(n, 1)))
 		rad := min(7*s, sp*0.36)
@@ -908,11 +973,13 @@ func (u *UI) drawKeyboard(d *dc) {
 	} else {
 		w := 0.0
 		if len(kb.text) > 0 {
-			w = d.text(fx+pad, cy+9*s, string(kb.text), 26*s, textOpt{col: cInk, width: fw - 2*pad - cw})
+			// the end of it if it does not fit: where the cursor is (a long URL)
+			t := d.fitTail(string(kb.text), 26*s, Sans, fw-2*pad-cw)
+			w = d.text(fx+pad, cy+9*s, t, 26*s, textOpt{col: cInk})
 		}
 		c.FillRect(fx+pad+w+2*s, cy-15*s, 2, 30*s, cBrand)
 		count, cc = sprintf(tx.AliasCountF, len(kb.text)), cQuiet
-		if kb.mode == "name" || kb.mode == "ssid" {
+		if kb.mode == "name" || kb.mode == "ssid" || kb.mode == "spec" {
 			count = sprintf("%d/%d", len(kb.text), kb.max)
 		}
 	}
@@ -928,6 +995,16 @@ func (u *UI) drawKeyboard(d *dc) {
 func (u *UI) kbReady() (bool, string) {
 	kb, tx := u.kb, u.Tx
 	switch kb.mode {
+	case "spec":
+		label := kb.spec.ok
+		if label == "" {
+			label = tx.KeyDone
+		}
+		n := len(kb.text)
+		if kb.spec.secret {
+			n = kb.n
+		}
+		return n >= kb.spec.min, label
 	case "wifi":
 		return PSKOK(kb.chars()), tx.ConnectButton
 	case "alias":
@@ -944,6 +1021,8 @@ func (u *UI) kbReady() (bool, string) {
 func (u *UI) kbTitle() string {
 	kb, tx := u.kb, u.Tx
 	switch kb.mode {
+	case "spec":
+		return kb.spec.title
 	case "wifi":
 		return sprintf(tx.PasswordForF, kb.ssid)
 	case "alias":
@@ -958,6 +1037,8 @@ func (u *UI) kbTitle() string {
 func (u *UI) kbHelp() string {
 	kb, tx := u.kb, u.Tx
 	switch kb.mode {
+	case "spec":
+		return kb.spec.help
 	case "wifi":
 		return tx.KeyboardHelp
 	case "alias":
@@ -971,6 +1052,9 @@ func (u *UI) kbHelp() string {
 // kbCount is a secret's counter.
 func (u *UI) kbCount() string {
 	kb, tx := u.kb, u.Tx
+	if kb.mode == "spec" {
+		return sprintf("%d/%d", kb.n, kb.spec.max)
+	}
 	if kb.mode != "wifi" {
 		return sprintf("%d", kb.n)
 	}

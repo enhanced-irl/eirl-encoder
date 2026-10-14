@@ -68,8 +68,19 @@ var (
 )
 
 type queued struct {
-	a ui.AppAction
-	s secret // setup_password only
+	a       ui.AppAction // its Secrets nil: they are in secrets
+	s       secret       // setup_password only
+	secrets map[string]secret
+	gen     uint64 // the secrets' generation when it was queued (a reveal after DropSecrets is not kept)
+}
+
+// wipe zeroes every secret of the action.
+func (q *queued) wipe() {
+	q.s.wipe()
+	for k, s := range q.secrets {
+		s.wipe()
+		delete(q.secrets, k)
+	}
 }
 
 // DeviceState is the app's device API for the screen (ui.App): the device (language, name, time zone, clock,
@@ -97,6 +108,9 @@ type DeviceState struct {
 	watch ui.AppWatch
 	queue []queued
 	kick  bool
+	// secretGen moves on every DropSecrets (and when what was revealed stops being true: a new key): a reveal queued
+	// before it does not bring its secrets back
+	secretGen uint64
 }
 
 var _ ui.App = (*DeviceState)(nil)
@@ -163,19 +177,29 @@ func (d *DeviceState) Watch(w ui.AppWatch) {
 		d.snap.Setup = &s
 	}
 	if (w.Device && !old.Device) || (w.Setup && !old.Setup) || (w.Update && !old.Update) || (w.Slots && !old.Slots) ||
-		(w.Zones && !old.Zones) || (w.Cloud && !old.Cloud) || (w.About && !old.About) {
+		(w.Zones && !old.Zones) || (w.Cloud && !old.Cloud) || (w.About && !old.About) || (w.Dest && !old.Dest) ||
+		(w.Status && !old.Status) || (w.Sources && !old.Sources) {
 		d.kick = true
 	}
 	d.mu.Unlock()
 	d.poke()
 }
 
-// Do queues an action: false if the queue is full, the action is unknown, or there is no app at all.
+// Do queues an action: false if the queue is full, the action is unknown, or there is no app at all. Its Secrets
+// are copied here (the caller wipes its own right after).
 func (d *DeviceState) Do(a ui.AppAction) bool {
 	if _, ok := actionRoutes[a.What]; !ok || a.What == "setup_password" {
 		return false
 	}
-	return d.enqueue(queued{a: a})
+	q := queued{a: a}
+	if len(a.Secrets) > 0 {
+		q.secrets = make(map[string]secret, len(a.Secrets))
+		for k, v := range a.Secrets {
+			q.secrets[k] = newSecret(v)
+		}
+	}
+	q.a.Secrets = nil
+	return d.enqueue(q)
 }
 
 // SetupPassword queues the web password (copied; the caller wipes its own).
@@ -191,9 +215,10 @@ func (d *DeviceState) enqueue(q queued) bool {
 	gone := d.snap.DeviceAPI == ui.No && d.snap.SetupAPI == ui.No && d.snap.Device == nil
 	if len(d.queue) >= queueMax || gone {
 		d.mu.Unlock()
-		q.s.wipe()
+		q.wipe()
 		return false
 	}
+	q.gen = d.secretGen
 	d.queue = append(d.queue, q)
 	if d.snap.Pending == "" {
 		d.snap.Pending = q.a.What
@@ -206,7 +231,7 @@ func (d *DeviceState) enqueue(q queued) bool {
 // dropQueue (with mu held) forgets the queued actions and wipes their secrets.
 func (d *DeviceState) dropQueue() {
 	for i := range d.queue {
-		d.queue[i].s.wipe()
+		d.queue[i].wipe()
 	}
 	d.queue = nil
 	d.snap.Pending = ""
@@ -277,13 +302,14 @@ func (d *DeviceState) take() (q *queued, kick bool, w ui.AppWatch, snap ui.AppSn
 }
 
 func (d *DeviceState) loop() {
-	var dev, setup, upd, slots, zones, cloud, about time.Time
+	var dev, setup, upd, slots, zones, cloud, about, dest, status, srcs time.Time
 	timer := time.NewTimer(time.Hour)
 	defer timer.Stop()
 	for d.ctx.Err() == nil {
 		q, kick, w, snap := d.take()
 		if kick {
 			dev, setup, upd, slots, cloud, about = time.Time{}, time.Time{}, time.Time{}, time.Time{}, time.Time{}, time.Time{}
+			dest, status, srcs = time.Time{}, time.Time{}, time.Time{}
 			if snap.Zones == nil {
 				zones = time.Time{}
 			}
@@ -298,6 +324,10 @@ func (d *DeviceState) loop() {
 				upd = time.Time{}
 			case "slots":
 				slots = time.Time{}
+			case "dest_save", "restart", "input_save", "uplink":
+				dest, status = time.Time{}, time.Time{}
+			case "cloud_unlink":
+				cloud = time.Time{}
 			}
 			d.changed()
 			continue
@@ -332,6 +362,9 @@ func (d *DeviceState) loop() {
 		due(&zones, ZonesRetry, w.Zones && snap.Zones == nil, d.pollZones)
 		due(&cloud, every(snap.CloudAPI, false, CloudEvery, CloudEvery), w.Cloud, d.pollCloud)
 		due(&about, AboutEvery, w.About, d.pollAbout)
+		due(&dest, every(snap.DestAPI, false, DestEvery, DestEvery), w.Dest, d.pollDest)
+		due(&status, every(snap.StatusAPI, false, StatusEvery, StatusEvery), w.Status, d.pollStatus)
+		due(&srcs, every(snap.SourcesAPI, false, SourcesEvery, SourcesEvery), w.Sources, d.pollSources)
 		if news {
 			d.changed()
 		}
@@ -531,9 +564,13 @@ func boardAddrs() []string {
 
 // runAction runs one action and keeps its result. The password's secret is wiped whatever happens.
 func (d *DeviceState) runAction(q queued) {
-	defer q.s.wipe()
+	defer q.wipe()
 	a := q.a
 	route := actionRoutes[a.What]
+	if parityActions[a.What] {
+		d.runParity(q, route)
+		return
+	}
 	lang := ""
 	var body []byte
 	switch a.What {

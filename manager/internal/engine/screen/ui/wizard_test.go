@@ -221,7 +221,7 @@ func TestWizardLater(t *testing.T) {
 		t.Fatal("no reminder")
 	}
 	h.press("settings", 0.1)
-	h.press("s_page_about", 0.1)
+	h.openPage("about")
 	h.press("s_setup_again", 0.1) // «Continue the setup»: at once
 	h.u.Tick()
 	if !h.u.wizardOn() || h.u.settingsOpen {

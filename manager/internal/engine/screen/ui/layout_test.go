@@ -10,6 +10,9 @@ import (
 
 func overlaps(a, b Rect) bool { return a.overlaps(b) }
 
+// audioViews are the audio views (Layout.Hit): the strips, their settings, and a camera's choice open.
+var audioViews = []string{"audio", "audioset", "audiopick"}
+
 // LayoutTest.test_fits_screens
 func TestLayoutFitsScreens(t *testing.T) {
 	for _, sz := range [][2]int{{1024, 600}, {1280, 720}, {1920, 1080}} {
@@ -44,8 +47,11 @@ func TestLayoutFitsScreens(t *testing.T) {
 				continue
 			}
 			view := "video"
-			if strings.HasPrefix(k, "a_") {
-				view = "audio"
+			for _, v := range audioViews { // an audio view's key: the first view it answers in
+				if audioKeyIn(k, v) {
+					view = v
+					break
+				}
 			}
 			var keys []string
 			s := strings.HasPrefix(k, "s_") || strings.HasPrefix(k, "w_") // Settings' and the wizard's: given
@@ -183,17 +189,20 @@ func TestLayoutFitsScreens(t *testing.T) {
 				t.Errorf("%v: meter %v", sz, r)
 			}
 		}
-		var rs, ra []Rect
+		var rs []Rect
+		ra := make([][]Rect, len(audioViews))
 		rs = append(append(rs, lay.Tiles...), lay.PGM, lay.PGMMeter)
 		for k, v := range lay.Buttons {
 			if !hasAnyPrefix(k, "m_", "a_", "s_", "k_", "w_") {
 				rs = append(rs, v)
 			}
-			if strings.HasPrefix(k, "a_") && !strings.HasPrefix(k, "a_fader") {
-				ra = append(ra, v)
+			for i, view := range audioViews {
+				if audioKeyIn(k, view) && !strings.HasPrefix(k, "a_fader") {
+					ra[i] = append(ra[i], v)
+				}
 			}
 		}
-		for _, set := range [][]Rect{ra, rs} { // in the audio view nothing overlaps either
+		for _, set := range append(ra, rs) { // in the audio views nothing overlaps either
 			for i, a := range set {
 				for _, b := range set[i+1:] {
 					if overlaps(a, b) {

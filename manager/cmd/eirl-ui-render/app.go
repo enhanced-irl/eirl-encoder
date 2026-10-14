@@ -19,7 +19,13 @@ import (
 //	settings-updates-testbuild ·
 //	settings-about · settings-old (an app without the device API) · settings-sources · settings-sources-edited ·
 //	settings-sources-pick · settings-sources-alias · settings-sources-onair · settings-sources-dup ·
-//	settings-sources-oldengine · wizard-1-language · wizard-2-time · wizard-2-zones · wizard-3-network ·
+//	settings-sources-oldengine · settings-sources-hidden (slot 2 hidden; hiding the one on air refused) ·
+//	settings-input (the board's HDMI, another EDID in use) · settings-input-usb (a USB card saved, in use) ·
+//	settings-input-auto (the first USB there is) · settings-input-test · settings-input-gone (a saved USB unplugged,
+//	the test pattern's audio card gone) · settings-input-warn (a USB 2 card with warnings) · settings-input-edited ·
+//	settings-input-pick · settings-input-modes · settings-input-audio · settings-input-confirm (streaming: «Save and
+//	apply» waiting for its second tap) · settings-input-error (the app's field errors) · settings-input-saved ·
+//	settings-input-loading · settings-input-old · wizard-1-language · wizard-2-time · wizard-2-zones · wizard-3-network ·
 //	wizard-3-networks · wizard-3-network-ssid-kb · wizard-4-password · wizard-4-password-kb · wizard-4-password-again · wizard-4-password-set ·
 //	wizard-5-name · wizard-5-name-kb · wizard-6-cloud · wizard-6-cloud-pairing · wizard-6-cloud-linked · wizard-7-done
 
@@ -89,6 +95,10 @@ func appState(variant, lang string, now time.Time) ui.AppSnapshot {
 		Zones: fakeZones, Commit: "0123abcd", IPs: []string{"192.168.1.20", "10.42.0.1"}}
 	avail := &ui.UpdateRelease{Version: "0.2.0", Notes: fakeNotes[lang], Size: 23_400_000}
 	snap.Slots, snap.SlotsAPI = fakeSlots(), ui.Yes
+	snap.Status, snap.StatusAPI = fakeStatus(), ui.Yes
+	snap.Sources, snap.SourcesAPI = fakeSources(lang), ui.Yes
+	inputVariant(variant, lang, now, &snap)
+	streamState(variant, lang, now, &snap)
 	last := func(code, msg string, fields map[string]ui.AppFieldError) {
 		snap.Last = &ui.AppResult{What: "slots", Status: 409, Code: code, Message: msg, Fields: fields, At: now}
 	}
@@ -231,4 +241,178 @@ func qrRows(text string) []string {
 		rows[y] = string(b)
 	}
 	return rows
+}
+
+// Fake devices of the Input page: the fixture's two USB cards and a Cam Link 4K.
+const (
+	fakeUSB1    = "/dev/v4l/by-path/platform-70090000.xusb-usb-0:2.4:1.0-video-index0"
+	fakeLogi    = "/dev/v4l/by-id/usb-046d_Logi_4K_Stream_Edition_0000ABCD-video-index0"
+	fakeCamLink = "/dev/v4l/by-id/usb-Elgato_Cam_Link_4K_0000EFGH-video-index0"
+)
+
+// fakeStatus is GET /status's input: the board's HDMI saved with 1080p30, another EDID running.
+func fakeStatus() *ui.StatusInfo {
+	return &ui.StatusInfo{Transport: "srt", Output: "off", Input: ui.InputInfo{Source: "hdmi", Device: "auto",
+		Format: "auto", Mode: "auto", Audio: "auto", EDIDPreferred: "1080p30", EDIDActive: "1080p50"}}
+}
+
+// fakeSources is GET /sources (the app names the HDMI and the test pattern in the device language).
+func fakeSources(lang string) *ui.SourcesInfo {
+	opt := func(format, mode string, fps float64, ow, oh int, share float64) ui.CaptureOption {
+		return ui.CaptureOption{Format: format, Mode: mode, FPS: fps, OutWidth: ow, OutHeight: oh, BusShare: share}
+	}
+	logi := []ui.CaptureOption{opt("MJPG", "1920x1080@60", 60, 1920, 1080, 0), opt("MJPG", "3840x2160@30", 30, 1920, 1080, 0),
+		opt("YUY2", "1920x1080@30", 30, 1920, 1080, 0.62), opt("NV12", "1280x720@60", 60, 1280, 720, 0.55),
+		opt("YUY2", "1920x1080@60000/1001", 59.94, 1920, 1080, 0.93), opt("MJPG", "1280x720@60", 60, 1280, 720, 0)}
+	usb1 := []ui.CaptureOption{opt("MJPG", "1920x1080@60", 60, 1920, 1080, 0), opt("YUY2", "1920x1080@5", 5, 1920, 1080, 0.31)}
+	return &ui.SourcesInfo{
+		Sources: []ui.SourceChoice{
+			{ID: "hdmi", Kind: "hdmi-csi", Name: map[string]string{"es": "HDMI de la placa", "en": "Board HDMI", "fr": "HDMI de la carte"}[lang]},
+			{ID: fakeUSB1, Kind: "usb", Name: "USB3. 0 capture", USB3: false, USBKnown: true, Auto: &usb1[0], Options: usb1,
+				AudioName: "USB3. 0 capture", Warnings: []string{"usb2"}},
+			{ID: fakeLogi, Kind: "usb", Name: "Logi 4K Stream Edition", USB3: true, USBKnown: true, Auto: &logi[0], Options: logi},
+			{ID: "test", Kind: "test", Name: map[string]string{"es": "Patrón de prueba", "en": "Test pattern", "fr": "Mire de test"}[lang]}},
+		Audio: []ui.AudioChoice{{ID: "i2s", Kind: "i2s", Name: "HDMI de la placa"},
+			{ID: "alsa:capture", Kind: "usb", Name: "USB3. 0 capture"}, {ID: "net:cam1", Kind: "network", Name: "Móvil de Ana"}}}
+}
+
+// inputVariant sets the app's state of an Input page's variant.
+func inputVariant(variant, lang string, now time.Time, snap *ui.AppSnapshot) {
+	in := &snap.Status.Input
+	switch variant {
+	case "settings-input-usb", "settings-input-modes", "settings-input-confirm":
+		*in = ui.InputInfo{Source: "usb", Device: fakeLogi, Format: "YUY2", Mode: "1920x1080@30", Audio: "auto",
+			EDIDPreferred: "1080p30", ActiveState: "ready", ActiveName: "Logi 4K Stream Edition", ActiveFormat: "YUY2",
+			ActiveMode: "1920x1080@30"}
+		if variant == "settings-input-confirm" {
+			snap.Status.Output = "on"
+		}
+	case "settings-input-auto":
+		*in = ui.InputInfo{Source: "usb", Device: "auto", Format: "auto", Mode: "auto", Audio: "auto", EDIDPreferred: "1080p30"}
+	case "settings-input-test":
+		*in = ui.InputInfo{Source: "test", Device: "auto", Format: "auto", Mode: "auto", Audio: "none", EDIDPreferred: "1080p30"}
+	case "settings-input-gone":
+		*in = ui.InputInfo{Source: "usb", Device: fakeCamLink, Format: "MJPG", Mode: "1920x1080@60", Audio: "alsa:Link4K",
+			EDIDPreferred: "1080p30", ActiveState: "waiting_device"}
+	case "settings-input-warn", "settings-input-audio":
+		*in = ui.InputInfo{Source: "usb", Device: fakeUSB1, Format: "auto", Mode: "auto", Audio: "alsa:capture",
+			EDIDPreferred: "1080p30", ActiveState: "ready", ActiveName: "USB3. 0 capture", ActiveFormat: "MJPG",
+			ActiveMode: "1920x1080@60"}
+	case "settings-input-error":
+		snap.Status.Output = "on"
+		snap.Last = &ui.AppResult{What: "input_save", Status: 400, Code: "validation", At: now.Add(time.Second),
+			Message: map[string]string{"es": "Hay campos con errores", "en": "Some fields are wrong",
+				"fr": "Certains champs sont incorrects"}[lang],
+			Fields: map[string]ui.AppFieldError{
+				"edidPreferred": {Code: "invalid", Message: map[string]string{"es": "debe ser uno de: 1080p30, 1080p50, 720p60",
+					"en": "must be one of: 1080p30, 1080p50, 720p60", "fr": "doit être l'un de : 1080p30, 1080p50, 720p60"}[lang]},
+				"url": {Code: "invalid", Message: "falta la URL"}}}
+	case "settings-input-saved":
+		yes := true
+		snap.Status.Output = "on"
+		snap.Last = &ui.AppResult{What: "input_save", OK: true, Status: 200, Restarted: &yes, At: now.Add(time.Second)}
+	case "settings-input-loading":
+		snap.Status, snap.StatusAPI, snap.Sources, snap.SourcesAPI = nil, ui.Unknown, nil, ui.Unknown
+	case "settings-input-old":
+		snap.Status, snap.StatusAPI, snap.Sources, snap.SourcesAPI = nil, ui.No, nil, ui.No
+	}
+}
+
+// --- the Wi-Fi page's channel and new password, and the Network cameras page (MIXER.md §21) ---
+//
+//	settings-wifi-eye (the password shown) · settings-wifi-channel (its picker) · settings-wifi-rotate (waiting for
+//	the second tap) · settings-wifi-error (the app refused the channel) · settings-cams-none · settings-cams-several
+//	(three cameras, by cable too) · settings-cams-many (more than fit: pages) · settings-cams-viaoff (turning the
+//	Wi-Fi way off: second tap) · settings-cams-cam (a camera's view) · settings-cams-cam-eye (its URLs shown) ·
+//	settings-cams-cam-cable (by cable, its URLs shown) · settings-cams-cam-nocable (by cable without an address) ·
+//	settings-cams-cam-remove (waiting for the second tap) · settings-cams-cam-reading (the app asked)
+
+// fakeKey is a camera's FAKE key (only to see the drawing).
+const fakeKey = "EjemploNoEsLaClave01"
+
+// fakeCamURLs are a camera's FAKE URLs over an address.
+func fakeCamURLs(ip, id string) ui.CamURLs {
+	srt := "srt://" + ip + ":8890?streamid=publish:" + id + ":" + id + ":" + fakeKey
+	return ui.CamURLs{SRT: srt, RTMP: "rtmp://" + ip + ":1935/" + id + "?user=" + id + "&pass=" + fakeKey,
+		RTMPServer: "rtmp://" + ip + ":1935/", RTMPKey: id + "?user=" + id + "&pass=" + fakeKey, SRTQR: qrRows(srt)}
+}
+
+// camsFake sets the network cameras and the Wi-Fi's channel of a variant.
+func camsFake(variant, lang string, net *ui.NetSnapshot, snap *ui.AppSnapshot, now time.Time) {
+	st := net.Status
+	if st == nil {
+		return
+	}
+	kb, loss := 4600, 0.3
+	st.CamMax = 1
+	st.LAN = ui.LANStatus{State: "off", Iface: "eth0", IP: "192.168.1.20"}
+	st.CamItems = []ui.NetCamera{{ID: "cam1", Name: "Móvil de Ana", Connected: true, Via: "wifi", Protocol: "srt",
+		Codec: "h265", Kbps: &kb, LossPct: &loss}}
+	if net.Wifi != nil {
+		net.Wifi.Channel = "auto"
+	}
+	cable := func() {
+		st.LANEnabled, st.LAN.State = true, "on"
+	}
+	switch {
+	case variant == "settings-cams-none":
+		st.CamItems, st.Cameras = []ui.NetCamera{}, 0
+	case variant == "settings-cams-several" || variant == "settings-cams-many":
+		cable()
+		st.CamMax = 8
+		lk := 2900
+		st.CamItems = append(st.CamItems,
+			ui.NetCamera{ID: "cam2", Name: "Cámara del escenario", Connected: true, Via: "lan", Protocol: "rtmp", Codec: "h264", Kbps: &lk},
+			ui.NetCamera{ID: "cam3", Name: "GoPro (casco)"})
+		if variant == "settings-cams-many" {
+			st.CamItems = append(st.CamItems, ui.NetCamera{ID: "cam4", Name: "Dron"}, ui.NetCamera{ID: "cam5", Name: "Móvil de Leo"})
+		}
+		st.Cameras = len(st.CamItems)
+	case strings.HasPrefix(variant, "settings-cams-cam-cable"), variant == "settings-cams-cam-nocable":
+		cable()
+		if variant == "settings-cams-cam-nocable" {
+			st.LAN.IP, st.LAN.State = "", "error"
+		}
+	case variant == "settings-wifi-error":
+		snap.Last = &ui.AppResult{What: "ap_channel", Status: 409, Code: "on_air", At: now,
+			Message: map[string]string{"es": "«Móvil de Ana» entra por esta wifi y está al aire: cambiar el canal la reinicia",
+				"en": "“Móvil de Ana” comes in over this Wi-Fi and is on air: changing the channel restarts it",
+				"fr": "« Móvil de Ana » arrive par ce Wi-Fi et est à l’antenne : changer le canal le redémarre"}[lang]}
+	}
+	if strings.HasSuffix(variant, "-eye") || strings.HasSuffix(variant, "-cable") {
+		lan := fakeCamURLs("192.168.1.20", "cam1")
+		snap.CamCreds = []ui.CamConnect{{ID: "cam1", Wifi: fakeCamURLs("10.42.0.1", "cam1"), LAN: &lan}}
+	}
+	if variant == "settings-cams-cam-reading" {
+		snap.Pending = "cam_creds"
+	}
+}
+
+// camsPreview puts the page of a variant in its state (after the page is open).
+func camsPreview(variant string, p ui.Preview) {
+	switch variant {
+	case "settings-wifi-eye":
+		p.NetReveal("s_wifi_pw_eye")
+	case "settings-wifi-channel":
+		p.NetChannelPicker()
+	case "settings-wifi-rotate":
+		p.NetConfirm("ap_rotate")
+	case "settings-cams-viaoff":
+		p.NetConfirm("via_wifi")
+	}
+	if !strings.HasPrefix(variant, "settings-cams-cam") {
+		return
+	}
+	p.NetView("cam1")
+	switch variant {
+	case "settings-cams-cam-eye", "settings-cams-cam-reading":
+		p.NetReveal("s_camv_srt_eye")
+		p.NetReveal("s_camv_rtmp_eye")
+	case "settings-cams-cam-cable", "settings-cams-cam-nocable":
+		p.NetWay("lan")
+		p.NetReveal("s_camv_srt_eye")
+		p.NetReveal("s_camv_rtmp_eye")
+	case "settings-cams-cam-remove":
+		p.NetConfirm("cam_remove")
+	}
 }

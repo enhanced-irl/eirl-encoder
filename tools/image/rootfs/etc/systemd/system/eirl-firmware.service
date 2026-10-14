@@ -1,0 +1,18 @@
+[Unit]
+Description=EnhancedIRL image: the board's firmware (QSPI) check, and its one-time update where the image allows it
+Documentation=https://github.com/enhanced-irl/eirl-encoder/blob/main/IMAGE.md
+ConditionPathExists=!/var/lib/eirl-image/firmware.done
+# Default dependencies: after sysinit (udev, modules, tmpfiles), which NVIDIA's updater needs. After nvfb, NVIDIA's
+# first-boot script: both use debconf (dpkg-reconfigure), whose lock would make one of them fail
+After=nvfb.service eirl-firstboot.service
+Before=eirl-encoderd.service eirl-engine.service eirl-hdmi-init.service eirl-splash-quit.service multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/eirl-image/eirl-firmware auto
+# An update takes about 2 minutes
+TimeoutStartSec=15min
+
+[Install]
+WantedBy=multi-user.target

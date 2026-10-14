@@ -1,0 +1,391 @@
+#!/usr/bin/env python3
+"""stages/check.py — the image's offline checks (IMAGE.md §10.1), on the root filesystem the image was made
+from and on the assembled raw image. Runs in the linux/arm64 work container (Python 3.6: no dataclasses, no
+walrus). Prints one line per check and a report; exits 1 if any check fails.
+
+  check.py --rootfs DIR --image IMG --bootparts DIR --release DIR --bundle NAME --version V
+           --mode product|test|debug --lock FILE --report-dir DIR [--update-lock]
+"""
+import argparse
+import fnmatch
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import tarfile
+
+FAILS = []
+NOTES = []
+
+
+def ok(name, cond, detail=""):
+    line = ("ok   " if cond else "FAIL ") + name + (": " + detail if detail else "")
+    print(line)
+    if not cond:
+        FAILS.append(line)
+    return cond
+
+
+def note(name, detail):
+    print("info " + name + ": " + detail)
+    NOTES.append((name, detail))
+
+
+def sha256_file(path, limit=None):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        left = limit
+        while True:
+            n = 1 << 20 if left is None else min(1 << 20, left)
+            if n == 0:
+                break
+            b = f.read(n)
+            if not b:
+                break
+            h.update(b)
+            if left is not None:
+                left -= len(b)
+    return h.hexdigest()
+
+
+def dpkg_status(root):
+    """{package: {"version", "status", "source"}} from var/lib/dpkg/status."""
+    pkgs, cur = {}, {}
+    for line in open(os.path.join(root, "var/lib/dpkg/status"), encoding="utf-8", errors="replace"):
+        line = line.rstrip("\n")
+        if not line:
+            if cur.get("Package"):
+                pkgs[cur["Package"]] = cur
+            cur = {}
+            continue
+        if line[0] in " \t":
+            continue
+        k, _, v = line.partition(":")
+        cur[k] = v.strip()
+    if cur.get("Package"):
+        pkgs[cur["Package"]] = cur
+    return pkgs
+
+
+def wants(root):
+    """Enabled units: {unit: [target.wants, ...]} from etc/systemd/system/*.wants."""
+    out = {}
+    base = os.path.join(root, "etc/systemd/system")
+    for d in sorted(os.listdir(base)):
+        if not (d.endswith(".wants") or d.endswith(".requires")):
+            continue
+        for u in sorted(os.listdir(os.path.join(base, d))):
+            out.setdefault(u, []).append(d)
+    return out
+
+
+def masked(root):
+    base = os.path.join(root, "etc/systemd/system")
+    return sorted(u for u in os.listdir(base)
+                  if os.path.islink(os.path.join(base, u)) and os.readlink(os.path.join(base, u)) == "/dev/null")
+
+
+def patterns(path):
+    out = []
+    for line in open(path, encoding="utf-8"):
+        line = line.split("#", 1)[0].strip()
+        if line:
+            out.append(line.split()[0])
+    return out
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    for a in ("rootfs", "image", "bootparts", "bootparts-lock", "release", "bundle", "version", "mode", "lock", "report-dir", "repo"):
+        ap.add_argument("--" + a, required=True)
+    ap.add_argument("--update-lock", action="store_true")
+    a = ap.parse_args()
+    R = a.rootfs
+    debug = a.mode == "debug"
+
+    # --- packages
+    pkgs = dpkg_status(R)
+    installed = {p: v for p, v in pkgs.items() if v.get("Status", "").endswith(" installed")}
+    lock_lines = ["%s %s" % (p, installed[p]["Version"]) for p in sorted(installed)]
+    report = os.path.join(a.report_dir, "packages.txt")
+    with open(report, "w", encoding="utf-8") as f:
+        f.write("# package version source\n")
+        for p in sorted(installed):
+            src = installed[p].get("Source", p).split(" ")
+            srcv = src[1].strip("()") if len(src) > 1 else installed[p]["Version"]
+            f.write("%s %s %s %s\n" % (p, installed[p]["Version"], src[0], srcv))
+    note("packages", "%d installed (report %s)" % (len(installed), report))
+    if a.mode == "product" and (a.update_lock or not os.path.exists(a.lock)):
+        ok("a product image has a reviewed packages.lock (no --update-lock)", False)
+    elif a.update_lock or not os.path.exists(a.lock):
+        with open(a.lock, "w", encoding="utf-8") as f:
+            f.write("# tools/image/packages.lock — the image's exact packages and versions (check.py --update-lock).\n")
+            f.write("\n".join(lock_lines) + "\n")
+        note("packages.lock", "written (%s): review its diff" % a.lock)
+    else:
+        want = [l for l in open(a.lock).read().splitlines() if l and not l.startswith("#")]
+        extra, missing = sorted(set(lock_lines) - set(want)), sorted(set(want) - set(lock_lines))
+        ok("packages = packages.lock", not extra and not missing,
+           "new/changed: %s; gone: %s" % (", ".join(extra[:12]) or "-", ", ".join(missing[:12]) or "-"))
+    deny = []
+    for f in sorted(os.listdir(os.path.join(a.repo, "base"))):
+        if f.startswith("purge-") and f.endswith(".txt"):
+            deny += patterns(os.path.join(a.repo, "base", f))
+    hits = sorted(p for p in installed for d in deny if fnmatch.fnmatch(p, d))
+    ok("nothing from base/purge-*.txt", not hits, ", ".join(hits[:20]))
+    dropped = ["nvidia-l4t-" + d for d in ("weston", "graphics-demos", "oem-config", "kernel-headers", "jetson-io", "gputools")]
+    ok("NVIDIA packages left out", not [p for p in dropped if p in installed], ", ".join(p for p in dropped if p in installed))
+    nv = sorted(p for p in installed if p.startswith("nvidia-l4t-"))
+    not_held = [p for p in nv if not installed[p]["Status"].startswith("hold ")]
+    ok("every nvidia-l4t-* on hold (%d)" % len(nv), nv and not not_held, ", ".join(not_held))
+    ok("no CUDA toolkit, cuDNN, TensorRT, VisionWorks", not [p for p in installed if re.match(r"(cuda-|libcudnn|libnvinfer|tensorrt|libvisionworks)", p)])
+    branding = [p for p in installed if re.match(r"(plymouth-theme-ubuntu|ubuntu-mono|humanity-icon-theme|ubuntu-wallpapers|ubuntu-artwork|ubuntu-settings|ubuntu-docs|ubuntu-advantage|ubuntu-pro|update-manager|ubuntu-release-upgrader|update-notifier)", p)]
+    ok("no Ubuntu branding packages", not branding, ", ".join(branding))
+    nocopy = [p for p in installed
+              if not os.path.exists(os.path.join(R, "usr/share/doc", p.split(":")[0], "copyright"))
+              and not os.path.islink(os.path.join(R, "usr/share/doc", p.split(":")[0]))]
+    ok("every package keeps its copyright file", len(nocopy) <= 3, "%d without: %s" % (len(nocopy), ", ".join(nocopy[:10])))
+
+    # --- units
+    w, m = wants(R), masked(R)
+    with open(os.path.join(a.report_dir, "units.txt"), "w", encoding="utf-8") as f:
+        f.write("# enabled (wanted by)\n")
+        for u in sorted(w):
+            f.write("%s %s\n" % (u, ",".join(w[u])))
+        f.write("# masked\n" + "\n".join(m) + "\n")
+    dt = os.readlink(os.path.join(R, "etc/systemd/system/default.target"))
+    ok("default.target = multi-user", dt.endswith("multi-user.target"), dt)
+    for u in ("eirl-encoderd.service", "eirl-engine.service", "eirl-hdmi-init.service", "eirl-firstboot.service", "eirl-firmware.service",
+              "eirl-splash.service", "eirl-update-recover.service", "eirl-ap.service", "nvpmodel.service",
+              "NetworkManager.service", "avahi-daemon.service", "haveged.service", "systemd-resolved.service"):
+        ok("enabled " + u, u in w)
+    must_mask = ["nv-l4t-bootloader-config.service", "alsa-restore.service"]
+    must_mask += ["nv-l4t-usb-device-mode.service"]
+    if not debug:
+        must_mask += ["ssh.service", "ssh.socket"]
+    for u in must_mask:
+        ok("masked " + u, u in m)
+    ok("no oem-config", not os.path.exists(os.path.join(R, "etc/systemd/system/nv-oem-config.target"))
+       and not os.path.exists(os.path.join(R, "lib/systemd/system/nv-oem-config.service")))
+    ok("no USB device mode console wanted", "serial-getty@ttyGS0.service" not in w)
+    ok("ModemManager installed, not enabled", "modemmanager" in installed and "ModemManager.service" not in w
+       and not os.path.lexists(os.path.join(R, "etc/systemd/system/dbus-org.freedesktop.ModemManager1.service")))
+
+    # --- per-device values and nothing of the test board
+    mid = open(os.path.join(R, "etc/machine-id"), encoding="utf-8").read()
+    ok("machine-id empty", mid.strip() == "")
+    ok("dbus machine-id -> /etc/machine-id", os.path.islink(os.path.join(R, "var/lib/dbus/machine-id")))
+    ok("no random seed", not os.path.exists(os.path.join(R, "var/lib/systemd/random-seed")))
+    keys = [f for f in os.listdir(os.path.join(R, "etc/ssh")) if f.startswith("ssh_host_")]
+    ok("no SSH host keys", not keys, ", ".join(keys))
+    conf = os.path.join(R, "etc/eirl-encoder")
+    left = sorted(os.listdir(conf)) if os.path.isdir(conf) else []
+    ok("/etc/eirl-encoder holds only a new device's engine.env", left == ["engine.env"], ", ".join(left))
+    env = open(os.path.join(conf, "engine.env")).read() if "engine.env" in left else ""
+    ok("engine.env: output off, no destination", re.search(r"(?m)^OUTPUT=off$", env) is not None
+       and re.search(r"(?m)^SRT_URL=$", env) is not None)
+    nmc = os.path.join(R, "etc/NetworkManager/system-connections")
+    ok("no Wi-Fi or network profiles", not os.path.isdir(nmc) or not os.listdir(nmc))
+    ok("no NetworkManager state", not os.listdir(os.path.join(R, "var/lib/NetworkManager")) if os.path.isdir(os.path.join(R, "var/lib/NetworkManager")) else True)
+    ok("journal empty", not os.listdir(os.path.join(R, "var/log/journal")))
+    homes = os.listdir(os.path.join(R, "home"))
+    ok("home directories", homes == (["eirl-debug"] if debug else []), ", ".join(homes))
+    ak = []
+    for top in ("root", "home", "etc"):
+        for dp, dn, fn in os.walk(os.path.join(R, top)):
+            ak += [os.path.join(dp, f)[len(R):] for f in fn if f in ("authorized_keys", "authorized_keys2")]
+    ok("authorized_keys", ak == (["/home/eirl-debug/.ssh/authorized_keys"] if debug else []), ", ".join(ak))
+    users = [l.split(":") for l in open(os.path.join(R, "etc/passwd")).read().splitlines() if l]
+    logins = [u[0] for u in users if 1000 <= int(u[2]) < 65534]
+    ok("login users", logins == (["eirl-debug"] if debug else []), ", ".join(logins))
+    shadow = [l.split(":") for l in open(os.path.join(R, "etc/shadow")).read().splitlines() if l]
+    pw = [s[0] for s in shadow if s[1] and s[1][0] not in "!*"]
+    ok("no account with a password", not pw, ", ".join(pw))
+    root = [s for s in shadow if s[0] == "root"]
+    ok("root locked", root and root[0][1].startswith(("!", "*")))
+    ok("resolv.conf is the resolved stub", os.readlink(os.path.join(R, "etc/resolv.conf")).endswith("stub-resolv.conf"))
+    ok("no extlinux backups", not [f for f in os.listdir(os.path.join(R, "boot/extlinux")) if f != "extlinux.conf"],
+       ", ".join(os.listdir(os.path.join(R, "boot/extlinux"))))
+    ok("no build leftovers", not os.path.exists(os.path.join(R, "usr/sbin/policy-rc.d"))
+       and not os.path.exists(os.path.join(R, "usr/bin/qemu-aarch64-static")) and not os.listdir(os.path.join(R, "tmp")))
+    scan = "/work/scan"
+    subprocess.call(["rm", "-rf", scan])
+    os.makedirs(scan)
+    for d in ("etc", "root", "home", "boot/extlinux", "usr/local", "usr/lib/eirl-encoder", "usr/lib/eirl-image",
+              "usr/share/doc/eirl-encoder", "var/lib", "opt/nvidia/l4t-bootloader-config"):
+        src = os.path.join(R, d)
+        if os.path.isdir(src):
+            os.makedirs(os.path.dirname(os.path.join(scan, d)), exist_ok=True)
+            subprocess.check_call(["cp", "-a", src, os.path.join(scan, d)])
+    subprocess.call(["rm", "-rf", os.path.join(scan, "var/lib/dpkg")])   # Ubuntu's package metadata (maintainers' addresses)
+    rc = subprocess.call(["bash", os.path.join(a.repo, "tools/public-check.sh"), "--dir", scan])
+    ok("nothing of the test board, no secrets (tools/public-check.sh on /etc, /var/lib, /usr/local, …)", rc == 0)
+
+    # --- our software
+    man = json.load(open(os.path.join(a.release, "manifest.json")))
+    ver = open(os.path.join(R, "usr/lib/eirl-encoder/VERSION")).read().split()[0]
+    ok("installed release = manifest (%s)" % man["version"], ver == man["version"], ver)
+    files_txt = open(os.path.join(R, "usr/lib/eirl-encoder/files.txt")).read().split()
+    with tarfile.open(os.path.join(a.release, a.bundle)) as t:
+        names = {n.lstrip("./"): n for n in t.getnames()}
+        retired = t.extractfile(names["engine/retired.txt"]).read().decode().split() if "engine/retired.txt" in names else []
+    # files.txt also lists the retired engine files an update removes (so a rollback can bring them back):
+    # a new device never had them
+    gone = set("/usr/lib/eirl-encoder/engine/" + r for r in retired)
+    missing = [p for p in files_txt if p not in gone and not os.path.lexists(os.path.join(R, p.lstrip("/")))]
+    ok("every path of files.txt installed (%d, %d retired ones not expected)" % (len(files_txt), len(gone & set(files_txt))),
+       not missing, ", ".join(missing[:10]))
+    # Every file of the bundle at the path install.sh gives it (manager/deploy/install.sh), with the bundle's bytes
+    deploy_dst = {"70-eirl-capture.rules": "etc/udev/rules.d/70-eirl-capture.rules",
+                  "90-eirl-uplinks": "etc/NetworkManager/dispatcher.d/90-eirl-uplinks",
+                  "eirl-engine-eirl-encoder.conf": "etc/systemd/system/eirl-engine.service.d/eirl-encoder.conf",
+                  "sudoers": "etc/sudoers.d/eirl-encoder", "tmpfiles.conf": "etc/tmpfiles.d/eirl-encoder.conf",
+                  "eirl-engine.default": "etc/default/eirl-engine"}
+    def dest(n):
+        top, _, rest = n.partition("/")
+        if not rest:
+            if n in ("eirl-encoderd", "srtla_send", "mediamtx", "srt-live-transmit"):
+                return "usr/local/bin/" + n
+            if n in ("eirl-netsetup", "eirl-update"):
+                return "usr/local/sbin/" + n
+            if n.startswith("libsrt.so."):
+                return "usr/lib/eirl-encoder/lib/" + n
+            if n in ("VERSION", "BUILD", "files.txt"):
+                return "usr/lib/eirl-encoder/" + n
+            if n == "install.sh":
+                return ""
+        if top == "engine":
+            if rest.startswith("lib/"):
+                return "usr/lib/eirl-encoder/engine/" + rest[4:]
+            if rest.startswith("units/"):
+                return "etc/systemd/system/" + rest[6:]
+            if rest == "retired.txt":
+                return ""
+        if top == "splash":
+            if rest == "eirl-splash":
+                return "usr/local/bin/eirl-splash"
+            if rest.endswith(".service"):
+                return "etc/systemd/system/" + rest
+            if rest == "install.sh":
+                return ""
+        if top == "doc":
+            return "usr/share/doc/eirl-encoder/" + rest
+        if top == "deploy":
+            if rest == "install.sh":
+                return ""
+            if rest.endswith(".service"):
+                return "etc/systemd/system/" + rest
+            if rest.endswith(".pkla"):
+                return "etc/polkit-1/localauthority/50-local.d/" + rest
+            return deploy_dst.get(rest)
+        return None
+    unknown, differ, checked = [], [], 0
+    with tarfile.open(os.path.join(a.release, a.bundle)) as t:
+        for m in t.getmembers():
+            if not m.isfile():
+                continue
+            n = m.name[2:] if m.name.startswith("./") else m.name
+            d = dest(n)
+            if d is None:
+                unknown.append(n)
+                continue
+            if d == "":
+                continue
+            checked += 1
+            h = hashlib.sha256(t.extractfile(m).read()).hexdigest()
+            p = os.path.join(R, d)
+            if not os.path.isfile(p) or sha256_file(p) != h:
+                differ.append(d)
+    ok("every file of the bundle has a known destination", not unknown, ", ".join(unknown[:10]))
+    ok("every bundle file installed with the bundle's bytes (%d)" % checked, not differ, ", ".join(differ[:10]))
+    ok("srt-live-transmit installed", any(os.path.exists(os.path.join(R, p)) for p in
+       ("usr/lib/eirl-encoder/bin/srt-live-transmit", "usr/local/bin/srt-live-transmit", "usr/lib/eirl-encoder/lib/srt-live-transmit")))
+    for e in ("edid-1080p30-lpcm48k.bin", "edid-1080p50-lpcm48k.bin", "edid-720p60-lpcm48k.bin"):
+        ok("EDID " + e, os.path.exists(os.path.join(R, "usr/lib/eirl-encoder/engine", e)))
+    ok("/etc/default/eirl-engine", os.path.exists(os.path.join(R, "etc/default/eirl-engine")))
+
+    # --- kernel bits and boot
+    kr = "4.9.337-tegra"
+    ok("tc358743.ko in extra/", os.path.exists(os.path.join(R, "lib/modules", kr, "extra/tc358743.ko")))
+    dep = open(os.path.join(R, "lib/modules", kr, "modules.dep")).read()
+    ok("depmod knows extra/tc358743.ko", "extra/tc358743.ko:" in dep)
+    ok("no in-tree tc358743 module shadowing ours", "kernel/drivers/media/i2c/tc358743.ko" not in dep)
+    deps = dict((l.split(":", 1)[0].rsplit("/", 1)[-1], l.split(":", 1)[0]) for l in dep.splitlines() if ":" in l)
+    for m in ("qmi_wwan", "cdc_mbim", "huawei_cdc_ncm", "option"):
+        ok("modem module %s from updates/eirl-modems/ (MODEMS.md §4)" % m,
+           deps.get(m + ".ko") == "updates/eirl-modems/%s.ko" % m, deps.get(m + ".ko", "missing"))
+    dtb = "tegra210-p3448-0000-p3449-0000-b00-tc358743.dtb"
+    ok("our DTB in /boot", os.path.exists(os.path.join(R, "boot", dtb)))
+    ext = open(os.path.join(R, "boot/extlinux/extlinux.conf")).read()
+    ok("extlinux DEFAULT eirl-splash", re.search(r"(?m)^DEFAULT eirl-splash$", ext) is not None)
+    labels = re.findall(r"(?m)^LABEL (\S+)", ext)
+    fdts = re.findall(r"(?m)^\s*FDT (\S+)", ext)
+    appends = re.findall(r"(?m)^\s*APPEND .*", ext)
+    ok("extlinux entries primary, tc358743, eirl-splash", set(labels) == {"primary", "tc358743", "eirl-splash"}, ", ".join(labels))
+    ok("every extlinux entry boots our DTB", len(fdts) == len(labels) >= 3 and all(f.endswith(dtb) for f in fdts))
+    ok("every APPEND has root=/dev/mmcblk0p1", len(appends) == len(labels) and all("root=/dev/mmcblk0p1" in l for l in appends))
+    ok("nv_boot_control.conf", os.path.exists(os.path.join(R, "etc/nv_boot_control.conf")))
+    fm = open(os.path.join(R, "usr/lib/eirl-image/firmware-mode")).read().strip()
+    ok("firmware mode = %s" % ("update" if a.mode == "product" else "check"), fm == ("update" if a.mode == "product" else "check"), fm)
+    for s in ("usr/lib/eirl-image/eirl-firstboot", "usr/lib/eirl-image/eirl-firmware"):
+        ok(s + " executable", os.access(os.path.join(R, s), os.X_OK))
+    for f in ("etc/os-release", "usr/lib/os-release"):
+        osr = open(os.path.join(R, f)).read()
+        names = re.findall(r'(?m)^(?:NAME|PRETTY_NAME)=.*', osr)
+        ok(f + " without the Ubuntu name", len(names) == 2 and not any("Ubuntu" in x for x in names), names[0] if names else "")
+
+    # --- libraries resolve (ldd in the chroot)
+    bins = ["usr/lib/eirl-encoder/engine/eirl-engine-go", "usr/local/bin/srtla_send"]
+    bins += [b for b in ("usr/local/bin/srt-live-transmit",) if os.path.exists(os.path.join(R, b))]
+    for d in ("usr/lib/eirl-encoder/bin", "usr/lib/eirl-encoder/lib"):
+        if os.path.isdir(os.path.join(R, d)):
+            bins += [os.path.join(d, f) for f in os.listdir(os.path.join(R, d)) if f.startswith(("srt-live", "libsrt"))]
+    gst = os.path.join(R, "usr/lib/aarch64-linux-gnu/gstreamer-1.0")
+    bins += ["usr/lib/aarch64-linux-gnu/gstreamer-1.0/" + f for f in os.listdir(gst) if f.startswith("libgstnv")]
+    bad = []
+    for b in bins:
+        env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin"}
+        p = subprocess.Popen(["chroot", R, "/usr/bin/ldd", "/" + b], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+        out = p.communicate()[0].decode("utf-8", "replace")
+        if "not found" in out:
+            bad.append("%s: %s" % (b, " ".join(l.split()[0] for l in out.splitlines() if "not found" in l)))
+    ok("libraries resolve (%d binaries, NVIDIA's GStreamer plugins included)" % len(bins), not bad, "; ".join(bad[:6]))
+
+    # --- the image
+    pt = subprocess.check_output(["sgdisk", "-p", a.image]).decode()
+    rows = [l.split() for l in pt.splitlines() if re.match(r"^\s+\d+\s", l)]
+    ok("14 partitions", len(rows) == 14, str(len(rows)))
+    last = max(rows, key=lambda r: int(r[1]))
+    ok("APP (1) is physically last", last[0] == "1" and last[6] == "APP", " ".join(last))
+    layout = [l.split("\t") for l in open(os.path.join(a.bootparts, "layout.tsv")).read().splitlines()[1:]]
+    # The boot partitions are pinned (tools/image/bootparts.lock): NVIDIA's signing is deterministic
+    pinned = "\n".join("\t".join((n, name, size, s)) for n, name, size, f, s in layout) + "\n"
+    if os.path.exists(a.bootparts_lock) and not a.update_lock:
+        ok("boot partitions = bootparts.lock", open(a.bootparts_lock).read().split("\n", 1)[1] == pinned)
+    elif a.mode == "product":
+        ok("a product image has a reviewed bootparts.lock", False)
+    else:
+        with open(a.bootparts_lock, "w", encoding="utf-8") as f:
+            f.write("# tools/image/bootparts.lock: the card's boot partitions (number, name, size, sha256), check.py --update-lock\n" + pinned)
+        note("bootparts.lock", "written: review its diff")
+    with open(a.image, "rb") as img:
+        for n, name, size, f, s in layout:
+            if f == "-":
+                continue
+            first = int(next(r for r in rows if r[0] == n)[1])
+            img.seek(first * 512)
+            ln = os.path.getsize(os.path.join(a.bootparts, f))
+            got = hashlib.sha256(img.read(ln)).hexdigest()
+            ok("p%s %s written" % (n, name), got == s)
+    sizes = {"rootfs MiB": int(subprocess.check_output(["du", "-sm", R]).split()[0]), "raw bytes": os.path.getsize(a.image)}
+    note("sizes", json.dumps(sizes))
+    with open(os.path.join(a.report_dir, "check.json"), "w", encoding="utf-8") as f:
+        json.dump({"fails": FAILS, "notes": NOTES, "sizes": sizes}, f, indent=1)
+    print("check: %d failed" % len(FAILS))
+    return 1 if FAILS else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

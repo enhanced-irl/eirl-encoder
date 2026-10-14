@@ -1,0 +1,108 @@
+# tools/image/packages.txt — what the image installs on top of ubuntu-base 18.04.5, with
+# apt-get install --no-install-recommends (IMAGE.md §3.2). One package per line, a comment after it.
+# It is base/keep.txt (BASE.md §3) without the development group (D4), without what only the retired Python
+# engine used (python3-gi, python3-cairo, gir1.2-*) and without bluez (D-I6), plus what ubuntu-base lacks and
+# the Ubuntu dependencies of the NVIDIA packages (their dpkg -i needs them already installed).
+# The exact result, with versions, is tools/image/packages.lock.
+
+# --- System (ubuntu-base has none of it)
+systemd
+systemd-sysv                  # /sbin/init
+libpam-systemd                # logind sessions (sshd, polkit)
+udev
+dbus
+kmod                          # modprobe, depmod
+sudo                          # the app's narrow rule (manager/deploy/sudoers)
+cron
+logrotate
+tzdata                        # time zones for the wizard (timedatectl)
+haveged                       # 🔴 kernel 4.9 has no jitter entropy: without it getrandom blocks (BASE.md §3)
+ca-certificates               # TLS with the cloud and GitHub (OTA)
+procps
+psmisc                        # fuser: NVIDIA's first-boot script (nvfb.sh)
+bc                            # NVIDIA's nvfb-early.sh
+lsb-release
+gdisk                         # growing the root partition at first boot (sgdisk)
+e2fsprogs                     # resize2fs
+util-linux
+python3                       # eirl-hdmi-init.sh, eirl-enginectl, install.sh, NVIDIA's QSPI updater, nv-update-extlinux
+fonts-dejavu-core             # the screen's font
+fontconfig
+libssl1.1
+
+# --- Tools the engine, the app and the installers call (base/keep.txt)
+v4l-utils
+i2c-tools                     # also creates the i2c group
+alsa-utils
+alsa-base                     # card order: USB after the board's
+vim-common                    # xxd
+iproute2
+iw
+iptables
+ethtool
+iputils-ping
+
+# --- Network: NetworkManager and its dispatcher (SRTLA), the access point and DHCP for cameras, jetson.local
+network-manager
+isc-dhcp-client               # NetworkManager's DHCP client on Ubuntu
+wpasupplicant
+dnsmasq-base
+avahi-daemon
+libnss-mdns
+policykit-1                   # Wi-Fi client and the wizard's clock/hostname (.pkla)
+modemmanager                  # 4G modems for SRTLA (stays, D-I6)
+wireless-regdb                # Wi-Fi channels and power per country
+crda
+linux-firmware                # the Intel 8265 and USB adapters
+
+# --- Maintenance (D-I4): installed, ssh.service masked, no user and no key in the image
+openssh-server
+
+# --- GStreamer 1.14 (the engine)
+gstreamer1.0-tools
+gstreamer1.0-plugins-base
+gstreamer1.0-plugins-good
+gstreamer1.0-plugins-bad
+gstreamer1.0-plugins-ugly
+gstreamer1.0-libav
+gstreamer1.0-alsa
+gstreamer1.0-x                # 🪤 brings libgstpango (textoverlay): it is NOT only X11
+libgstreamer1.0-0
+libgstreamer-plugins-base1.0-0
+libgstreamer-plugins-bad1.0-0
+
+# --- Direct Ubuntu dependencies of the kept nvidia-l4t-* packages (IMAGE.md §3.3)
+device-tree-compiler
+libasound2
+libbsd0
+libc6
+libcairo2
+libdatrie1
+libegl1
+libegl1-mesa
+libexpat1
+libffi6
+libfontconfig1
+libgcc1
+libgles2
+libglib2.0-0
+libglvnd0
+libgtk-3-0
+adwaita-icon-theme-full       # satisfies adwaita-icon-theme's "ubuntu-mono | adwaita-icon-theme-full": no Ubuntu-branded icons
+libharfbuzz0b
+libpango-1.0-0
+libpangocairo-1.0-0
+libpangoft2-1.0-0
+libpcre3
+libpixman-1-0
+libstdc++6
+libwayland-client0
+libwayland-egl1
+libwayland-server0
+libx11-6
+libxau6
+libxcb1
+libxdmcp6
+libxext6
+libxrender1
+zlib1g

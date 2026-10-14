@@ -15,16 +15,41 @@ const (
 	// from 30/s all of them even with some jitter). The engine gives it to each source bridge's SetScreen.
 	MVGap = 25 * time.Millisecond
 	// MVMargin: on top of the program's latency for the program on the screen (what the compositor takes to
-	// give it out). The engine's pgmtap → mvp bridge (BridgeShared) uses Extra = latency + MVMargin.
+	// give it out). The engine's pgmtap → mvp bridge (BridgeShared) uses Extra = ProgramDelay.
 	MVMargin = 40 * time.Millisecond
+
 	// UIFPS: the UI layer's nominal rate (the VU meters, 20 a second).
 	UIFPS = 20
 )
+
+// ProgramDelay is the Extra of the pgmtap → mvp bridge: the program compositor's latency plus MVMargin,
+// on top of each program frame's pts on the screen.
+func ProgramDelay(latency time.Duration) time.Duration { return latency + MVMargin }
+
+// TileDelay is the pad offset of each tile's mvd<i> queue, so that a change in a source appears on its tile
+// and on the program in the same frame of the screen. The program tile shows a program frame ProgramDelay
+// after its pts, and a program frame holds the source frames that start before its end: up to one program
+// frame (1/fps) newer than its pts. So the tiles go ProgramDelay minus a program frame late. Both come from
+// the configuration, not from the sources; what is left is where each source frame falls (MIXER.md §22.2).
+func TileDelay(latency time.Duration, fps int) time.Duration {
+	return ProgramDelay(latency) - time.Second/time.Duration(max(1, fps))
+}
+
+// tileQueue sizes a tile's mvd<i> queue for the frames waiting for their (delayed) turn after their
+// conversion (small RGBA from the converter's own pool, never the source's buffers, which the program
+// shares). A tile frame arrives up to MIXER_SYNC ahead of its time, and the offset adds TileDelay: at most
+// one frame every MVGap for that long, plus two. The converter's pool holds those, what the
+// compositor's pad keeps (up to its latency), the frame on screen and the one being converted.
+func tileQueue(sync, latency time.Duration, fps int) (queue, buffers int) {
+	queue = int((sync+TileDelay(latency, fps))/MVGap) + 2
+	return queue, queue + 6
+}
 
 // Pipeline is what Describe needs from the engine's configuration.
 type Pipeline struct {
 	Width, Height, FPS int           // the program
 	Latency            time.Duration // the compositors' latency (MIXER_LATENCY)
+	Sync               time.Duration // capture → program (MIXER_SYNC): how early a tile's frame arrives
 	Snapshot           bool          // the 1 fps JPEG of what the screen shows (RUN_DIR/screen.jpg)
 }
 
@@ -33,7 +58,8 @@ type Pipeline struct {
 // UI layer on top (appsrc ui, RGBA from Go); the compositor to the HDMI (a copy with its own 8 buffers and
 // sync=true: without it, glitches with movement, MIXER.md §3 trap 4) and, if asked, a 1 fps half-size JPEG
 // for the web (appsink snap). Every appsrc has max-latency 500 ms: with 0 the compositor does not set up
-// its latency (jerks and «clock problem», trap 3).
+// its latency (jerks and «clock problem», trap 3). Each tile ends in a queue mvd<i> whose src pad the
+// screen shifts by TileDelay.
 func Describe(p pipeline.Platform, lay *ui.Layout, c Pipeline) string {
 	fps := min(c.FPS, pipeline.ScreenFPS)
 	appsrc := func(name, caps string) string {
@@ -41,6 +67,7 @@ func Describe(p pipeline.Platform, lay *ui.Layout, c Pipeline) string {
 			`max-bytes=0 block=false caps="%s"`, name, caps)
 	}
 	const q = "queue max-size-buffers=6 leaky=downstream"
+	tq, tb := tileQueue(c.Sync, c.Latency, c.FPS)
 	var parts []string
 	pg := lay.PGM
 	pads := []string{fmt.Sprintf("sink_0::xpos=%d sink_0::ypos=%d sink_0::width=%d sink_0::height=%d", pg.X, pg.Y, pg.W, pg.H)}
@@ -53,7 +80,8 @@ func Describe(p pipeline.Platform, lay *ui.Layout, c Pipeline) string {
 			n, r.X, n, r.Y, n, r.W, n, r.H))
 		parts = append(parts, appsrc(fmt.Sprintf("mvs%d", i), fmt.Sprintf("%s,format=NV12,width=%d,height=%d,framerate=%d/1",
 			p.Mem, c.Width, c.Height, fps))+
-			fmt.Sprintf(" ! %s ! %s output-buffers=10 ! %s,format=RGBA,width=%d,height=%d ! mv.sink_%d", q, p.Convert, p.Mem, r.W, r.H, n))
+			fmt.Sprintf(" ! %s ! %s output-buffers=%d ! %s,format=RGBA,width=%d,height=%d ! queue name=mvd%d max-size-buffers=%d leaky=downstream ! mv.sink_%d",
+				q, p.Convert, tb, p.Mem, r.W, r.H, i, tq, n))
 	}
 	n := len(lay.Tiles) + 1
 	pads = append(pads, fmt.Sprintf("sink_%d::zorder=10", n))

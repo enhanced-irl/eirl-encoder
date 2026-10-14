@@ -49,6 +49,9 @@ type Manager struct {
 	// NoInternetFile: /run/eirl-encoder/uplinks-nointernet, the client wifi without internet (the engine leaves it out
 	// of the SRTLA split; WIFI.md §13). Empty = not written
 	NoInternetFile string
+	// OnNoInternet: when set, the client wifi's result goes there instead of to NoInternetFile: the links service
+	// (internal/links) writes that file with the modems' results too, so that two writers do not erase each other
+	OnNoInternet func(iface string, off bool) error
 
 	mu       sync.Mutex // serializes read, change, write and apply
 	applying atomic.Bool
@@ -868,15 +871,22 @@ const internetEvery = 30 * time.Second
 // interface in NoInternetFile while it is «without internet» (empty otherwise): the engine takes it out of the
 // SRTLA split and puts it back (WIFI.md §13). Until ctx ends.
 func (m *Manager) MonitorWiFi(ctx context.Context, logf func(string, ...any)) {
-	if m.Client == nil || m.NoInternetFile == "" {
+	if m.Client == nil || m.NoInternetFile == "" && m.OnNoInternet == nil {
 		return
 	}
 	m.Client.Monitor(ctx, internetEvery, func(off bool) error {
-		data := []byte{}
-		if off {
-			data = []byte(m.Client.Iface + "\n")
+		var err error
+		if m.OnNoInternet != nil {
+			// The links service writes the file, with the modems' results too (MODEMS.md §5): one writer
+			err = m.OnNoInternet(m.Client.Iface, off)
+		} else {
+			data := []byte{}
+			if off {
+				data = []byte(m.Client.Iface + "\n")
+			}
+			err = m.Write(m.NoInternetFile, data, 0o640)
 		}
-		if err := m.Write(m.NoInternetFile, data, 0o640); err != nil {
+		if err != nil {
 			if logf != nil {
 				logf("client wifi: could not write the no-internet list (will retry)", "err", err)
 			}

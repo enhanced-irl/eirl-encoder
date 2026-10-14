@@ -254,6 +254,17 @@ func (e *element) SetPad(pad, prop, value string) bool {
 	return C.eg_set_pad_arg(el, cpad, cp, cv) != 0
 }
 
+func (e *element) SetPadOffset(pad string, d time.Duration) bool {
+	el, done := e.use()
+	defer done()
+	if el == nil {
+		return false
+	}
+	cpad := C.CString(pad)
+	defer C.free(unsafe.Pointer(cpad))
+	return C.eg_set_pad_offset(el, cpad, C.gint64(d)) != 0
+}
+
 func (e *element) SetBool(prop string, v bool) {
 	el, done := e.use()
 	defer done()
@@ -445,6 +456,43 @@ func (c *cadence) Take() (uint64, uint64) {
 	var a, f C.guint64
 	C.eg_cadence_take(c.p, &a, &f)
 	return uint64(a), uint64(f)
+}
+
+type animator struct {
+	p    *C.EgAnim
+	pads int
+}
+
+func (Real) NewAnimator(comp Element, pads int, frame time.Duration) Animator {
+	return &animator{C.eg_anim_new(raw(comp), C.int(pads), C.gint64(frame)), pads}
+}
+
+func (a *animator) Play(steps [][]Layer) {
+	if len(steps) == 0 || a.pads == 0 {
+		return
+	}
+	// EgLayer holds no pointers: Go memory can go to C, which copies it
+	buf := make([]C.EgLayer, len(steps)*a.pads)
+	for k, step := range steps {
+		for i := range a.pads {
+			var l Layer
+			if i < len(step) {
+				l = step[i]
+			}
+			buf[k*a.pads+i] = C.EgLayer{x: C.gint32(l.X), y: C.gint32(l.Y), w: C.gint32(l.W), h: C.gint32(l.H),
+				z: C.gint32(l.Z), alpha: C.double(l.Alpha)}
+		}
+	}
+	C.eg_anim_play(a.p, &buf[0], C.int(len(steps)))
+}
+
+func (a *animator) Busy() bool { return C.eg_anim_busy(a.p) != 0 }
+
+func (a *animator) Free() {
+	if a.p != nil {
+		C.eg_anim_free(a.p)
+		a.p = nil
+	}
 }
 
 type counter struct{ p *C.EgCounter }

@@ -1,0 +1,82 @@
+#!/bin/bash
+# eirl-firstboot — the image's first boot (IMAGE.md §5), run by eirl-firstboot.service as root, early (before the
+# network, avahi, the app and the engine), until both of its steps are done:
+#   1. grow the root partition (APP, physically the last one) and its filesystem to the whole card, online;
+#   2. the host name eirl-encoder-<xxxx>, with the same four characters as the Wi-Fi name EnhancedIRL-XXXX.
+# Each step has its own marker in /var/lib/eirl-image and is written only when the step succeeded or had nothing
+# to do, so a power cut or a failure is retried at the next boot. The board's firmware (QSPI) is another unit,
+# eirl-firmware.service, later in the boot (it needs udev). machine-id comes before all this (systemd writes it at
+# boot: the image ships it empty). The app makes the rest of what is per device at its own first start.
+# A failing step is logged and the boot goes on: the encoder must come up even on a card that cannot grow.
+set -uo pipefail
+STATE=/var/lib/eirl-image
+log() { echo "eirl-firstboot: $*"; }
+mkdir -p "$STATE"
+num() { [[ ${1:-} =~ ^[0-9]+$ ]]; }
+
+# --- 1. Grow. The same steps as NVIDIA's nvresizefs.sh (in the oem-config package, which the image leaves out):
+#     it must be the last partition; the backup GPT header moves to the end of the card; the partition is
+#     recreated with the same start (no realignment), type, GUID, name and attributes; the kernel is told (BLKPG,
+#     works on a mounted partition); resize2fs online. resize2fs also runs whenever the filesystem is smaller than
+#     the partition, so a cut between the table and the filesystem is finished at the next boot.
+grow_root() {
+  local mm sys part disk n info start end type guid name attrs other lastend fsblocks bsize partbytes
+  mm=$(mountpoint -d /) || return 1
+  sys=$(readlink -f "/sys/dev/block/$mm") || return 1
+  [ -r "$sys/partition" ] || { log "grow: / is not on a partition"; return 1; }
+  part=$(basename "$sys"); disk=$(basename "$(dirname "$sys")"); n=$(cat "$sys/partition")
+  case "$disk" in mmcblk*) ;; *) log "grow: / is on $disk, not a card: left as it is"; return 0 ;; esac
+  info=$(sgdisk -i "$n" "/dev/$disk") || return 1
+  start=$(sed -n 's/^First sector: \([0-9]*\).*/\1/p' <<<"$info")
+  end=$(sed -n 's/^Last sector: \([0-9]*\).*/\1/p' <<<"$info")
+  type=$(sed -n 's/^Partition GUID code: \([0-9A-F-]*\).*/\1/p' <<<"$info")
+  guid=$(sed -n 's/^Partition unique GUID: \([0-9A-F-]*\).*/\1/p' <<<"$info")
+  name=$(sed -n "s/^Partition name: '\(.*\)'$/\1/p" <<<"$info")
+  attrs=$(sed -n 's/^Attribute flags: \([0-9a-f]*\).*/\1/p' <<<"$info")
+  num "$start" && num "$end" && [ -n "$type" ] && [ -n "$guid" ] || { log "grow: cannot read partition $n"; return 1; }
+  other=$(sgdisk -p "/dev/$disk" | awk -v n="$n" -v e="$end" '$1 ~ /^[0-9]+$/ && $1 != n && $2 > e {print $1}')
+  [ -z "$other" ] || { log "grow: partition $n is not the last one (after it: $other): left as it is"; return 0; }
+  sgdisk -e "/dev/$disk" >/dev/null || return 1
+  lastend=$(sgdisk -E "/dev/$disk" 2>/dev/null | tail -1)
+  num "$lastend" || { log "grow: cannot read the end of the card"; return 1; }
+  if [ $((lastend - end)) -ge 131072 ]; then     # more than 64 MiB free after it
+    sgdisk -a 1 -d "$n" -n "$n:$start:$lastend" -t "$n:$type" -u "$n:$guid" -c "$n:$name" "/dev/$disk" >/dev/null || return 1
+    if [ -n "$attrs" ] && [ "$attrs" != 0000000000000000 ]; then sgdisk -A "$n:=:$attrs" "/dev/$disk" >/dev/null || return 1; fi
+    partx -u --nr "$n" "/dev/$disk" || return 1
+    log "grow: partition $n now ends at sector $lastend"
+  fi
+  # The filesystem, whenever it is smaller than the partition (also after a cut between the two)
+  fsblocks=$(dumpe2fs -h "/dev/$part" 2>/dev/null | sed -n 's/^Block count: *\([0-9]*\)/\1/p')
+  bsize=$(dumpe2fs -h "/dev/$part" 2>/dev/null | sed -n 's/^Block size: *\([0-9]*\)/\1/p')
+  partbytes=$(( $(cat "/sys/class/block/$part/size") * 512 ))
+  num "$fsblocks" && num "$bsize" || { log "grow: cannot read the filesystem of $part"; return 1; }
+  if [ $((partbytes - fsblocks * bsize)) -ge $((64 * 1024 * 1024)) ]; then
+    resize2fs "/dev/$part" || return 1
+    log "grow: the filesystem of $part now fills it ($partbytes bytes)"
+  else
+    log "grow: $part already fills the card"
+  fi
+}
+if [ ! -e "$STATE/grow.done" ]; then
+  if grow_root; then touch "$STATE/grow.done"; else log "grow: FAILED (the system goes on in the space it has; retried at the next boot)"; fi
+fi
+
+# --- 2. Host name: eirl-encoder-<last four characters of the hardware id>, lowercase
+if [ ! -e "$STATE/hostname.done" ]; then
+  if id=$(/usr/local/bin/eirl-encoderd -print-hardware-id 2>/dev/null) && [ ${#id} -ge 4 ]; then
+    h="eirl-encoder-$(printf '%s' "${id: -4}" | tr 'A-Z' 'a-z')"
+    if printf '%s' "$h" | grep -qxE '[a-z0-9-]{1,40}'; then
+      echo "$h" > /etc/hostname
+      hostname "$h"
+      sed -i -E "s/^127\.0\.1\.1[[:space:]].*/127.0.1.1\t$h/" /etc/hosts
+      grep -q '^127\.0\.1\.1' /etc/hosts || printf '127.0.1.1\t%s\n' "$h" >> /etc/hosts
+      touch "$STATE/hostname.done"
+      log "host name $h"
+    fi
+  else
+    log "host name: no hardware id yet, staying eirl-encoder (retried at the next boot)"
+  fi
+fi
+
+[ -e "$STATE/grow.done" ] && [ -e "$STATE/hostname.done" ] && touch "$STATE/firstboot.done"
+exit 0

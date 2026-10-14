@@ -151,7 +151,7 @@ from the device itself (CSRF) and `Content-Type: application/json`.
 | `POST /login` | `{"password": "…"}` | `204` + cookie `eirl_sess` (HttpOnly, SameSite=Strict, 30 sliding days). `401` if it fails, `429` if the limit is exceeded (5 attempts/min per IP, with an increasing wait) |
 | `POST /logout` | — | `204` |
 | `GET /session` | — | `200 {"authenticated": true}` · `401` |
-| `PUT /password` | `{"current": "…", "new": "…"}` (≥ 10 characters) | `204`. Invalidates the other sessions |
+| `PUT /password` | `{"current": "…", "new": "…"}` (≥ 10 characters) | `204`. Invalidates the other sessions (from the screen, over the local socket: all of them). `403 bad_password` if the current one is wrong, `400 validation` if the new one does not fit, `429` after 5 wrong current passwords in a minute per IP (Oct 14) |
 
 ### Status
 
@@ -212,13 +212,19 @@ none, to save the output chosen on the touch screen (see `PUT /output`).
   },
   "transport": "srtla",           // srt | srtla: that of the running stream (or the saved one if stopped)
   "uplinks": [                    // internet uplinks (SRTLA.md); absent without the uplinks dispatcher
-    { "name": "enx0c5b8f279a64", "ip": "192.168.8.100", "kind": "usb",   // ethernet | usb | wifi
+    { "name": "enx0c5b8f279a64", "ip": "192.168.8.100", "kind": "modem", // ethernet | usb | wifi | modem
       "inUse": true,              // srtla_send is using it now (only when streaming over SRTLA, also with the hot output)
       "disabled": false,          // disabled from the app (PUT /uplinks/{interface})
       "conflict": false,          // same IP as another uplink (two identical HiLink modems): not used
       "noInternet": true,         // only if: the Wi-Fi client without internet (captive portal), out of the split (WIFI.md §13)
-      "txKbps": 2410, "rxKbps": 85 }   // traffic since the previous sample (sysfs)
+      "txKbps": 2410, "rxKbps": 85,    // traffic over the last sample (sysfs), at least 1.5 s long: every caller sees the same
+      // With the links service (MODEMS.md §4): the dot of every link, judged in one place (internal/linkhealth)
+      "label": "Movistar",        // the modem's operator (or its alias); absent = name it by its kind
+      "health": "good",           // good | weak | bad | off
+      "healthCode": "ok",         // why: closed list in MODEMS.md §5, translated by the web and the screen
+      "modemId": "h-9b2c41d07e5a" } // the modem behind it (modems[])
   ],
+  "modems": [ … ],                // cellular modems, also those without a usable link (no SIM, PIN…): GET /modems
   "bitrate": { "kbps": 3200, "minKbps": 1000, "maxKbps": 6000 },  // only with ABR running
   "mixer": { … },                 // only with the mixer running (MIXER=1): the same as GET /mixer
   "outputState": { "state": "on" } // off | connecting | on | error, + reason (closed list) and detail (≤ 200)
@@ -295,6 +301,7 @@ Validation (whitelist; what does not fit is rejected, not "cleaned"):
 |---|---|
 | `PUT /output` | `{"output": "on"\|"off", "apply": bool}`: Go live or Stop streaming. With the mixer, **hot**: it is saved and sent to the engine (`{"cmd": "output"}`), without restarting or leaving "unapplied changes" (neither the script's fingerprint nor the app's count `OUTPUT`). Without the mixer, it restarts as before, with the preview always running. Same response and `apply` semantics as `PUT /destination`; `on` requires a destination. Go live or Stop streaming **from the touch screen** (`output.by: "screen"` in the engine's state) is also saved into `OUTPUT`, with the same validation and the same log, once per change (`output.seq`) and even when no tab is open: it survives a restart and the cloud sees it in its configuration. It does not restart or apply other pending changes. With `by` `start` or `socket` it is not touched: what is saved is already the truth. Likewise, the screen's **Power menu** (`screen.power`: `reboot` or `poweroff`) is carried out by the app, once per request (`seq`) and only if it is recent |
 | `PUT /uplinks/{interface}` | `{"disabled": true\|false}`: takes **one** uplink out of or into the SRTLA split (name `[A-Za-z0-9_.-]{1,15}`, max. 16 disabled). The server changes it on top of what is already in `/etc/eirl-encoder/uplinks-disabled` (a disabled uplink that is now disconnected stays disabled; two changes in a row do not overwrite each other) and the stream applies it in ≤ 2 s **without cutting** (reloads `srtla_send` with SIGHUP). `200 {"name", "disabled"}`; the state arrives through the SSE. `400` if the name is not valid; `503` without the dispatcher |
+| `GET /modems` | The cellular modems ([`MODEMS.md`](MODEMS.md) §4.2): `{"modems": [{"id", "backend": "mm"\|"hilink", "iface", "manufacturer", "model", "state", "sim", "registration", "operator", "tech", "signal": {"rsrp", "rsrq", "sinr", "rssi", "bars", "quality"}, "imeiTail", "iccidTail"}]}`, every field but `id`, `backend`, `state`, `sim` and `signal` optional. Never the whole IMEI, ICCID or IMSI. Read-only (configuration: MODEMS.md phase M4). `[]` without modems or without ModemManager |
 | `GET /sources` | Sources connected now ([`SOURCES.md`](SOURCES.md)): `{"sources": [{"id", "kind": "hdmi-csi"\|"usb"\|"test", "name", "node", "usb": {"vendorId", "productId", "speedMbps", "bus", "serial"}, "formats", "audio": {"id", "kind", "name", "card"}, "warnings": ["usb2"\|"only_4k"\|"no_format"\|"unreadable"], "error": "<if it could not be queried>", "auto": {"format", "mode", "fps", "outWidth", "outHeight", "busShare"}, "options": [same as auto]}], "audio": [{"id": "i2s"\|"alsa:<id>", "kind", "name"}]}`. `id` is what is sent in `device`; `auto` is what the stream would choose and `options`, everything that can be asked of it (the same rule: `sources.Choose`/`Options`). `503` without a detector |
 | `PUT /input` | With the mixer, the **main** source: the one that goes on air at start and the audio one (what is streamed is changed with `POST /mixer`, without restarting). `{"source": "hdmi"\|"usb"\|"test", "device": "auto"\|"/dev/v4l/by-id/…"\|"/dev/v4l/by-path/…", "format": "auto"\|"NV12"\|"YUY2"\|"I420"\|"UYVY"\|"MJPG", "mode": "auto"\|"<W>x<H>@<fps>", "audio": "auto"\|"none"\|"i2s"\|"alsa:<id>", "edidPreferred": "1080p30"\|"1080p50"\|"720p60", "apply": bool}`. Absent fields are not touched (a body with only `edidPreferred` is still valid); with none → `400`. A device that is not connected can be saved: the stream waits for it (phase `waiting_device`). Validation errors with the keys `source`, `device`, `videoFormat`, `videoMode`, `audio`, `edidPreferred` (`mode` is the destination's: the whole configuration is validated). Same response and `apply` semantics as `PUT /destination`. It belongs to the device, so it can be changed even if the destination is managed by EnhancedIRL. With HDMI, applying = the source renegotiates (a few seconds without signal) |
 | `GET /mixer` | The mixer's state (scene, sources per slot, screen; [`MIXER.md` §5](MIXER.md#5-command-and-state-socket-contract)). With an older engine, `program.pip`, `program.pause`, `screen.locked`, `output.by`/`seq`, `audio.follow`, `audio.links`, `audio.mode` and `audio.sources[].delayMs`/`inMix`/`gainDb` are missing (the web hides their controls). `audio.links` carries only the sources in `sources` (`null` = no audio of its own), `delayMs` goes from 0 to 500, `audio.mode` is `single` (`main` plays) or `mix` (the ones with `inMix: true` play at the same time; no other value comes out) and `gainDb`, from −40 to +12 with one decimal (0 = no change). `404 mixer_off` if it is not running (stream stopped, restarting or without `MIXER=1`) |
@@ -350,22 +357,34 @@ off do not go through here**: they still go through `screen.power` in the engine
 is, [`SETUP.md`](SETUP.md) §3). **No session or CSRF**: the
   authentication is the socket's permissions. Each request is logged with the caller's uid and pid
   (`SO_PEERCRED`), never with the body.
-- **Whitelist** (the rest, `403 local_forbidden`):
+- **Whitelist** (the rest, `403 local_forbidden`). Since Oct 14 **everything the web configures can be configured on
+  the screen**, secrets included (the owner's decision): the screen shows them as dots and reveals them with an eye
+  button. Each route and why it is acceptable, in [`SETUP.md`](SETUP.md) §8:
 
   | Route | Over the socket |
   |---|---|
   | `GET /network` | Same as in the web |
-  | `GET /network/credentials` | **Only the Wi-Fi** (`{"wifi": …}`, with `?qr=rows` for the QR in rows): the cameras' keys are not shown on the screen |
+  | `GET /network/credentials` | **The socket's own handler**: only the Wi-Fi (`{"wifi": …}`); with `?cameras=1`, the same as the web (`{"wifi", "cameras"}`, every camera's URLs with its key) for a camera's eye button. `?qr=rows` adds `wifi.qrRows` in both; another value of `cameras`, `400` |
   | `PUT /network`, `PUT /network/ap`, `PUT /network/lan` | Same as in the web; they answer with the same as `GET /network`. The screen renames "Create my Wi-Fi" with `PUT /network/ap {"ssid"}` (WIFI.md §14) |
   | `GET /network/wifi`, `PUT /network/wifi`, `GET /network/wifi/scan`, `POST /network/wifi/connect`, `POST /network/wifi/forget` | Same as in the web (WIFI.md §5). The password typed on the screen goes through here, directly: never through the engine's socket nor its state |
+  | `POST /cameras`, `PATCH /cameras/{id}`, `DELETE /cameras/{id}` | Same as in the web (Oct 14); the answers carry the camera's URLs with its key |
+  | `GET /destination`, `PUT /destination` | Same as in the web (Oct 14): `GET` masks the key |
+  | `GET /destination/secrets` | **Only on the socket** (the web answers `404`): `200 {"streamId": "…", "passphrase": "…"}` in clear, as saved (`""` when unset), also with `managedBy: eirl`. `Cache-Control: no-store`; never logged |
+  | `GET /status` | Same as in the web (Oct 14): the SSE snapshot, without secrets |
+  | `PUT /uplinks/{interface}`, `PUT /input`, `GET /sources` | Same as in the web (Oct 14) |
+  | `POST /service/restart` | "Apply" (Oct 14); `start` and `stop`, `403`. It restarts the engine, the caller: the screen never sees the `202` (nor the answer of a `PUT` with `"apply": true` that restarts), and the app does not cut the restart when the socket closes |
+  | `PUT /password` | Same as in the web (Oct 14), with no session to keep: **every web session is closed**. The screen's wrong attempts are counted as one caller (5 per minute, then `429`); `503 setup_required` without a password |
+  | `GET/PUT /device`, `GET /device/timezones`, `GET /setup`, `POST /setup/{password,step,complete,restart}`, `GET/PUT /sources/slots`, `GET /update`, `POST /update/{check,install}` | The device settings, the wizard (the setup code only here), the slots and the updates ([`SETUP.md`](SETUP.md) §8) |
+  | `GET /cloud`, `POST /cloud/pair`, `DELETE /cloud` | The link, the pairing code (`?qr=rows` → `linkQrRows`) and unlinking (Oct 14). With a destination the cloud set, unlinking restarts the engine, and the cloud is still notified when the socket closes |
 
-  Left out on purpose: the cameras and their keys, reboot, power off and the service, the password, the account,
-  the logs and the mixer (the engine already is the mixer). Widening it is a contract change: each new
-  route is reviewed (what secret it returns, what it can break).
+  Left out on purpose: `start`/`stop` of the service, reboot and power off (they go through `screen.power`), the logs,
+  the mixer and `PUT /output` (the engine already is the mixer), the live preview, the QR images and the web session.
+  Mutations have the web's body limit (16 KB). Widening it is a contract change: each new route is reviewed (what
+  secret it returns, what it can break).
 - The client (the screen) makes each call in a thread, never in the GLib loop, with one connection per
-  request. Timeout of 5 s on GETs and 150 s on PUTs: a network PUT waits until it is applied (0.5-1 s the
+  request. Timeout of 3 s on GETs (8 s on `GET /status`, which can wait for the network and the Wi-Fi) and 150 s on PUTs: a network PUT waits until it is applied (0.5-1 s the
   reception, ~10 s if `ap0` is created, at most 2 min). Whatever secret it reads (the Wi-Fi password, the one
-  typed) lives only in the screen's memory: never in the engine's state (`mixer.json` goes to all the
+  typed, the stream key and the cameras' URLs an eye reveals) lives only in the screen's memory: never in the engine's state (`mixer.json` goes to all the
   web's subscribers) nor in the journal.
 
 ## 4. Live preview (WebRTC, phase 5)

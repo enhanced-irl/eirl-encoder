@@ -442,6 +442,80 @@ func drawIcon(c *Canvas, p *Path, kind string, cx, cy, r, lw float64, col Color)
 			roundRect(bx, by, 0.9*r, 0.7*r, 0.12*r)
 			stroke()
 		}
+	case "stream": // the stream: a mast that emits, two arcs on each side of its top
+		ty := cy - 0.35*r
+		c.FillCircle(cx, ty, max(lw*0.9, 0.13*r), col)
+		for _, k := range []float64{0.42, 0.78} {
+			for _, a0 := range []float64{-0.7, 3.1416 - 0.7} {
+				p.NewSubPath()
+				p.Arc(cx, ty, k*r, a0, a0+1.4)
+				stroke()
+			}
+		}
+		p.MoveTo(cx, ty+0.2*r)
+		p.LineTo(cx, cy+0.95*r)
+		p.MoveTo(cx-0.35*r, cy+0.95*r)
+		p.LineTo(cx+0.35*r, cy+0.95*r)
+		stroke()
+	case "cloud": // EnhancedIRL: a cloud of three bumps on a flat base
+		by := cy + 0.5*r
+		p.MoveTo(cx-0.6*r, by)
+		p.Arc(cx-0.6*r, by-0.35*r, 0.35*r, math.Pi/2, 3*math.Pi/2)
+		p.Arc(cx-0.1*r, by-0.6*r, 0.5*r, math.Pi, 1.85*math.Pi)
+		p.Arc(cx+0.55*r, by-0.4*r, 0.4*r, 1.5*math.Pi, 2.5*math.Pi)
+		p.ClosePath()
+		stroke()
+	case "sliders": // the device's settings: three lines, each with its knob
+		for i, k := range []float64{-0.3, 0.45, -0.05} {
+			y := cy + float64(i-1)*0.6*r
+			p.MoveTo(cx-0.9*r, y)
+			p.LineTo(cx+0.9*r, y)
+			stroke()
+			c.FillCircle(cx+k*r*1.6, y, max(lw*1.3, 0.17*r), col)
+		}
+	case "eye", "eyeoff": // a secret: an eye (shown: crossed out, tap to hide it again)
+		for _, sg := range []float64{-1, 1} {
+			p.NewSubPath()
+			for i := 0; i <= 16; i++ {
+				t := float64(i)/16*2 - 1 // −1…1 across the eye
+				x := cx + 0.95*r*t
+				y := cy + sg*0.55*r*(1-t*t)
+				if i == 0 {
+					p.MoveTo(x, y)
+				} else {
+					p.LineTo(x, y)
+				}
+			}
+			stroke()
+		}
+		p.NewSubPath()
+		p.Arc(cx, cy, 0.27*r, 0, 2*math.Pi)
+		stroke()
+		if kind == "eyeoff" {
+			p.MoveTo(cx-0.8*r, cy+0.75*r)
+			p.LineTo(cx+0.8*r, cy-0.75*r)
+			stroke()
+		}
+	case "ethernet": // a cable uplink: an RJ45 socket
+		roundRect(cx-0.85*r, cy-0.7*r, 1.7*r, 1.4*r, 0.18*r)
+		stroke()
+		p.MoveTo(cx-0.4*r, cy+0.7*r)
+		p.LineTo(cx-0.4*r, cy+0.25*r)
+		p.LineTo(cx+0.4*r, cy+0.25*r)
+		p.LineTo(cx+0.4*r, cy+0.7*r)
+		stroke()
+		for _, k := range []float64{-0.4, -0.13, 0.13, 0.4} {
+			p.MoveTo(cx+k*r, cy-0.45*r)
+			p.LineTo(cx+k*r, cy-0.15*r)
+			stroke()
+		}
+	case "modem": // a cellular uplink: four rising bars
+		for i, h := range []float64{0.35, 0.7, 1.05, 1.4} {
+			x := cx - 0.75*r + float64(i)*0.5*r
+			p.MoveTo(x, cy+0.75*r)
+			p.LineTo(x, cy+0.75*r-h*r)
+			stroke()
+		}
 	case "camera": // the network cameras: the body and the lens
 		bw, bh := 1.15*r, 0.9*r
 		bx, by := cx-0.95*r, cy-bh/2

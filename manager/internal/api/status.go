@@ -12,6 +12,7 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/config"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/hw"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/mixer"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/modem"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/network"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/sources"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/srtstats"
@@ -39,6 +40,8 @@ type Status struct {
 	Transport string `json:"transport"`
 	// Uplinks: internet links (SRTLA). Absent without the NetworkManager dispatcher.
 	Uplinks []uplinks.Uplink `json:"uplinks,omitempty"`
+	// Modems: the cellular modems, also those without a usable link (no SIM, PIN…); MODEMS.md §4
+	Modems []modem.Modem `json:"modems,omitempty"`
 	// Bitrate: the current video bitrate while adaptive bitrate runs; absent without it
 	Bitrate *BitrateView `json:"bitrate,omitempty"`
 	// Mixer: scene and sources of the running mixer (MIXER=1); absent without it (MIXER.md §5)
@@ -264,8 +267,10 @@ func (s *Server) collect(ctx context.Context) Status {
 	// change with the hot output switch (screen, web, socket): with it, links showed “unused” and no bitrate while
 	// streaming
 	emitting := running && st.Output == "on"
-	if s.Uplinks != nil {
-		st.Uplinks = s.Uplinks.Read(now, emitting && rs.Transport == "srtla")
+	if snap := s.linksSnapshot(); !snap.At.IsZero() {
+		st.Uplinks, st.Modems = snap.Uplinks, snap.Modems
+	} else if s.Uplinks != nil {
+		st.Uplinks = s.Uplinks.Read(now, overSRTLA(running, st.Output, rs))
 	}
 	if emitting && rs.ABR == "1" {
 		st.Bitrate = readBitrate(s.ABRPath)

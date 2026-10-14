@@ -9,6 +9,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"errors"
 	"flag"
 	"fmt"
@@ -31,8 +32,10 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/config"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/device"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/hw"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/links"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/live"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/mixer"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/modem"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/netcfg"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/network"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/safefile"
@@ -142,6 +145,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	setupUpdates(ctx, srv, *updateURL, *updateDir, *updateCheck, *runDir, log)
+	// The internet check of modems and phones, and the one writer of the no-internet file (the Wi-Fi client's
+	// monitor reports to it): MODEMS.md §5
+	inet := &links.Internet{URL: internetURL(srv.Config, *cloudAPI), Path: noInternetFile, Write: config.WriteAtomic,
+		Log: func(msg string, args ...any) { log.Info(msg, args...) }}
 	// Network cameras (F7, NETWORK_SOURCES.md §6): only with the root helper installed
 	if _, err := os.Stat(*netsetup); err == nil {
 		srv.Network = &network.Manager{
@@ -164,7 +171,7 @@ func main() {
 			wc.OwnSSID, wc.InternetURL = srv.Network.SSID, internetURL(srv.Config, *cloudAPI)
 			srv.Network.Client = wc
 			// Without internet (a captive portal), out of the SRTLA bonding: the engine reads this file (WIFI.md §13)
-			srv.Network.NoInternetFile = noInternetFile
+			srv.Network.NoInternetFile, srv.Network.OnNoInternet = noInternetFile, inet.Set
 			go srv.Network.MonitorWiFi(ctx, log.Info)
 			// "Connect to a Wi-Fi" as network.json says: NetworkManager does not remember it after a restart
 			go func() {
@@ -184,6 +191,44 @@ func main() {
 		// And if it stays in error (or up without being asked), again every 2 min
 		go srv.Network.Retry(ctx, 2*time.Minute, func(err error) { log.Warn("cameras' network: retry", "err", err) })
 	}
+	// Links and modems (MODEMS.md §4): every internet link judged every 2 s (the dots of the web and of the
+	// screen's header, through links.json) and the cellular modems watched every 5 s
+	// The modems' ids are an HMAC with this board's own key (MODEMS.md §4): never undone into the IMEI. Without
+	// the file (it cannot be written), a key for this run only: the ids change at the next start, nothing worse
+	if k, err := modem.LoadIDKey(filepath.Join(*confDir, "modem-id.key"),
+		func(p string) ([]byte, error) { return safefile.ReadOwned(p, 256) }, config.WriteAtomic); err == nil {
+		modem.SetIDKey(k)
+	} else {
+		log.Warn("modems: no id key on disk, ids last until the next start", "err", err)
+		k := make([]byte, 32)
+		if _, err := rand.Read(k); err == nil {
+			modem.SetIDKey(k)
+		}
+	}
+	mods := &modem.Manager{Backends: []modem.Backend{modem.NewMM(), modem.NewHiLink()},
+		Links: func() []modem.Link {
+			var out []modem.Link
+			for _, a := range srv.Uplinks.Addrs() {
+				out = append(out, modem.Link{Name: a.Name, IP: a.IP})
+			}
+			return out
+		},
+		Log: func(msg string, args ...any) { log.Warn(msg, args...) }}
+	srv.Links = &links.Service{Uplinks: srv.Uplinks, Modems: mods, Streaming: srv.StreamingSRTLA,
+		Path: linksFile, Write: config.WriteAtomic,
+		WiFi: func(ctx context.Context) (string, *int) {
+			if srv.Network == nil || srv.Network.Client == nil {
+				return "", nil
+			}
+			c := srv.Network.Client
+			if st, err := c.State(ctx); err == nil && st.State == "connected" {
+				return c.Iface, st.Signal
+			}
+			return c.Iface, nil
+		}}
+	go mods.Run(ctx)
+	go srv.Links.Run(ctx)
+	go inet.Run(ctx, func() []uplinks.Addr { return links.Targets(srv.Links.Current()) })
 	if *cloudAPI != "" {
 		cl, err := newCloud(ctx, srv, *cloudAPI, *cloudApp, *confDir, *thumb, *defEnv, *listen, *unit, log)
 		if err != nil {
@@ -240,6 +285,10 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+// linksFile: every link with its dot's colour, for the engine's screen (MODEMS.md §4). In the app's runtime
+// directory: the engine reads it through the eirl-encoder group
+const linksFile = "/run/eirl-encoder/links.json"
 
 // noInternetFile: the Wi-Fi client without internet, out of the SRTLA bonding (WIFI.md §13). The app writes it
 // (network.MonitorWiFi), the engine reads it (UPLINKS_NOINTERNET, the same path) and /status shows it

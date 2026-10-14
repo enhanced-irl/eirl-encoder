@@ -1,7 +1,7 @@
 # Multi-camera: composition, multiview and touch screen
 
 > **Status:** IN PROGRESS (F0, F1 —single engine— and F2 —web ↔ screen— in main; F3 —no rehearsal mode— on the board; next F4, per-source audio)
-> **Updated:** 2026-10-14 (translated to English; the Python engine retired, the Go engine is the only one: [`ENGINE_GO.md`](ENGINE_GO.md); last content change Oct 13: header and Settings, §18; Wi-Fi in Settings, §19; Oct 14: renaming "Create my Wi-Fi", §19)
+> **Updated:** 2026-10-14 (translated to English; the Python engine retired, the Go engine is the only one: [`ENGINE_GO.md`](ENGINE_GO.md); last content change Oct 13: header and Settings, §18; Wi-Fi in Settings, §19; Oct 14: renaming "Create my Wi-Fi", §19; everything the web configures, on the screen, §21; fades one step per program frame and the screen's tiles in step with the program, §22)
 
 **The mixer is the encoder.** `eirl-engine` captures all the sources it detects at the same time, and what
 comes out is always the composed **program** (cut, PiP, side by side, fades). That includes SRT/SRTLA
@@ -208,7 +208,7 @@ pieces today (`manager/internal/engine/…`):
 **Scene** (`take`, `secondary`, `swap`, `layout`, `transition`; §5).
 - **On air** changes the main one. The secondary (PiP, side by side) does not change, unless the new
   main one was it: then they swap.
-- **Fade** of 400 ms only in full composition. PiP in the bottom-right corner, at ⅓ of
+- **Fade** of 400 ms (0.6 s with a layer that moves afterwards; §11), one step per program frame (§22). PiP in the bottom-right corner, at ⅓ of
   the size.
 - The scene is saved in `STATE_DIR/mixer-scene.json` (`/var/lib/eirl-engine`), so it **survives Go live,
   Stop streaming and Apply**. If the configuration's main source changes, it starts with that one.
@@ -512,7 +512,8 @@ needed for testing out on the street (G1).
   covered stays underneath, opaque, until the end (crossfade); what goes out without anything covering it
   (a PiP leaving, the Pause) goes out fading; and what leaves full screen for a smaller place
   (swap in PiP) acts as the base and then moves into its place, in a 0.6 s fade instead of 0.4.
-  A change mid-fade starts from where that fade was.
+  A change mid-fade starts from the scene the interrupted fade was going to, not from the picture half way:
+  the layers still fading out go at once (a visible jump; §22).
 - **Touch screen**: new row with Corner and Size (greyed out without PiP) and, at the bottom, **Go live** (it is
   held for 1 s, both to start and to stop streaming, with a bar that fills up), **Pause** and
   **Lock**. When locked, everything goes dark except the program and it only responds to "Unlock" held for
@@ -930,6 +931,14 @@ gear grouping the Wi-Fi and the network cameras switch of NETWORK_SOURCES.md §6
   locked, closed and in amber, and it is held to unlock.
 - **The header's network** is measured in the free space between the status and the board readings; if it does not fit, whole parts
   are removed (first the RTT, then the link), not half a word. Before, fixed width and cut off when streaming over SRTLA.
+- **The connections' dots** (Oct 14, [`MODEMS.md`](MODEMS.md) §6): with the app's `links.json` fresh, the middle has two
+  lines: a dot per internet connection (green, amber, red; a grey ring when switched off) with its short name (the
+  modem's operator or alias, else Cable / Wi-Fi / Modem / USB), and below, smaller, the network ("SRTLA" without the
+  count: the dots say it) with the temperature and voltage, which leave the right side to make room. If the names do
+  not fit: a smaller size, then the modem's technology ("5G", "4G"), then dots only. The client Wi-Fi's antenna becomes
+  its dot. The whole area is a button to Settings › Streaming › Connections (not while locked). Without the file, or
+  with one older than 15 s (the app is not running), the header is as before. The engine reads the file at each
+  drawing only if it changed (`appapi.Links`, validated: the app runs as another user).
 - **Margins**: the program (16:9, at most 5/8 of the width) and the thumbnails share the height the
   header leaves with `m` also at the bottom; the thumbnails take what is left over (their video is letterboxed, `fit_rect`).
   At 1024×600: header 70, program 640×360, thumbnails 240×134, 12 px on all four edges.
@@ -1036,3 +1045,199 @@ never calls NetworkManager or `eirl-netsetup`.
 - **F6 · Cloud:** scene and sources from the app (ENCODER_CLOUD.md §13.2).
 - **F7 · Network sources:** the encoder as an RTMP/SRT receiver for wireless cameras (local
   MediaMTX + NVDEC). In main on Oct 13 (MR !27): [`NETWORK_SOURCES.md`](NETWORK_SOURCES.md).
+- **Settings parity:** everything the web configures, on the screen (Oct 14): §21.
+- **Fades and the screen's tiles** (Oct 14): §22. Open: a change mid-fade still jumps (§22.3).
+
+## 21. Settings: everything the web configures, on the screen (Oct 14)
+
+Decided by the owner on Oct 14: **every setting of the local web can be changed from the touch screen**, from
+Settings or from the audio view; **secret values show as dots, with an eye button to reveal them**. Before, the
+screen had the Wi-Fi, the cameras' reception, the source slots, the language, the time, the updates and About; the
+destination, the uplinks, the input, the cameras' management, the AP's channel and password, the pause card, the
+audio delays and links, the EnhancedIRL link and the web password were only on the web.
+
+### 21.1 Navigation: seven groups with tabs
+
+At 1024×600 the list on the left takes seven entries a finger can hit (≥ 48 px), and there are thirteen pages now.
+Chosen over a list with pages (▲▼): **seven groups**, and a group of several pages shows them as **tabs** in the page's
+title row (`SettingsGroups`, settings_layout.go; a list entry is `s_page_<group>`, a tab `s_tab_<page>`):
+
+| Group | Tabs (pages) |
+|---|---|
+| Stream | Destination (`dest`) · Uplinks (`uplinks`) · Pause (`pause`) |
+| Sources | Slots (`sources`) · Input (`input`) |
+| Wi-Fi | — (`wifi`) |
+| Network cameras | — (`cams`) |
+| EnhancedIRL | — (`cloud`) |
+| Device | Language (`language`) · Date & time (`time`) · Name & password (`account`) |
+| System | Updates (`updates`) · About (`about`) |
+
+A group's entry goes back to the tab last seen. The dots (Wi-Fi down, an update, the setup pending) show on the
+group's entry and on the tab. The wizard keeps using the pages by id, without tabs.
+
+### 21.2 How a page is made
+
+- **One file per page**, registered with `registerPage(id, &pageDef{layout, draw, title, keys, touch, watch, leave})`
+  (pagedef.go): its buttons' rectangles, its drawing, the buttons on view, its taps, what it needs from the app and
+  what it drops when it goes. The first seven pages keep their wiring in ui.go/settings.go.
+- **Shared pieces** (widgets.go): a field (title above, value below, › when a tap opens something), a secret's value
+  (dots, or the text with its eye open), a stepper (− value +, the unit in the title), the generic picker (a choice
+  in the page area, with pages; the option under the finger when it went down), `confirmTap` (a second tap within
+  `ConfirmFor` for what cuts or deletes) and a page's own notice.
+- **Texts by area**: each area's table in its own file (`strings_<area>.go`: stream, input, net, cloud, account,
+  audio) reached as `Tx.<Area>`; the completeness and verbs tests walk into them.
+- **The keyboard** takes a spec (`kbSpec`: title, help, secret, max, min, starting layer, allowed keys, what OK and X
+  do). Every secret keyboard (the Wi-Fi password, the web password, the stream key…) has an **eye** (`k_eye`) that
+  shows what is typed in monospaced type; closed, only dots, as before.
+- **The app's data and actions**: the device client (appapi) asks for `GET /destination`, `GET /status` (uplinks and
+  the saved input) and `GET /sources` only while their page is on the screen (`AppWatch.Dest|Status|Sources`, every
+  2 s, 2 s and 10 s), and runs this section's actions through the same queue as the device's
+  (`ui.AppActions`: `dest_save`, `dest_reveal`, `restart`, `uplink`, `input_save`, `sources_scan`, `cloud_unlink`,
+  `password`, `cam_add|rename|rotate|remove`, `cam_creds`, `ap_enabled|channel|rotate`, `lan_enabled`;
+  appapi/parity.go), each with its route's `{id}`, its JSON body and its **secret fields**, which `Do` copies, the
+  body is built from without turning them into a string, and are wiped once sent. The app's side (the socket's
+  whitelist and its two local-only routes): SETUP.md §8, MANAGER.md §3.
+- The engine's own settings (the pause card, a source hidden, an audio delay or link) go straight to the engine as
+  commands, like the mixer's; a refusal shows on the page (origins `page` and `audioset`).
+
+### 21.3 Secrets
+
+- **Shown only behind an eye.** The saved stream key and passphrase come from `GET /destination/secrets` (local
+  socket only; the web never sees them), a camera's URLs from `GET /network/credentials?cameras=1`; both are asked
+  for when an eye is opened, and dropped (`DropSecrets`) when their page goes. The board Wi-Fi's password, drawn in
+  clear next to its QR before, is now dots with an eye (the QR still carries it: it is how cameras and phones join).
+- **Typed ones** live in the keyboard's buffer, then in the page's draft (the destination's key and passphrase until
+  the app saves them, so a refused save does not make the user type a long key again; the web passwords between
+  their keyboards) until they are saved or sent, cancelled, the page goes or the screen locks; then they are wiped.
+  They never go to a log, a command, the state or a drawn text with the eye closed.
+- **A reveal does not outlive its page**: the client keeps a generation of the secrets that `DropSecrets` moves on; a
+  reveal queued before it is not kept when it answers. A new key, or a camera added or removed, drops the cameras'
+  URLs too (a reveal in flight would bring the old ones), and every eye opened asks for them again.
+- `screen.jpg` is not updated while Settings is open (§18), so a revealed secret does not reach the web's snapshot.
+
+### 21.4 The pages
+
+- **Destination**: the URL (SRT/SRTLA, its end shown when long), the key and the passphrase (secret keyboards; empty
+  removes them), latency, audio, video and minimum video (steppers inside the app's bounds; the minimum only with
+  adaptive bitrate and never above the video), adaptive bitrate. A draft until «Save» or «Save and apply» (a second
+  tap while streaming); a saved change not applied yet offers «Apply» (`POST /service/restart`). Set by the
+  EnhancedIRL account: read-only, as on the web. Applying restarts the engine, which draws this screen: it comes back
+  by itself, and the app finishes the restart even though the screen's request is cut (MANAGER.md §3).
+- **Connections** (formerly Uplinks; renamed Oct 14, MODEMS.md D-M5): one row per uplink (kind, IP, what it sends, or
+  why not); the row is its switch in or out of the SRTLA share. With the app's judgement (MODEMS.md §5) each row has
+  its dot before the icon, a modem's operator as its title (its interface goes to the second line), and the reason
+  of an amber or red dot, translated (`Stream.UplinkHealth`). Taking out the last usable one while streaming over SRTLA needs a second tap. The rates come from the
+  app's shared sample (one baseline of at least 1.5 s for every caller: the web's SSE and the screen no longer
+  disturb each other's rates).
+- **Pause**: the card's text (the engine's rule: 1-60 characters, letters, digits and some punctuation) and whether
+  the pause silences the program.
+- **Slots**: besides what each slot is and its alias, a Hide/Show button for the source in it (live, outside the
+  draft; the source on air cannot be hidden).
+- **Input**: the main source, its capture mode (USB), the EDID (HDMI) and the start audio, as the web's card; a
+  draft until «Save» / «Save and apply»; «Scan».
+- **Wi-Fi**: «Create my Wi-Fi»'s password with its eye, its 2.4 GHz channel (Auto, 1-11) and «New password» (a second
+  tap: every camera has to join again). The access point is changed by two clients (NetState: its name and «Create my
+  Wi-Fi»; the device client: its channel, password and the cameras' way over it): one change at a time across both.
+- **Network cameras**: the reception switch plus «Through the encoder's Wi-Fi» and «By cable»; the cameras, each one
+  opening its own view (rename, its URLs and QR behind the eye, «New key», «Remove», with a second tap), and «Add
+  camera».
+- **EnhancedIRL**: unlinked, «Link» shows the code and its QR; pairing, «New code» or «Cancel»; linked, to whom,
+  whether it is connected and «Unlink» (a second tap, saying what it does).
+- **Name & password**: the encoder's name, and the web password (the current one, then the new one twice, like the
+  wizard: a mistyped one would leave nobody knowing it with every web session closed). With no password yet, only the
+  new one, twice (the setup's). The app limits wrong current passwords like the login (`429`).
+- **Audio settings** (in the audio view, «Audio settings ›» in its header): each input's delay (0-500 ms, 10 ms a tap,
+  100 ms held) and each camera's audio (a choice list: an input or «No audio of its own»).
+
+### 21.5 Limits
+
+- The keyboard types printable ASCII only: no accents in a pause card, a camera's or the encoder's name typed on the
+  screen (a name set on the web with accents stays and shows).
+- The screen's previews: `eirl-ui-render settings-dest|dest-reveal|dest-edited|dest-managed|dest-pending|dest-error,
+  settings-uplinks|uplinks-single|uplinks-none|uplinks-health, settings-pause, settings-input…, settings-sources-hidden,
+  settings-cloud|cloud-pairing|cloud-linked|cloud-unlink, settings-account|account-kb, audioset, audiosetpick` and the
+  Wi-Fi and cameras ones (its file's header lists them all).
+
+## 22. Fades one step per program frame, and the screen's tiles in step with the program (Oct 14)
+
+Two things seen on the touch screen: the tiles of the sources changed a moment **before** the program, and a
+fade between cameras was **not smooth**. Measured frame by frame on the board with a diagnostic build (not in
+main): a trace of every program frame and every multiview frame (pts, when it left the compositor, luma) and,
+per output frame of each compositor, the pts of the buffer each of its pads used; analysed off the board.
+Sources: the board's HDMI at 1080p50, a USB camera at 1080p60 (MJPEG) and a USB capture card at 30 fps;
+program at 60, screen at 30.
+
+### 22.1 The fade
+
+**Cause.** A Go ticker every 20 ms set the six properties of each layer, one by one, from the actor. The
+program compositor does not give its frames out at a steady pace: now and then it stalls for ~110 ms and
+catches up composing several frames 6-10 ms apart (they leave between 25 ms before and 115 ms after their pts;
+none is lost, the pts stay continuous). The alpha a frame got depended on **when** the VIC composed it, not on
+its time: two or three frames of a burst with the same alpha, then a jump of five ticks after each stall. A
+frame could also come out with half a change.
+
+**Fix.** The actor computes the whole fade at the program's rate (`FadeRects` at k/n, n = length × fps, then
+the new scene) and an animator in C (`EgAnim`, `internal/gst`) plays it: a probe on the compositor's src pad
+sets, after each output frame and from the compositor's own thread, every pad property for the next frame, by
+its timestamp. A cut is a table of one step; before the program plays, the layers go straight onto the pads.
+At the end of a fade the scene is placed again, for what changed meanwhile (a source found, another aspect).
+`GstControlSource` does not fit: GStreamer 1.14's `videoaggregator` (nvcompositor's base class) syncs each pad
+to the timestamp of **its own** current buffer, not the output's, so a 30 fps source or a still (the Pause, the
+slate: one buffer every 250 ms) would fade in a handful of steps. Tested against the real 1.14.5 aggregator
+(`TestAnimatorOneStepPerFrame`, with the software `compositor` where gst-plugins-bad is installed).
+
+| Pause fade over the slate (400 ms, 9 of each) | Before | After |
+|---|---|---|
+| Program (60 fps): frames in the ramp | 24-28 | 23 (ideal 23) |
+| Repeated alpha / jumps per fade | 12-15 / 2-3 (up to +0.31) | 0 / 0 |
+| Step per frame (ideal 0.042) | 0 … 0.31 | 0.036 … 0.047 |
+| Off a straight ramp (max) | 0.13-0.20 | 0.006 |
+| Screen (30 fps): repeats / jumps per fade | 0-2 / 1-2 (up to +0.36) | 0 / 0 |
+
+Fades between sources: the biggest change between two frames, against the median, went from 3-158× to
+1.1-1.2× in full-screen crossfades, and from 200-1100× to 3-4× in a swap in PiP (what is left is its planned
+move at ⅔). Unchanged, by design: the cut halfway in full → side by side (`later-cut`), and a change mid-fade
+(§22.3). The fade no longer depends on the sources, their rates or the load: only on each frame's timestamp.
+
+### 22.2 The tiles ahead of the program
+
+**Cause.** A source's frame goes to the program and to its tile with the same pts (capture + `MIXER_SYNC`); the
+program reaches the multiview through `pgmtap`, `ProgramDelay` (= `MIXER_LATENCY` + `MVMargin`, 100 ms) later.
+Before, the tiles were **66 ms (HDMI at 50) and 75-80 ms (USB at 60) ahead** of the program on the screen:
+two frames of the screen (correlation of the pictures of each tile and of the program tile, sharp peak).
+
+**Fix.** Each tile waits after its conversion (small RGBA from its own pool, never the source's buffers, which
+the program shares) in a queue `mvd<i>` whose src pad is offset (`gst_pad_set_offset`) by
+`TileDelay` = `ProgramDelay` − one program frame: the program tile shows a program frame `ProgramDelay` after
+its pts, and a program frame holds the source frames that start before its end, up to one program frame newer
+than its pts. Both values come from the configuration (`MIXER_LATENCY`, the program's rate), not from the
+sources. The queue and the pool are sized from the time a tile frame can wait (`MIXER_SYNC` + `TileDelay`, one
+frame every `MVGap`): 10 frames and 16 buffers with the defaults (+6 buffers of 240×134 RGBA per tile, ~3 MB in
+all). A tile without its queue is logged (`screen_tile_delay_missing`).
+
+Fitting the delay to the pictures did not work: with the tiles delayed, the screen's compositor also shows the
+program at another moment (the tiles were still a frame ahead at 67 ms, and 10-38 ms behind at 100 ms). The
+values below come from the pads' own pts, per screen frame (source frame on the tile minus source frame inside
+the program on the program tile; positive = tile ahead):
+
+| Tile against the program on the screen | Before | After (mean; spread) |
+|---|---|---|
+| Board HDMI, 1080p50 | 66 ms ahead | +17 ms (0, +20, +40) |
+| USB camera, 1080p60 MJPEG | 75-80 ms ahead | −9 ms (mostly ±16) |
+| USB capture card, 30 fps | — | +7 ms (mostly 0 and ±32) |
+
+What is left is where each source frame falls in a program frame and in a frame of the screen (a 60 fps
+source also gives its tile one frame in two, `MVGap`): within a frame of the screen, which no fixed or
+per-source delay removes.
+
+### 22.3 Left open
+
+- **A change mid-fade** starts from the scene the interrupted fade was going to: the layers still fading out go
+  at once (a jump; it was so in the Python engine too). Starting from the picture half way needs `FadePlan` to
+  handle layers at a partial alpha.
+- The program compositor's stalls of ~110 ms do not lose frames, but they bunch them (also in the timings line:
+  `program_to_screen … gap=146ms`): worth a look on their own; the stills pushed every 250 ms are a suspect.
+- CPU and memory (60 s per thread, three sources live, screen on, preview off, not streaming): engine 61 → 64 %
+  of one core and system 90 → 94 %, the difference in the capture threads (the compositor's thread, where the
+  animator runs, 7.3 → 7.5 %); RAM ~105 MB in both. The two builds also differ in the screen work merged in
+  between (Settings and the connections' dots).

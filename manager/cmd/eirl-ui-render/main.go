@@ -14,9 +14,10 @@
 // settingsapoff · settingsapbusy · settingswrong · settingsnoinet · settingsnets · settingsnets2 · settingsnetsbusy ·
 // settingsnetswrong · settingsnetsforget · settingskb · settingskbupper · settingskbsym · settingskbsym2 ·
 // settingskbwrong · settingsapoffname · settingsssidkb · settingsssidkbbad · settingsrenaming · settingsrenameonair ·
-// settingsrenamed. Modifiers: +wifi +srtla (2 uplinks) +srtla1 +press +presstile +noclient +camstab +noalias +details +phoff +phwait
+// settingsrenamed · audioset (the audio view's settings) · audiosetpick (a camera's audio being chosen) · audioseterr (the
+// engine refused a delay). Modifiers: +wifi +srtla (2 uplinks) +srtla1 +dots +dots6 (the connections' dots) +press +presstile +noclient +camstab +noalias +details +phoff +phwait
 // +pherr +phmute
-// +nophones +ant3 +ant1 +antnoinet +antsearch +anterror (the former tools/ui_render.py's header explained each) +apoff
+// +gone (audioset: a camera linked to an input that is unplugged) +nophones +ant3 +ant1 +antnoinet +antsearch +anterror (the former tools/ui_render.py's header explained each) +apoff
 // («Create my Wi-Fi» off, its name known: e.g. wizard-3-network+apoff).
 package main
 
@@ -176,7 +177,8 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir string, bench 
 		}
 	}
 	audio, _ := st["audio"].(map[string]any)
-	if variant == "audio" || variant == "audiomix" {
+	audioSet := strings.HasPrefix(variant, "audioset")
+	if variant == "audio" || variant == "audiomix" || audioSet {
 		if audio == nil {
 			audio = map[string]any{}
 			st["audio"] = audio
@@ -195,8 +197,21 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir string, bench 
 		if len(as) > 1 {
 			as[1].(map[string]any)["delayMs"] = 120
 		}
+		// The audio settings: camera 2 with the Logi's microphone by hand; with +gone, camera 3 with one unplugged
+		if links, _ := audio["links"].(map[string]any); audioSet && links != nil {
+			for _, x := range sources {
+				switch src := x.(map[string]any); src["slot"] {
+				case 2.0:
+					links[src["id"].(string)] = "alsa:Logi"
+				case 3.0:
+					if has("gone") {
+						links[src["id"].(string)] = "alsa:USB_Mic"
+					}
+				}
+			}
+		}
 	}
-	if (variant == "audio" || variant == "audiomix") && !has("nophones") {
+	if (variant == "audio" || variant == "audiomix" || audioSet) && !has("nophones") {
 		ph, _ := audio["phones"].(map[string]any)
 		if ph == nil {
 			ph = m("on", true, "gainDb", -12, "state", "on")
@@ -346,6 +361,9 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir string, bench 
 		st["output"] = m("mode", "on", "state", "on", "kbps", 5800, "sentKbps", 5800, "rttMs", 57)
 	}
 	net.app = app
+	if strings.HasPrefix(variant, "settings") {
+		camsFake(variant, tx.Code, &net.snap, &app.snap, now)
+	}
 	if has("details") { // sources and audio inputs that are not live, with the engine's detail codes (ENGINE_GO.md §13)
 		set := func(x map[string]any, state, det, code string, args map[string]any) {
 			x["state"], x["detail"], x["detailCode"] = state, det, code
@@ -383,6 +401,16 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir string, bench 
 			}
 		}
 	}
+	if variant == "settings-sources-hidden" { // slot 2's source hidden (the one on air cannot be)
+		for _, x := range sources {
+			if x.(map[string]any)["slot"].(float64) == 2 {
+				x.(map[string]any)["state"] = "hidden"
+			}
+		}
+	}
+	if variant == "settings-input-confirm" || variant == "settings-input-error" || variant == "settings-input-saved" {
+		st["output"] = m("mode", "on", "state", "on", "kbps", 5800, "sentKbps", 5800, "rttMs", 57)
+	}
 	if has("noalias") { // the engine's names (translated on the screen) instead of the fixture's aliases
 		for _, x := range sources {
 			x.(map[string]any)["alias"] = ""
@@ -410,6 +438,17 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir string, bench 
 	u := ui.New(lay, tx, net)
 	u.Fonts, u.Levels, u.Logo, u.PauseSupported = fonts, lv, ui.DefaultLogo(), true
 	u.LinkInfo = func() (string, int) { return transport, links }
+	// +dots: the connections' dots of the header (MODEMS.md §6); +dots6: six of them (names shortened to fit)
+	if has("dots") || has("dots6") {
+		dots := []ui.LinkDot{{Name: "eth0", Kind: "ethernet", Health: "good"}, {Name: "wlan0", Kind: "wifi", Health: "weak"},
+			{Name: "wwan0", Kind: "modem", Label: "Movistar", Tech: "5g-nsa", Health: "good"},
+			{Name: "wwan1", Kind: "modem", Label: "Vodafone", Tech: "4g", Health: "weak"},
+			{Name: "enx1", Kind: "modem", Label: "Orange", Tech: "4g", Health: "bad"}}
+		if has("dots6") {
+			dots = append(dots, ui.LinkDot{Name: "wwan2", Kind: "modem", Label: "Digi", Tech: "4g", Health: "off", Disabled: true})
+		}
+		u.Links = func() ([]ui.LinkDot, bool) { return dots, true }
+	}
 	if legacy != nil {
 		u.Legacy = func() *ui.WifiCreds { return legacy }
 	}
@@ -421,6 +460,20 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir string, bench 
 	p := u.Preview()
 	if variant == "audio" || variant == "audiomix" {
 		p.AudioView()
+	}
+	if audioSet {
+		link := -1
+		if variant == "audiosetpick" {
+			link = 1 // camera 2's (with +gone, camera 3's: its audio unplugged)
+			if has("gone") {
+				link = 2
+			}
+		}
+		p.AudioSettings(link)
+		if variant == "audioseterr" { // the engine refused a delay: the view says why
+			u.CommandDone(ui.Command{Msg: m("cmd", "audio_delay", "source", "i2s", "ms", 130), Origin: "audioset"}, false,
+				"unknown_source")
+		}
 	}
 	if variant == "menu" {
 		p.OpenMenu()
@@ -457,7 +510,24 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir string, bench 
 			p.ConfirmUpdate()
 		case "settings-language":
 			p.Press(ui.HitButton, "s_lang_"+tx.Code, 0)
+		case "settings-sources-hidden": // a tap on Hide of the source on air: the engine refuses it
+			u.CommandDone(ui.Command{Msg: map[string]any{"cmd": "hide"}, Origin: "page"}, false, "on_air")
+		case "settings-input-edited":
+			p.InputEdit("usb|"+fakeLogi, "MJPG|3840x2160@30", "", "none")
+		case "settings-input-pick":
+			p.InputPick("s_inp_source")
+		case "settings-input-modes":
+			p.InputPick("s_inp_mode")
+		case "settings-input-audio":
+			p.InputPick("s_inp_audio")
+		case "settings-input-confirm":
+			p.InputEdit("", "MJPG|1920x1080@60", "", "")
+			p.InputConfirmApply()
+		case "settings-input-error":
+			p.InputEdit("", "", "1080p50", "")
 		}
+		streamPreview(p, variant)
+		camsPreview(variant, p)
 	}
 	if strings.HasPrefix(variant, "settingsnets") {
 		p.OpenNetworks()

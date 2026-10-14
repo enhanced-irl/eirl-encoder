@@ -32,8 +32,8 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/safefile"
 )
 
-// Settings is what the app manages. The secrets (StreamID, Passphrase) never leave this package in
-// clear: the API uses Public().
+// Settings is what the app manages. The secrets (StreamID, Passphrase) go out in clear only to the
+// screen, over the local socket (GET /destination/secrets, its eye); the web and the cloud get Public().
 type Settings struct {
 	ManagedBy  string // local | eirl (v2: destino que da el backend)
 	URL        string // srt://host:port · listener: srt://:port · srtla://host:port (bonding)

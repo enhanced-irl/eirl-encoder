@@ -94,7 +94,9 @@ func (s *Server) unlinkCloud(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, 503, "cloud_disabled", "cloud.disabled")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	// Not cut if the caller hangs up: with a destination the cloud set, unlinking restarts the engine (Unlinked), and
+	// over the socket the caller is the engine: the cloud would not hear about it
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 15*time.Second)
 	defer cancel()
 	notified := s.Cloud.Unlink(ctx)
 	writeJSON(w, 200, struct {
@@ -457,7 +459,11 @@ func CloudStatus(st Status, now time.Time) cloud.EncoderStatus {
 		}
 	}
 	for _, u := range st.Uplinks {
-		out.Uplinks = append(out.Uplinks, cloud.StatusUplink{Name: u.Name, Kind: u.Kind, InUse: u.InUse,
+		kind := u.Kind
+		if kind == "modem" {
+			kind = "usb" // the cloud contract knows ethernet | usb | wifi; modems reach it in phase M6 (MODEMS.md)
+		}
+		out.Uplinks = append(out.Uplinks, cloud.StatusUplink{Name: u.Name, Kind: kind, InUse: u.InUse,
 			Disabled: u.Disabled, Conflict: u.Conflict, TxKbps: u.TxKbps, NoInternet: u.NoInternet})
 	}
 	if st.Bitrate != nil {

@@ -124,6 +124,8 @@ type Layout struct {
 	KB      map[string][]Key
 
 	Strips []Strip
+	// ASet is the audio view's settings (audioset.go)
+	ASet AudioSetLayout
 }
 
 // NewLayout is Layout(dw, dh, nslots).
@@ -184,6 +186,7 @@ func NewLayout(dw, dh, nslots int) *Layout {
 	// The password keyboard (WIFI.md §6): full screen (inside Settings: screen.jpg stays frozen), QWERTY with
 	// upper case and numbers/symbols layers: all of printable ASCII
 	b["k_cancel"] = Rect{dw - m - ib, m, ib, hb}
+	b["k_eye"] = Rect{dw - 2*m - 2*ib, m, ib, hb} // a secret's eye: its characters shown or dots
 	fh := max(52, dh/11)
 	l.KBField = Rect{m, 2*m + hb, dw - 2*m, fh}
 	l.KBNote = 2*m + hb + fh + max(22, dh/26)
@@ -251,6 +254,8 @@ func NewLayout(dw, dh, nslots int) *Layout {
 			b["a_phones"], b["a_ph_minus"], b["a_ph_plus"] = on, minus, plus
 		}
 	}
+	// Its settings (each input's delay, each camera's audio): their button in this header and their sub-view
+	l.audioSetLayout(hy, hh)
 	// Each source's VU meter, inside its tile (the program's goes in the column)
 	vw := max(8, dw/110)
 	for _, r := range l.Tiles {
@@ -275,6 +280,9 @@ func (l *Layout) sortKeys() {
 func (l *Layout) KBHit(x, y int, layer string) string {
 	if l.Buttons["k_cancel"].Inside(x, y, 8) {
 		return "k_cancel"
+	}
+	if l.Buttons["k_eye"].Inside(x, y, 8) { // only a secret's keyboard has it (kbTouch)
+		return "k_eye"
 	}
 	for _, k := range l.KB[layer] {
 		if k.R.Inside(x, y, 3) {
@@ -312,8 +320,8 @@ const (
 
 // Hit is Layout.hit: (tile, slot) | (program) | (button, key) | none. With the Power menu open, only its
 // buttons (m_*); with the Settings panel, the given keys (settings: those visible, in order: the first that
-// fits wins; nil and settingsOpen = the X and the cameras' switch). In the audio view, its buttons (a_*) and
-// the header's.
+// fits wins; nil and settingsOpen = the X and the cameras' switch). In the audio views (audio, audioset,
+// audiopick), their buttons (audioKeyIn) and the header's.
 func (l *Layout) Hit(x, y int, menu bool, view string, settingsOpen bool, settings []string) Hit {
 	if menu || settingsOpen {
 		keys := settings
@@ -331,10 +339,10 @@ func (l *Layout) Hit(x, y int, menu bool, view string, settingsOpen bool, settin
 		}
 		return Hit{}
 	}
-	if view == "audio" {
+	if view == "audio" || view == "audioset" || view == "audiopick" {
 		for _, margin := range []int{0, 12} {
 			for _, k := range l.keys {
-				if (strings.HasPrefix(k, "a_") || k == "power" || k == "lock" || k == "settings") &&
+				if (audioKeyIn(k, view) || k == "power" || k == "lock" || k == "settings") &&
 					l.Buttons[k].Inside(x, y, margin) {
 					return Hit{Kind: HitButton, Key: k}
 				}
@@ -363,6 +371,22 @@ func (l *Layout) Hit(x, y int, menu bool, view string, settingsOpen bool, settin
 		}
 	}
 	return Hit{}
+}
+
+// audioKeyIn: an audio view's button (a_*) answers in that view: the strips' and their header's in "audio"; the
+// audio settings' (a_s_*) in "audioset", and with a camera's choice open ("audiopick") only its rows and ←.
+func audioKeyIn(k, view string) bool {
+	switch {
+	case !strings.HasPrefix(k, "a_"):
+		return false
+	case k == "a_s_back":
+		return view == "audioset" || view == "audiopick"
+	case strings.HasPrefix(k, "a_s_opt_"):
+		return view == "audiopick"
+	case strings.HasPrefix(k, "a_s_"):
+		return view == "audioset"
+	}
+	return view == "audio"
 }
 
 func hasAnyPrefix(s string, prefixes ...string) bool {

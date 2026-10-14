@@ -2,8 +2,55 @@ package ui
 
 import "strconv"
 
-// SettingsPages are the Settings list's entries, in order: each one a page on the right.
-var SettingsPages = []string{"wifi", "cams", "sources", "language", "time", "updates", "about"}
+// SettingsGroup is one entry of the Settings list: its pages, shown as tabs in the page's title row when there
+// are several (a group of one page shows its name there).
+type SettingsGroup struct {
+	ID    string
+	Pages []string
+}
+
+// SettingsGroups are the Settings list's entries, in order (seven: what fits at 1024×600 with entries a finger
+// can hit). A list entry is s_page_<group>; a tab, s_tab_<page>. A group of one page has the page's id.
+var SettingsGroups = []SettingsGroup{
+	{"stream", []string{"dest", "uplinks", "pause"}},
+	{"sources", []string{"sources", "input"}},
+	{"wifi", []string{"wifi"}},
+	{"cams", []string{"cams"}},
+	{"cloud", []string{"cloud"}},
+	{"device", []string{"language", "time", "account"}},
+	{"system", []string{"updates", "about"}},
+}
+
+// SettingsPages are every Settings page, in the list's order.
+var SettingsPages = func() []string {
+	var out []string
+	for _, g := range SettingsGroups {
+		out = append(out, g.Pages...)
+	}
+	return out
+}()
+
+// groupOf is the group a page belongs to (nil: none).
+func groupOf(page string) *SettingsGroup {
+	for i := range SettingsGroups {
+		for _, p := range SettingsGroups[i].Pages {
+			if p == page {
+				return &SettingsGroups[i]
+			}
+		}
+	}
+	return nil
+}
+
+// groupByID is a group by its id (nil: none).
+func groupByID(id string) *SettingsGroup {
+	for i := range SettingsGroups {
+		if SettingsGroups[i].ID == id {
+			return &SettingsGroups[i]
+		}
+	}
+	return nil
+}
 
 // Stepper fields of the manual date and time (the Date & time page, NTP off).
 var TimeFields = []string{"day", "mon", "year", "hour", "min"}
@@ -21,10 +68,10 @@ func (l *Layout) settingsLayout() {
 	lw := max(200, p.W*24/100)
 	l.SettingsHead = Rect{p.X + m, p.Y + m, lw, hb}
 	l.SettingsList = Rect{p.X + m, p.Y + 2*m + hb, lw, p.Y + p.H - m - (p.Y + 2*m + hb)}
-	n := len(SettingsPages)
+	n := len(SettingsGroups)
 	l.SettingsEntryH = max(48, min(66, (l.SettingsList.H-(n-1)*gap)/max(1, n)))
-	for i, id := range SettingsPages {
-		b["s_page_"+id] = Rect{l.SettingsList.X, l.SettingsList.Y + i*(l.SettingsEntryH+gap), lw, l.SettingsEntryH}
+	for i, g := range SettingsGroups {
+		b["s_page_"+g.ID] = Rect{l.SettingsList.X, l.SettingsList.Y + i*(l.SettingsEntryH+gap), lw, l.SettingsEntryH}
 	}
 	px := p.X + m + lw + m
 	pw := p.X + p.W - m - px
@@ -32,6 +79,16 @@ func (l *Layout) settingsLayout() {
 	l.SettingsPage = Rect{px, p.Y + 2*m + hb, pw, p.Y + p.H - m - (p.Y + 2*m + hb)}
 	b["s_close"] = Rect{px + pw - ib, p.Y + m, ib, hb}
 	b["s_back"] = Rect{px, p.Y + m, ib, hb}
+	// The tabs of a group of several pages: the title row up to the X, in equal parts (only one group's are on view)
+	for _, g := range SettingsGroups {
+		if len(g.Pages) < 2 {
+			continue
+		}
+		tw := (pw - ib - m - (len(g.Pages)-1)*gap) / len(g.Pages)
+		for i, pg := range g.Pages {
+			b["s_tab_"+pg] = Rect{px + i*(tw+gap), p.Y + m, tw, hb}
+		}
+	}
 	l.settingsClient = -1
 	l.SettingsRows(true)
 	c := l.SettingsPage
@@ -101,18 +158,20 @@ func (l *Layout) settingsLayout() {
 	b["s_up_check"] = Rect{c.X, uy, bw, sh + 8}
 	b["s_up_install"] = Rect{c.X + bw + m, uy, c.W - bw - m, sh + 8}
 	l.UpdateNotes = Rect{c.X, uy + sh + 8 + 3*m, c.W, c.Y + c.H - (uy + sh + 8 + 3*m)}
-	// Sources: one row per slot (its number; what it is; its alias), and «Save» at the bottom. The picker of
-	// what a slot is uses the network list's rows (s_cand_i)
+	// Sources: one row per slot (its number; what it is; its alias; Hide/Show while a source is in it), and «Save»
+	// at the bottom. The picker of what a slot is uses the network list's rows (s_cand_i)
 	saveH := sh + 8
-	rowH := max(48, min(64, (c.H-saveH-m)/max(1, l.N)))
-	aw := max(200, c.W*2/5)
+	rowH := max(52, min(64, (c.H-saveH-m)/max(1, l.N)))
 	lab := max(96, c.W/7)
+	hw := max(112, c.W/6)
+	aw := (c.W - lab - hw - 2*m) / 2
 	for i := range l.N {
 		n := strconv.Itoa(i + 1)
 		y := c.Y + i*rowH
 		bh := min(48, rowH-4)
 		b["s_src_"+n] = Rect{c.X + lab, y + (rowH-bh)/2, aw, bh}
-		b["s_alias_"+n] = Rect{c.X + lab + aw + m, y + (rowH-bh)/2, c.W - lab - aw - m, bh}
+		b["s_alias_"+n] = Rect{c.X + lab + aw + m, y + (rowH-bh)/2, c.W - lab - aw - hw - 2*m, bh}
+		b["s_hide_"+n] = Rect{c.X + c.W - hw, y + (rowH-bh)/2, hw, bh}
 	}
 	b["s_src_save"] = Rect{c.X + c.W - max(200, c.W/4), c.Y + c.H - saveH, max(200, c.W/4), saveH}
 	for i := range l.ListRows {
@@ -134,11 +193,52 @@ func (l *Layout) settingsLayout() {
 	// About: the lines, and «Run setup again» at the bottom
 	b["s_setup_again"] = Rect{c.X, c.Y + c.H - sh - 8, max(260, c.W/2), sh + 8}
 	l.AboutLines = Rect{c.X, c.Y, c.W, c.H - sh - 8 - m}
+	// The generic picker (a choice of a page's field): the network list's rows and pages
+	for i := range l.ListRows {
+		b["s_pick_"+strconv.Itoa(i)] = b["s_row_"+strconv.Itoa(i)]
+	}
+	// The pages that register their own layout (pagedef.go)
+	l.pageLayouts()
 }
 
-// SettingsRows places the Wi-Fi and Network cameras pages' rows: «Conectarse a una wifi» (if the app has it,
-// client), «Crear mi wifi» and its QR; the cameras' reception switch and its list. Without the client row, the
-// one below moves up. Recomputed only when client changes.
+// FormRows is the page area cut in rows for a form page: n rows of the same height (at most 64, at least 48) with
+// a gap, and what is left at the bottom for its note and buttons. Pages use it so their fields line up.
+func (l *Layout) FormRows(n int) (rows []Rect, bottom Rect) {
+	c := l.SettingsPage
+	gap := l.M / 2
+	foot := max(52, l.HB+6)
+	rh := max(48, min(64, (c.H-foot-l.M-(n-1)*gap)/max(1, n)))
+	for i := range n {
+		rows = append(rows, Rect{c.X, c.Y + i*(rh+gap), c.W, rh})
+	}
+	return rows, Rect{c.X, c.Y + c.H - foot, c.W, foot}
+}
+
+// halves splits a row in two with a gap between them.
+func (l *Layout) halves(r Rect) (Rect, Rect) {
+	w := (r.W - l.M) / 2
+	return Rect{r.X, r.Y, w, r.H}, Rect{r.X + w + l.M, r.Y, r.W - w - l.M, r.H}
+}
+
+// stepperKeys places a stepper inside a field rectangle: − and + at its right, with room for the value between
+// them (a number: its unit goes in the field's title).
+func (l *Layout) stepperKeys(r Rect, minus, plus string) {
+	bw := max(48, min(r.H, 56))
+	l.Buttons[plus] = Rect{r.X + r.W - bw, r.Y, bw, r.H}
+	l.Buttons[minus] = Rect{r.X + r.W - 2*bw - max(84, r.W/4), r.Y, bw, r.H}
+}
+
+// eyeKey places the eye of a secret field at the right of its rectangle, square.
+func (l *Layout) eyeKey(r Rect, key string) Rect {
+	bw := max(48, min(r.H, 60))
+	l.Buttons[key] = Rect{r.X + r.W - bw, r.Y, bw, r.H}
+	return Rect{r.X, r.Y, r.W - bw - l.M/2, r.H}
+}
+
+// SettingsRows places the Wi-Fi and Network cameras pages' rows: «Connect to a Wi-Fi» (if the app has it,
+// client), «Create my Wi-Fi», its QR and the column beside it; the cameras' reception switch (the rest of that page is
+// camsLayout's) and, for an older app, its list. Without the client row, the one below moves up. Recomputed only
+// when client changes.
 func (l *Layout) SettingsRows(client bool) {
 	c := 0
 	if client {
@@ -162,11 +262,17 @@ func (l *Layout) SettingsRows(client bool) {
 	b["s_ap"] = Rect{x, ya, rw, rh}
 	b["s_net"] = Rect{x, top, rw, rh}
 	l.SettingsQR = Rect{x, ya + rh + m, rw, pg.Y + pg.H - (ya + rh + m)}
-	// «Rename» the AP: at the bottom right of the QR area, in the text column with the QR on (the QR is at most as
-	// wide as the area is high) and next to the name with it off
+	// Beside the QR (it is at most as wide as the area is high), a column from the bottom: «Rename» the AP (next to
+	// the name with it off), «New password», the 2.4 GHz channel and the password with its eye (MIXER.md §21);
+	// above them, the network's name or the page's notes
 	q := l.SettingsQR
-	bw := max(220, rw*36/100)
-	b["s_ssid"] = Rect{q.X + q.W - bw, q.Y + q.H - 52, bw, 52}
+	col := Rect{q.X + q.H + m, q.Y, q.W - q.H - m, q.H}
+	gap := m / 2
+	bh, fh := max(52, hb+6), max(56, hb*6/5)
+	b["s_ssid"] = Rect{col.X, col.Y + col.H - bh, col.W, bh}
+	b["s_wifi_rotate"] = Rect{col.X, b["s_ssid"].Y - gap - bh, col.W, bh}
+	b["s_wifi_ch"] = Rect{col.X, b["s_wifi_rotate"].Y - gap - fh, col.W, fh}
+	b["s_wifi_pw"] = l.eyeKey(Rect{col.X, b["s_wifi_ch"].Y - gap - fh, col.W, fh}, "s_wifi_pw_eye")
 	l.SettingsCams = Rect{x, top + rh + m, rw, pg.Y + pg.H - (top + rh + m)}
 	nw := max(120, dw/8)
 	sw := 64 * dw / 1280

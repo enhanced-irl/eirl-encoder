@@ -185,7 +185,7 @@ func (u *UI) wizardTap(what, pick string, hasPick bool) {
 		u.wizardClose()
 	case "w_pw":
 		u.kbClear()
-		u.kb = &keyboard{mode: "webpw", layer: "lower"}
+		u.kb = &keyboard{mode: "webpw", layer: "lower", buf: make([]byte, PSKMax)}
 		u.settingsView = "keyboard"
 	case "w_name":
 		name := ""

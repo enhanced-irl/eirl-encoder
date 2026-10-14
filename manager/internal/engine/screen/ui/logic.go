@@ -340,8 +340,12 @@ func SignalLevel(signal int) int {
 
 // --- the app's network state: which switches exist and what their rows say ---
 
-// NetSwitch: the reception switch exists (the app answers and some network camera is registered).
-func NetSwitch(n *NetSnapshot) bool { return n.Status != nil && n.Status.Cameras > 0 }
+// NetSwitch: the reception switch exists (the app answers and some network camera is registered, or the reception
+// is off).
+func NetSwitch(n *NetSnapshot) bool {
+	// Without cameras only to turn it back on: the app adds a camera only with the reception on
+	return n.Status != nil && (n.Status.Cameras > 0 || !n.Status.Enabled)
+}
 
 // APSwitch: «Crear mi wifi» has a switch (the app answers and has accessPoint.policy, WIFI.md §5).
 func APSwitch(n *NetSnapshot) bool {
@@ -411,7 +415,7 @@ type RowState struct {
 	Knob Knob
 	Busy bool
 	Sub  string
-	Tone string // good | warn | quiet
+	Tone string // good | warn | bad | quiet
 }
 
 // APRow is ap_row: the «Crear mi wifi» row.

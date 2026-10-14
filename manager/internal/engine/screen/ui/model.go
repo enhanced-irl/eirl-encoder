@@ -62,11 +62,14 @@ type OutputStatus struct {
 }
 
 type AudioStatus struct {
-	Main    *string       `json:"main"`
-	Mode    string        `json:"mode,omitempty"`
-	Follow  bool          `json:"follow,omitempty"`
-	Sources []AudioInput  `json:"sources"`
-	Phones  *PhonesStatus `json:"phones,omitempty"`
+	Main    *string      `json:"main"`
+	Mode    string       `json:"mode,omitempty"`
+	Follow  bool         `json:"follow,omitempty"`
+	Sources []AudioInput `json:"sources"`
+	// Links is each camera's audio: video id → audio id, or null for none of its own (resolved: by hand, else the
+	// same device's); nil from an engine without them
+	Links  map[string]*string `json:"links,omitempty"`
+	Phones *PhonesStatus      `json:"phones,omitempty"`
 }
 
 type AudioInput struct {
@@ -197,6 +200,30 @@ type NetStatus struct {
 	AccessPoint AccessPoint
 	LANEnabled  bool // lan.enabled is true
 	Cameras     int  // cameras.items: how many are registered
+	// The Network cameras page (MIXER.md §21): the cable, the most cameras and each one (CamItems nil: not given)
+	LAN      LANStatus
+	CamMax   int // cameras.max (0: not given)
+	CamItems []NetCamera
+}
+
+// LANStatus is lan of GET /network: the cameras by cable.
+type LANStatus struct {
+	State string // off | starting | on | error | ""
+	Iface string // eth0
+	IP    string // its IPv4, the one the cameras point at ("" none)
+	Error string
+}
+
+// NetCamera is one registered network camera (cameras.items of GET /network): no secrets.
+type NetCamera struct {
+	ID, Name  string
+	Connected bool     // a sender is publishing
+	Via       string   // wifi | lan | ""
+	Protocol  string   // srt | rtmp | ""
+	Codec     string   // h264 | h265 | ""
+	Kbps      *int     // what it sends
+	RTTMs     *float64 // SRT only
+	LossPct   *float64 // SRT only
 }
 
 // AccessPoint is accessPoint (or GET /network/wifi's ap), only what validates.
@@ -214,7 +241,8 @@ type AccessPoint struct {
 type WifiCreds struct {
 	SSID, Password string
 	QR             []string
-	On             bool // only for wifi.json (an older app)
+	On             bool   // only for wifi.json (an older app)
+	Channel        string // the saved 2.4 GHz channel: auto | 1-11 ("" not given); the one in use: AccessPoint.Channel
 }
 
 // WifiClient is GET /network/wifi's client.
@@ -269,10 +297,11 @@ func (noNet) Say(string)                  {}
 // --- what the screen sends and reads live ---
 
 // Command is an order from the screen to the engine (the socket's commands, MIXER.md §5). Origin says what
-// to do with the result: touch and audio failures are logged; a held button's failure is shown.
+// to do with the result: touch and audio failures are logged; a held button's failure is shown; a Settings
+// page's (page) and the audio settings' (audioset) are shown in their view.
 type Command struct {
 	Msg    map[string]any
-	Origin string // touch | audio | hold
+	Origin string // touch | audio | hold | page | audioset
 	X, Y   int    // where the finger was (logs)
 }
 

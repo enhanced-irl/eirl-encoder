@@ -14,7 +14,7 @@ import (
 // shares the program's timeline. If the screen fails or is unplugged, the broadcast goes on.
 func (e *Engine) startScreen() {
 	e.scr = screen.New(screen.Options{Media: e.media, Platform: e.plat, Host: screenHost{e},
-		Slots: e.nslots, Width: e.width, Height: e.height, FPS: e.fps, Latency: e.latency,
+		Slots: e.nslots, Width: e.width, Height: e.height, FPS: e.fps, Latency: e.latency, Sync: e.sync,
 		RunDir: e.runDir, PauseSupported: e.pauseBridge != nil})
 	e.appNet = appapi.New(e.scr.NetChanged, "")
 	e.appNet.Start()
@@ -109,7 +109,7 @@ func (h screenHost) AttachScreen(mvs []gst.Element, mvp gst.Element) {
 	if e.mvBridge == nil {
 		if tap := e.pgm.ByName("pgmtap"); tap != nil {
 			e.mvBridge = e.media.NewBridge(gst.BridgeShared, e.pgm, mvp)
-			e.mvBridge.SetParams(gst.BridgeParams{Sync: e.sync, Extra: e.latency + screen.MVMargin})
+			e.mvBridge.SetParams(gst.BridgeParams{Sync: e.sync, Extra: screen.ProgramDelay(e.latency)})
 			e.mvBridge.Attach(tap)
 		}
 	} else {

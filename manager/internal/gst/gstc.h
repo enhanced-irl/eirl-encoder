@@ -118,4 +118,24 @@ int eg_select_stream(GstElement *rtspsrc, const char *media);
 // VIDIOC_STREAMOFF on this process' own descriptors open on node (a stuck nvv4l2camerasrc)
 int eg_streamoff(const char *node);
 
+// The compositor's layers, set from its own streaming thread. A probe on its src pad applies, after each
+// output frame, the step of the current table that belongs to the next frame: a fade gets one step per
+// program frame, by the frame's timestamp, and every property of every pad changes between two frames
+// (never halfway). A cut is a table of one step. The pads are sink_0 … sink_<npads-1>.
+typedef struct {
+	gint32 x, y, w, h, z;
+	double alpha;
+} EgLayer;
+typedef struct EgAnim EgAnim;
+EgAnim *eg_anim_new(GstElement *comp, int npads, gint64 frame_ns);
+// steps × npads layers (copied); replaces whatever is playing. The probe after the next frame out of
+// the compositor sets step 0 for the frame after it, and step k for each following frame by its time
+void eg_anim_play(EgAnim *a, const EgLayer *steps, int nsteps);
+// 1 while a table is still being played
+int eg_anim_busy(EgAnim *a);
+// Once the compositor's pipeline is in NULL
+void eg_anim_free(EgAnim *a);
+// A pad's offset (gst_pad_set_offset): its data is that much later on the running time; 0 if no such pad
+int eg_set_pad_offset(GstElement *el, const char *pad, gint64 offset_ns);
+
 #endif

@@ -11,11 +11,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/tls"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +20,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/netcheck"
 )
 
 var (
@@ -150,11 +149,9 @@ type Client struct {
 		at   time.Time
 		err  string // wrong_password | not_found | connect_failed | ""
 	}
-	inetMu      sync.Mutex
-	inetIP      string
-	inetOK      *bool
-	inetStreak  int       // consecutive checks that say the opposite of inetOK
-	inetChanged time.Time // last change of inetOK
+	inetMu sync.Mutex
+	inetIP string
+	inet   netcheck.State // the shared hysteresis (internal/netcheck)
 }
 
 // New: the client wifi of that interface, through NetworkManager on the system bus.
@@ -612,10 +609,10 @@ var internetDwell = 60 * time.Second
 func (c *Client) internet(ip string) *bool {
 	c.inetMu.Lock()
 	defer c.inetMu.Unlock()
-	if c.inetIP != ip || c.inetOK == nil {
+	if c.inetIP != ip || c.inet.OK == nil {
 		return nil
 	}
-	v := *c.inetOK
+	v := *c.inet.OK
 	return &v
 }
 
@@ -631,13 +628,13 @@ func (c *Client) checkNow(ctx context.Context) bool {
 		url = c.InternetURL()
 	}
 	c.inetMu.Lock()
-	off := c.inetOK != nil && !*c.inetOK
+	off := c.inet.Off()
 	switch {
 	case err != nil || url == "":
 		c.inetMu.Unlock()
 		return off
 	case d.State != devActivated || d.IP == "":
-		c.inetIP, c.inetOK, c.inetStreak = "", nil, 0
+		c.inetIP, c.inet = "", netcheck.State{}
 		c.inetMu.Unlock()
 		return false
 	}
@@ -650,21 +647,10 @@ func (c *Client) checkNow(ctx context.Context) bool {
 	c.inetMu.Lock()
 	defer c.inetMu.Unlock()
 	if c.inetIP != d.IP {
-		return c.inetOK != nil && !*c.inetOK // it changed meanwhile: next round
+		return c.inet.Off() // it changed meanwhile: next round
 	}
-	now := c.now()
-	switch {
-	case c.inetOK == nil && ok: // the first good one: it does not change the split
-		c.inetOK, c.inetStreak, c.inetChanged = &ok, 0, now
-	case c.inetOK != nil && *c.inetOK == ok:
-		c.inetStreak = 0
-	default:
-		c.inetStreak++
-		if c.inetStreak >= internetStreak && (c.inetOK == nil || now.Sub(c.inetChanged) >= internetDwell) {
-			c.inetOK, c.inetStreak, c.inetChanged = &ok, 0, now
-		}
-	}
-	return c.inetOK != nil && !*c.inetOK
+	c.inet.Record(ok, c.now(), internetStreak, internetDwell)
+	return c.inet.Off()
 }
 
 // Monitor: checks the client wifi's internet access every `every` (also with nobody watching) and calls onChange at
@@ -687,24 +673,8 @@ func (c *Client) Monitor(ctx context.Context, every time.Duration, onChange func
 	}
 }
 
-// checkInternet: HEAD over HTTPS to url from ip, with the certificate verified (a portal that intercepts HTTPS is
-// «no internet» too). With ctx: when the app stops it does not wait for the timeout.
-var checkInternet = func(ctx context.Context, url, ip string) bool {
-	d := &net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(ip)}, Timeout: 5 * time.Second}
-	cl := &http.Client{Timeout: 8 * time.Second, Transport: &http.Transport{DialContext: d.DialContext,
-		TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}, Proxy: nil, DisableKeepAlives: true},
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
-	if err != nil {
-		return false
-	}
-	resp, err := cl.Do(req)
-	if err != nil {
-		return false
-	}
-	resp.Body.Close()
-	return true
-}
+// checkInternet: the shared probe (internal/netcheck); a variable for the tests.
+var checkInternet = netcheck.HTTPS
 
 // --- helpers --------------------------------------------------------------------------------------------------
 

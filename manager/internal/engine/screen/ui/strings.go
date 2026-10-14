@@ -7,16 +7,18 @@ package ui
 type Strings struct {
 	Code string // the language code: es | en | fr
 	// Header
-	LogoA, LogoB          string // the name in text when the logo is missing ("Enhanced" + "IRL")
-	LiveClockF            string // %d:%02d:%02d
-	NoConnectionF         string // %s = reason
-	RetryingReason        string
-	ConnectingReasonF     string // %s = reason
-	Connecting            string
-	NotEmitting           string
-	TempF                 string // %.0f (°C)
-	VoltsF                string // %.2f, decimal point replaced by Decimal
-	MbpsF                 string // %.1f
+	LogoA, LogoB      string // the name in text when the logo is missing ("Enhanced" + "IRL")
+	LiveClockF        string // %d:%02d:%02d
+	NoConnectionF     string // %s = reason
+	RetryingReason    string
+	ConnectingReasonF string // %s = reason
+	Connecting        string
+	NotEmitting       string
+	TempF             string // %.0f (°C)
+	VoltsF            string // %.2f, decimal point replaced by Decimal
+	MbpsF             string // %.1f
+	// LinkShort: a connection's short name in the header's dots, by kind (ethernet | usb | wifi | modem)
+	LinkShort             map[string]string
 	RTTF                  string // %d
 	LinkSRT, LinkSRTLAOne string // the output's link: SRT; SRTLA with one uplink
 	LinkSRTLAF            string // %d uplinks (0 or more than one)
@@ -90,7 +92,7 @@ type Strings struct {
 	NoCameras, NoCamerasHelp               string
 	CamLive                                string
 	HowWifiF                               string // %s = ssid
-	HowWifiOff, HowCable, HowURL           string
+	HowWifiOff, HowURL                     string
 	// «Crear mi wifi» row
 	Off, TurningOn, TurningOff string
 	LegacyOnF                  string // %s = ssid
@@ -222,6 +224,28 @@ type Strings struct {
 	AboutName, AboutHost, AboutIPs, AboutWeb         string
 	AboutUnknown                                     string
 	SetupAgain, SetupAgainConfirm, SetupContinue     string
+	// --- MIXER.md §21: everything the web configures, on the screen ---
+	GroupTitle map[string]string // the Settings list's entries, by group (SettingsGroups)
+	TabTitle   map[string]string // the tabs of a group of several pages, by page
+	// Shared by the form pages
+	Save, SaveApply, Apply  string
+	NotSet, TapAgain, Saved string
+	SavedRestarting         string // saved and applied: the stream restarts
+	SavedStopped            string // saved; not streaming: taken when it starts
+	SavedLater              string // saved, not applied: taken when the stream restarts
+	PendingApply            string // saved changes not applied yet (the «Apply» button next to it)
+	ApplyCuts               string // «Save and apply» while streaming: a few seconds' cut (tap again)
+	Unsaved                 string // a draft not saved yet
+	ManagedByCloud          string // the destination is set by the EnhancedIRL account: read-only
+	// CmdErrors: why the engine refused a page's command, by its code (scene and audio codes)
+	CmdErrors map[string]string
+	// Each area's own (one file each: strings_<area>.go, with its three tables)
+	Stream  StreamStrings  // Stream: Destination, Uplinks, Pause
+	Input   InputStrings   // Sources: the Input tab and the slots' Hide
+	NetX    NetStrings     // Wi-Fi (channel, new password) and Network cameras (switches, add, a camera's page)
+	Cloud   CloudStrings   // EnhancedIRL
+	Account AccountStrings // Device: Name & password
+	AudioX  AudioStrings   // the audio view's settings: delay and each camera's audio
 }
 
 // Languages are the screen's languages, in the order the Language page lists them.

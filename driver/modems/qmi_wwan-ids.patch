@@ -1,0 +1,17 @@
+--- a/qmi_wwan.c	2026-10-14 17:28:58
++++ b/qmi_wwan.c	2026-10-14 17:28:58
+@@ -984,6 +984,14 @@
+ 	{QMI_QUIRK_SET_DTR(0x2c7c, 0x0195, 4)},	/* Quectel EG95 */
+ 	{QMI_FIXED_INTF(0x2c7c, 0x0296, 4)},	/* Quectel BG96 */
+ 	{QMI_QUIRK_SET_DTR(0x2c7c, 0x0306, 4)},	/* Quectel EP06 Mini PCIe */
++	/* EnhancedIRL encoder: Quectel IDs that L4T 4.9 lacks (upstream matches them by class/protocol;
++	 * here on the QMI interface of the default composition, AT+QCFG="usbnet",0)
++	 */
++	{QMI_QUIRK_SET_DTR(0x2c7c, 0x030e, 4)},	/* Quectel EM05-G v2 */
++	{QMI_QUIRK_SET_DTR(0x2c7c, 0x0512, 4)},	/* Quectel EG12/EM12 */
++	{QMI_QUIRK_SET_DTR(0x2c7c, 0x0620, 4)},	/* Quectel EM160R-GL */
++	{QMI_QUIRK_SET_DTR(0x2c7c, 0x0800, 4)},	/* Quectel RM500Q-GL */
++	{QMI_QUIRK_SET_DTR(0x2c7c, 0x0801, 4)},	/* Quectel RM520N */
+ 
+ 	/* 4. Gobi 1000 devices */
+ 	{QMI_GOBI1K_DEVICE(0x05c6, 0x9212)},	/* Acer Gobi Modem Device */

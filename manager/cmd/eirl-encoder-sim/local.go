@@ -118,6 +118,15 @@ func runLocal(ctx context.Context, o localOpts, log *slog.Logger) error {
 		o.hwID = simHardwareID(o.dataDir)
 	}
 	srv.Network = simNetwork(o.dataDir, o.hwID)
+	// The internet connections and modems (MODEMS.md), through the real links service
+	if r, svc, mods, err := simLinks(o.dataDir); err != nil {
+		log.Warn("simulated connections off", "err", err)
+	} else {
+		srv.Uplinks, srv.Links = r, svc
+		svc.Streaming = srv.StreamingSRTLA
+		go mods.Run(ctx)
+		go svc.Run(ctx)
+	}
 	if _, err := srv.Network.EnsureNetwork(); err != nil {
 		log.Warn("access point: could not write its name and password", "err", err)
 	}

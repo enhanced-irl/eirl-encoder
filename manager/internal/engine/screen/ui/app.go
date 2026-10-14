@@ -37,16 +37,62 @@ type AppWatch struct {
 	Zones  bool // the time zone picker: the list, once
 	Cloud  bool // the wizard's link step: the link state every ~3 s
 	About  bool // the About page: the IP addresses and the build's commit
+	// MIXER.md §21: the pages of everything the web configures
+	Dest    bool // the Destination page: GET /destination every ~2 s
+	Status  bool // the Uplinks and Input pages: GET /status every ~2 s
+	Sources bool // the Input page: GET /sources every ~10 s (a camera just plugged in shows up)
 }
 
 // AppAction is a change asked of the app.
 type AppAction struct {
-	What  string // language | name | timezone | ntp | time | setup_step | setup_complete | setup_restart | update_check | update_install | slots | cloud_pair
+	What  string // language | name | timezone | ntp | time | setup_step | setup_complete | setup_restart | update_check | update_install | slots | cloud_pair, and MIXER.md §21's (AppActions)
 	Value string // language, name, timezone; setup_step: the step id
 	State string // setup_step: done | skipped
 	On    bool   // ntp
 	Time  time.Time
 	Slots []SlotAssign // slots: all of them
+	// MIXER.md §21's actions: the route's {id} (an uplink's name, a camera's id), the JSON body's fields (nil:
+	// none) and its secret fields (a stream key, a password: Do copies them; the caller wipes its own right after)
+	ID      string
+	Body    map[string]any
+	Secrets map[string][]byte
+}
+
+// AppActions are MIXER.md §21's actions (their route is the client's): what each one sends.
+//
+//	dest_save     PUT /destination  Body: url, latencyMs, videoBitrateKbps, audioBitrateKbps, adaptiveBitrate,
+//	              videoMinBitrateKbps, apply; streamId / passphrase: null clears it; Secrets: streamId, passphrase
+//	dest_reveal   GET /destination/secrets → AppSnapshot.DestSecrets (until DropSecrets)
+//	restart       POST /service/restart (apply what is saved)
+//	uplink        PUT /uplinks/{ID}  Body: disabled
+//	input_save    PUT /input  Body: source, device, format, mode, audio, edidPreferred, apply
+//	sources_scan  GET /sources → AppSnapshot.Sources
+//	cloud_unlink  DELETE /cloud (also cancels a pairing)
+//	password      PUT /password  Secrets: current, new
+//	cam_add       POST /cameras  Body: name
+//	cam_rename    PATCH /cameras/{ID}  Body: name
+//	cam_rotate    PATCH /cameras/{ID}  (rotateKey)
+//	cam_remove    DELETE /cameras/{ID}
+//	cam_creds     GET /network/credentials?cameras=1 → AppSnapshot.CamCreds (until DropSecrets)
+//	ap_enabled    PUT /network/ap  Body: enabled (the cameras over the board's Wi-Fi)
+//	ap_channel    PUT /network/ap  Body: channel (auto | 1-11)
+//	ap_rotate     PUT /network/ap  (rotatePassword)
+//	lan_enabled   PUT /network/lan  Body: enabled (the cameras by cable)
+var AppActions = []string{"dest_save", "dest_reveal", "restart", "uplink", "input_save", "sources_scan",
+	"cloud_unlink", "password", "cam_add", "cam_rename", "cam_rotate", "cam_remove", "cam_creds", "ap_enabled",
+	"ap_channel", "ap_rotate", "lan_enabled"}
+
+// SecretsDropper is an App that can forget the secrets it read for the screen (DestSecrets, CamCreds): the page
+// that showed them calls it when it goes.
+type SecretsDropper interface {
+	DropSecrets()
+}
+
+// dropSecrets forgets what the app revealed, if the App can.
+func (u *UI) dropSecrets() {
+	if d, ok := u.app().(SecretsDropper); ok {
+		d.DropSecrets()
+	}
 }
 
 // AppSnapshot is the app's device state for the screen. Pointers and slices are read-only.
@@ -65,6 +111,16 @@ type AppSnapshot struct {
 	ZonesErr  string
 	Cloud     *CloudInfo
 	CloudAPI  Tri
+	// MIXER.md §21
+	Dest       *DestInfo
+	DestAPI    Tri
+	Status     *StatusInfo
+	StatusAPI  Tri
+	Sources    *SourcesInfo
+	SourcesAPI Tri
+	// The secrets an eye asked for (nil: not asked, or dropped): the stream key and passphrase, the cameras' URLs
+	DestSecrets *DestSecrets
+	CamCreds    []CamConnect
 	// Local facts the engine knows itself (About): the build's commit and the board's IP addresses
 	Commit string
 	IPs    []string
@@ -205,6 +261,113 @@ type CloudInfo struct {
 	LastError    string
 }
 
+// DestInfo is GET /destination: the stream's destination as the web shows it (the key and the passphrase never:
+// only whether they are set, and the key masked).
+type DestInfo struct {
+	ManagedBy      string // "eirl": EnhancedIRL sets it (read-only here and on the web)
+	URL            string // without its secrets ("" if none, or URLInvalid)
+	URLInvalid     bool
+	Mode           string // caller | listener
+	LatencyMs      int
+	StreamIDSet    bool
+	StreamIDMasked string
+	PassphraseSet  bool
+	VideoKbps      int
+	AudioKbps      int
+	ABR            bool
+	VideoMinKbps   int
+	Transport      string // srt | srtla (the saved URL's)
+	Output         string // on | off (saved)
+	PendingRestart bool   // saved, not applied: «Apply» restarts the stream
+}
+
+// DestSecrets is GET /destination/secrets (local socket only): what the eye of the key and of the passphrase shows.
+type DestSecrets struct {
+	StreamID, Passphrase string
+}
+
+// StatusInfo is what the pages use of GET /status: the uplinks (SRTLA) and the saved input.
+type StatusInfo struct {
+	Transport      string // the running stream's: srt | srtla
+	Output         string // on | off
+	PendingRestart bool
+	HasUplinks     bool // the board has the uplinks dispatcher (else the page says SRTLA is not available)
+	Uplinks        []UplinkInfo
+	Input          InputInfo
+}
+
+// UplinkInfo is one internet uplink (GET /status uplinks[]).
+type UplinkInfo struct {
+	Name, IP, Kind string // kind: ethernet | wifi | modem | ""
+	InUse          bool   // the running SRTLA stream uses it
+	Disabled       bool   // taken out of the bonding by hand
+	Conflict       bool   // the same IP as another one: not used
+	NoInternet     bool
+	TxKbps         int
+	// The app's judgement of the link (MODEMS.md §5); empty from an app without it
+	Label      string // the modem's operator or its alias: the row's title instead of the interface
+	Health     string // good | weak | bad | off: the row's dot
+	HealthCode string // why: the closed list of MODEMS.md §5, translated by Stream.UplinkHealth
+}
+
+// InputInfo is the saved input (GET /status input) and what runs now.
+type InputInfo struct {
+	Source        string // hdmi | usb | test
+	Device        string // usb: a /dev/v4l path or auto
+	Format, Mode  string // usb: auto, or one of the source's options
+	Audio         string // auto | none | i2s | alsa:<card>
+	EDIDPreferred string
+	EDIDActive    string
+	ActiveState   string // starting | waiting_device | ready | ""
+	ActiveSource  string // what runs: hdmi | usb | test ("" an older app)
+	ActiveName    string
+	ActiveFormat  string
+	ActiveMode    string
+}
+
+// SourcesInfo is GET /sources: what is connected and what each USB source can be captured with.
+type SourcesInfo struct {
+	Sources []SourceChoice
+	Audio   []AudioChoice
+}
+
+// SourceChoice is one video source of the catalogue.
+type SourceChoice struct {
+	ID, Kind, Name string // kind: hdmi-csi | usb | test
+	USB3           bool
+	USBKnown       bool           // the app said the bus speed (else neither USB 3 nor USB 2: just USB)
+	Auto           *CaptureOption // what «automatic» takes (usb)
+	Options        []CaptureOption
+	AudioName      string // the same device's audio, if it has
+	Warnings       []string
+}
+
+// CaptureOption is one way to capture a USB source.
+type CaptureOption struct {
+	Format, Mode        string // the format; WxH@fps (VIDEO_MODE)
+	FPS                 float64
+	OutWidth, OutHeight int
+	BusShare            float64
+}
+
+// AudioChoice is one audio input of the catalogue.
+type AudioChoice struct {
+	ID, Kind, Name string // kind: i2s | usb | network
+}
+
+// CamConnect is a network camera's URLs (with its key): GET /network/credentials?cameras=1.
+type CamConnect struct {
+	ID   string
+	Wifi CamURLs  // over the board's Wi-Fi
+	LAN  *CamURLs // by cable (nil: the board has no IP on its cable)
+}
+
+// CamURLs are a camera's URLs over one way in, and the SRT one's QR in rows of 0 and 1 (made by the client).
+type CamURLs struct {
+	SRT, RTMP, RTMPServer, RTMPKey string
+	SRTQR                          []string
+}
+
 // AppResult is how an action went: OK, or the HTTP code with the app's error, message (in the device language)
 // and field errors (field → message).
 type AppResult struct {
@@ -217,6 +380,8 @@ type AppResult struct {
 	At      time.Time
 	// Applied: PUT /sources/slots's applied (the engine took it now; false: at its next start); nil if not given
 	Applied *bool
+	// Restarted: PUT /destination's or /input's (with apply): the stream restarted to take it; nil if not given
+	Restarted *bool
 }
 
 // AppFieldError is a field's error: its code (duplicate, invalid…) and the app's message.

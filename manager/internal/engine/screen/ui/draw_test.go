@@ -133,6 +133,19 @@ func TestIcons(t *testing.T) {
 
 // Every text of every table is there (an empty field would be a hole on the screen), with the same keys as
 // Spanish in the maps.
+// stringFields walks a strings table's fields, also inside its areas' tables (MIXER.md §21: Strings.Stream…):
+// fn gets each field, its name (Area.Field) and the Spanish table's same field.
+func stringFields(v, es reflect.Value, prefix string, fn func(f, ref reflect.Value, name string)) {
+	for i := range v.NumField() {
+		f, ref, name := v.Field(i), es.Field(i), prefix+v.Type().Field(i).Name
+		if f.Kind() == reflect.Struct {
+			stringFields(f, ref, name+".", fn)
+			continue
+		}
+		fn(f, ref, name)
+	}
+}
+
 func TestStringsComplete(t *testing.T) {
 	es := reflect.ValueOf(Spanish).Elem()
 	for _, code := range Languages {
@@ -140,9 +153,7 @@ func TestStringsComplete(t *testing.T) {
 		if tx.Code != code {
 			t.Errorf("%s: Code %q", code, tx.Code)
 		}
-		v := reflect.ValueOf(tx).Elem()
-		for i := range v.NumField() {
-			f, name := v.Field(i), v.Type().Field(i).Name
+		stringFields(reflect.ValueOf(tx).Elem(), es, "", func(f, ref reflect.Value, name string) {
 			switch f.Kind() {
 			case reflect.String:
 				if f.String() == "" {
@@ -155,7 +166,6 @@ func TestStringsComplete(t *testing.T) {
 					}
 				}
 			case reflect.Map:
-				ref := es.Field(i)
 				if f.Len() == 0 || f.Len() != ref.Len() {
 					t.Errorf("%s: %s has %d keys (es: %d)", code, name, f.Len(), ref.Len())
 				}
@@ -165,14 +175,28 @@ func TestStringsComplete(t *testing.T) {
 					}
 				}
 			case reflect.Slice:
-				if f.Len() == 0 || f.Len() != es.Field(i).Len() {
-					t.Errorf("%s: %s has %d items (es: %d)", code, name, f.Len(), es.Field(i).Len())
+				if f.Len() == 0 || f.Len() != ref.Len() {
+					t.Errorf("%s: %s has %d items (es: %d)", code, name, f.Len(), ref.Len())
 				}
 			}
-		}
+		})
 	}
 	if Lang("de") != English || Lang("") != English || New(nil, nil, nil).Tx != English {
 		t.Error("the default is not English")
+	}
+	// Every group and tab has its name; every single-page group, its page's title
+	for _, g := range SettingsGroups {
+		if Spanish.GroupTitle[g.ID] == "" {
+			t.Errorf("no GroupTitle for %s", g.ID)
+		}
+		for _, p := range g.Pages {
+			if len(g.Pages) > 1 && Spanish.TabTitle[p] == "" {
+				t.Errorf("no TabTitle for %s", p)
+			}
+			if len(g.Pages) == 1 && Spanish.PageTitle[p] == "" {
+				t.Errorf("no PageTitle for %s", p)
+			}
+		}
 	}
 }
 
@@ -184,9 +208,7 @@ func TestStringsVerbs(t *testing.T) {
 	verbs := func(s string) string { return strings.Join(reVerb.FindAllString(s, -1), " ") }
 	es := reflect.ValueOf(Spanish).Elem()
 	for _, code := range Languages {
-		v := reflect.ValueOf(Lang(code)).Elem()
-		for i := range v.NumField() {
-			f, ref, name := v.Field(i), es.Field(i), v.Type().Field(i).Name
+		stringFields(reflect.ValueOf(Lang(code)).Elem(), es, "", func(f, ref reflect.Value, name string) {
 			var pairs [][2]string
 			switch f.Kind() {
 			case reflect.String:
@@ -210,7 +232,7 @@ func TestStringsVerbs(t *testing.T) {
 			if strings.HasSuffix(name, "F") && f.Kind() == reflect.String && verbs(f.String()) == "" {
 				t.Errorf("%s: %s is a format without verbs", code, name)
 			}
-		}
+		})
 	}
 }
 

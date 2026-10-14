@@ -121,3 +121,12 @@ func (p Preview) WizardKeyboard(mode, typed string) {
 	p.u.kb.n = copy(p.u.kb.buf[:], typed)
 	p.u.settingsView = "keyboard"
 }
+
+// Reveal opens a secret's eye (its field's eye key).
+func (p Preview) Reveal(key string) { p.u.toggleReveal(key) }
+
+// Confirming arms a second-tap confirmation (what is waiting for it).
+func (p Preview) Confirming(what string) { p.u.confirmTap(what) }
+
+// Touch is a tap on a page's button (Settings open on its page).
+func (p Preview) Touch(key string) { p.u.pageTouch(key, "", false) }

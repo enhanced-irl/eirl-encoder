@@ -2,16 +2,17 @@ package engine
 
 import (
 	"encoding/json"
-
 	"fmt"
-	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/audio"
-	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/phones"
+	"math"
 	"strconv"
 	"time"
 
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/audio"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/elog"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/phones"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/pipeline"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/scene"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/gst"
 )
 
 // --- scene: everything here runs on the actor ---
@@ -70,32 +71,79 @@ func (e *Engine) targetRects() map[int]scene.Layer {
 func (e *Engine) applyScene() {
 	e.fading = nil
 	e.applied = e.targetRects()
-	e.applyRects(e.applied)
+	e.show([]map[int]scene.Layer{e.applied})
 	if e.scr != nil {
 		e.scr.SetAspects(e.aspects) // the screen's tiles get the same bars
 	}
 }
 
+// npads: the compositor's layers, the slots' and the Pause's (the last one) if there is one.
+func (e *Engine) npads() int {
+	if e.pauseSlot == scene.NoPauseSlot {
+		return e.nslots
+	}
+	return e.nslots + 1
+}
+
+// show puts layers on the compositor, one step per output frame, the last one to stay. Before the program
+// plays they go straight onto its pads; after, through the animator, which sets every pad at once between
+// two frames from the compositor's own thread: a fade moves exactly one step per frame of the program
+// whatever the actor is doing, and no frame comes out with half a change.
+func (e *Engine) show(steps []map[int]scene.Layer) {
+	if e.anim == nil || !e.playing {
+		e.applyRects(steps[len(steps)-1])
+		return
+	}
+	n := e.npads()
+	table := make([][]gst.Layer, len(steps))
+	for k, rects := range steps {
+		table[k] = make([]gst.Layer, n)
+		for i, l := range rects {
+			if i >= 0 && i < n {
+				table[k][i] = gstLayer(l)
+			}
+		}
+	}
+	e.anim.Play(table)
+}
+
+func gstLayer(l scene.Layer) gst.Layer {
+	return gst.Layer{X: l.X, Y: l.Y, W: l.W, H: l.H, Alpha: l.Alpha, Z: l.Z}
+}
+
+// fadeSteps is a FadePlan fade at the program's rate: one FadeRects per frame (t = k/n), then the new
+// scene itself. The first step is still the old picture: the fade fills the n frames after it.
+func fadeSteps(old, nw map[int]scene.Layer, roles map[int]scene.Role, length time.Duration, fps int) []map[int]scene.Layer {
+	n := max(1, int(math.Round(length.Seconds()*float64(fps))))
+	steps := make([]map[int]scene.Layer, 0, n+1)
+	for k := range n {
+		steps = append(steps, scene.FadeRects(old, nw, roles, float64(k)/float64(n)))
+	}
+	return append(steps, nw)
+}
+
 func (e *Engine) applyRects(rects map[int]scene.Layer) {
 	for i, l := range rects {
 		pad := "sink_" + strconv.Itoa(i)
-		for _, kv := range [][2]string{{"xpos", strconv.Itoa(l.X)}, {"ypos", strconv.Itoa(l.Y)}, {"width", strconv.Itoa(l.W)},
-			{"height", strconv.Itoa(l.H)}, {"alpha", strconv.FormatFloat(l.Alpha, 'g', -1, 64)}, {"zorder", strconv.Itoa(l.Z)}} {
+		for _, kv := range gstLayer(l).Props() {
 			e.comp.SetPad(pad, kv[0], kv[1])
 		}
 	}
 }
 
 // sceneChanged puts the new scene on the program, with a fade if it calls for one (FadePlan). A change
-// halfway through a fade starts from where that fade was.
+// halfway through a fade starts from the scene that fade was going to (e.applied), not from the picture
+// half way: the layers that were still fading out go at once.
 func (e *Engine) sceneChanged() {
 	e.syncHidden()
 	nw := e.targetRects()
 	old := e.applied
 	if e.scene.Transition == scene.TransitionFade && old != nil && !sameLayers(old, nw) {
 		roles := scene.FadePlan(old, nw, e.width, e.height)
-		e.fading = &fadeState{t0: time.Now(), old: old, new: nw, roles: roles, length: scene.FadeLength(roles)}
+		length := scene.FadeLength(roles)
+		e.fading = &fadeState{t0: time.Now(), length: length}
 		e.applied = nw
+		e.show(fadeSteps(old, nw, roles, length, e.fps))
 	} else {
 		e.applyScene()
 	}
@@ -123,12 +171,13 @@ func (e *Engine) fadeTick() {
 	if f == nil {
 		return
 	}
-	t := float64(time.Since(f.t0)) / float64(f.length)
-	if t >= 1 {
+	// The animator plays the fade; the actor waits for its end and then places the scene again: what
+	// changed meanwhile (a source found or moved to another slot, another aspect) was left for now. If
+	// nothing did, the animator has nothing to change. A program that gives no frames does not hold the
+	// actor: after the fade's length and fadeGrace the scene goes in one step.
+	if e.anim == nil || !e.anim.Busy() || time.Since(f.t0) > f.length+fadeGrace {
 		e.applyScene()
-		return
 	}
-	e.applyRects(scene.FadeRects(f.old, f.new, f.roles, t))
 }
 
 // --- commands ---

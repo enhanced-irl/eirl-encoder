@@ -287,3 +287,71 @@ func TestCaptureTimeEarly(t *testing.T) {
 		t.Fatal("the CSI's raw clock offset is added (trap 24)")
 	}
 }
+
+// The animator against a real GstVideoAggregator (the software compositor: nvcompositor on the board is
+// the same base class, 1.14's libgstbadvideo): a fade table moves exactly one step per output frame,
+// with no repeated or skipped steps, and the last step stays. Only where gst-plugins-bad is installed.
+func TestAnimatorOneStepPerFrame(t *testing.T) {
+	g := New()
+	if !g.HasElement("compositor") {
+		t.Skip("no compositor (gst-plugins-bad)")
+	}
+	caps := "video/x-raw,format=I420,width=64,height=36,framerate=30/1"
+	p, err := g.Parse("anim", "compositor name=c background=black ! video/x-raw,format=I420,width=64,height=36 "+
+		"! appsink name=out emit-signals=false sync=false max-buffers=200 drop=false "+
+		"videotestsrc pattern=black num-buffers=120 ! "+caps+" ! c.sink_0 "+
+		"videotestsrc pattern=white num-buffers=120 ! "+caps+" ! c.sink_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := g.NewAnimator(p.ByName("c"), 2, time.Second/30)
+	defer func() { p.Close(); a.Free() }() // Free only once the pipeline is in NULL
+	const n = 30
+	steps := make([][]Layer, 0, n+1)
+	for k := 0; k <= n; k++ {
+		steps = append(steps, []Layer{{W: 64, H: 36, Alpha: 1, Z: 1}, {W: 64, H: 36, Alpha: float64(k) / n, Z: 2}})
+	}
+	a.Play(steps)
+	if !a.Busy() {
+		t.Fatal("not busy with a table")
+	}
+	if err := p.SetState(StatePlaying); err != nil {
+		t.Fatal(err)
+	}
+	out := p.ByName("out")
+	var luma []float64
+	for len(luma) < 60 {
+		b := out.PullBytes(2 * time.Second)
+		if b == nil {
+			break
+		}
+		sum := 0
+		for _, v := range b[:64*36] {
+			sum += int(v)
+		}
+		luma = append(luma, float64(sum)/(64*36))
+	}
+	if len(luma) < 50 {
+		t.Fatalf("%d frames", len(luma))
+	}
+	// The first frame was composed before any step (both pads at their defaults: white on top); from the
+	// second, step k on frame k+1: black (alpha 0) and then up by 1/n a frame until white
+	ramp := luma[1 : n+2]
+	step := (ramp[n] - ramp[0]) / n
+	if step < 5 {
+		t.Fatalf("no fade: %v", luma)
+	}
+	for k := 1; k <= n; k++ {
+		if d := ramp[k] - ramp[k-1]; d < step*0.5 || d > step*1.5 {
+			t.Errorf("frame %d: luma +%.1f, want +%.1f (one step a frame): %v", k+1, d, step, ramp)
+		}
+	}
+	for _, v := range luma[n+2:] {
+		if v != ramp[n] {
+			t.Errorf("after the table: %.1f, want the last step (%.1f) to stay", v, ramp[n])
+		}
+	}
+	if a.Busy() {
+		t.Error("still busy after the last step")
+	}
+}

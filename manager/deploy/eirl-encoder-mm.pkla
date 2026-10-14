@@ -1,0 +1,10 @@
+# polkit (0.105, Ubuntu 18.04) → /etc/polkit-1/localauthority/50-local.d/eirl-encoder-mm.pkla
+# Cellular modems (MODEMS.md §7): eirl-encoderd (user eirl-encoder, no root) turns on ModemManager's extended
+# signal readings (Modem.Signal.Setup) and, from phase M4, unlocks the SIM, enables and resets modems. Only
+# Device.Control: not messaging, contacts, voice, location, USSD or firmware. Reading needs no permission.
+[eirl-encoder: cellular modems through ModemManager]
+Identity=unix-user:eirl-encoder
+Action=org.freedesktop.ModemManager1.Device.Control
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes

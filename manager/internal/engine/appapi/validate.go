@@ -1,6 +1,8 @@
 package appapi
 
 import (
+	"math"
+	"net"
 	"regexp"
 	"unicode/utf8"
 )
@@ -26,15 +28,22 @@ type LAN struct {
 	Enabled bool
 	State   string // off | starting | on | error
 	Error   string
+	Iface   string // eth0 (a network interface's name)
+	IP      string // its IPv4, the one the cameras point at ("" none: no cable, or no address)
 }
 
-// Camera is one network camera of GET /network (the screen only counts them: their live state comes from the
-// engine's own sources).
+// Camera is one network camera of GET /network: what the Network cameras page lists (its live picture comes from
+// the engine's own sources). No secrets: its key only comes with GET /network/credentials?cameras=1.
 type Camera struct {
 	ID        string
 	Name      string
 	Connected bool
-	Via       string // wifi | lan | ""
+	Via       string   // wifi | lan | ""
+	Protocol  string   // srt | rtmp | "" (without a sender)
+	Codec     string   // h264 | h265 | ""
+	Kbps      *int     // 0-10000000
+	RTTMs     *float64 // SRT only: 0-100000
+	LossPct   *float64 // SRT only: 0-100
 }
 
 // Cameras of GET /network.
@@ -52,11 +61,12 @@ type Status struct {
 }
 
 // WiFi is the board's wifi to join (GET /network/credentials?qr=rows, only with the panel open): the SSID, its
-// password and the QR in rows of 0 and 1.
+// password, the QR in rows of 0 and 1, and its saved 2.4 GHz channel.
 type WiFi struct {
 	SSID     string
 	Password string
 	QR       []string
+	Channel  string // auto | 1-11 as saved ("" an app that does not say it); the one in use is AccessPoint.Channel
 }
 
 // Client is «Conectarse a una wifi» (client of GET /network/wifi).
@@ -90,6 +100,11 @@ var (
 	reSSID        = regexp.MustCompile(`^[A-Za-z0-9 _.-]{1,32}$`) // netcfg's (the app validates them on write)
 	rePSK         = regexp.MustCompile(`^[A-Za-z0-9]{8,63}$`)
 	reQRRow       = regexp.MustCompile(`^[01]{21,177}$`)
+	reChannel     = regexp.MustCompile(`^(auto|[1-9]|1[01])$`) // netcfg's AP channel: auto or 1-11 (2.4 GHz)
+	reIface       = regexp.MustCompile(`^[a-z0-9]{1,15}$`)
+	camProtocols  = set("srt", "rtmp")
+	camCodecs     = set("h264", "h265")
+	camVias       = set("wifi", "lan")
 	maxNetworks   = 40
 	maxQRFileRead = 16384
 )
@@ -166,6 +181,14 @@ func networkStatus(v any) *Status {
 		st.LAN.Enabled, _ = lan["enabled"].(bool)
 		st.LAN.State = oneOf(lan, "state", apStates)
 		st.LAN.Error = textField(lan, "error", 200)
+		if f, _ := lan["iface"].(string); reIface.MatchString(f) {
+			st.LAN.Iface = f
+		}
+		if a, _ := lan["ip"].(string); len(a) <= 15 {
+			if ip := net.ParseIP(a); ip != nil && ip.To4() != nil {
+				st.LAN.IP = a
+			}
+		}
 	}
 	cams := obj(d["cameras"])
 	st.Cameras.Max, _ = intIn(cams["max"], 0, 1000)
@@ -176,8 +199,18 @@ func networkStatus(v any) *Status {
 		if c == nil {
 			continue
 		}
-		cam := Camera{ID: textField(c, "id", 200), Name: textField(c, "name", 200), Via: oneOf(c, "via", set("wifi", "lan"))}
+		cam := Camera{ID: textField(c, "id", 200), Name: textField(c, "name", 200), Via: oneOf(c, "via", camVias),
+			Protocol: oneOf(c, "protocol", camProtocols), Codec: oneOf(c, "codec", camCodecs)}
 		cam.Connected, _ = c["connected"].(bool)
+		if n, ok := intIn(c["kbps"], 0, 10000000); ok {
+			cam.Kbps = &n
+		}
+		if f, ok := floatIn(c["rttMs"], 0, 100000); ok {
+			cam.RTTMs = &f
+		}
+		if f, ok := floatIn(c["lossPct"], 0, 100); ok {
+			cam.LossPct = &f
+		}
 		st.Cameras.Items = append(st.Cameras.Items, cam)
 	}
 	return st
@@ -202,6 +235,15 @@ func clientState(v any) *Client {
 	}
 	out.Error = oneOf(cl, "error", clientErrors)
 	return out
+}
+
+// floatIn is v as a number in [lo, hi] (a JSON number, integer or not).
+func floatIn(v any, lo, hi float64) (float64, bool) {
+	f, ok := numberOf(v)
+	if !ok || math.IsNaN(f) || f < lo || f > hi {
+		return 0, false
+	}
+	return f, true
 }
 
 func stringOf(v any) string {
@@ -258,14 +300,18 @@ func validWiFi(ssid, password, rows any) (WiFi, bool) {
 	return WiFi{SSID: s, Password: p, QR: qr}, true
 }
 
-// wifiCreds is the wifi of GET /network/credentials?qr=rows ({"wifi": {"ssid", "password", "qrRows"}}) validated
-// like wifi.json's, or nil (no wifi, or something that does not fit).
+// wifiCreds is the wifi of GET /network/credentials?qr=rows ({"wifi": {"ssid", "channel", "password", "qrRows"}})
+// validated like wifi.json's, or nil (no wifi, or something that does not fit). A channel that does not fit is left
+// out (the rest still counts).
 func wifiCreds(v any) *WiFi {
 	w := obj(obj(v)["wifi"])
 	if w == nil {
 		return nil
 	}
 	if c, ok := validWiFi(w["ssid"], w["password"], w["qrRows"]); ok {
+		if ch, _ := w["channel"].(string); reChannel.MatchString(ch) {
+			c.Channel = ch
+		}
 		return &c
 	}
 	return nil

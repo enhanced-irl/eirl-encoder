@@ -16,7 +16,12 @@ type fakeApp struct {
 	did     []AppAction
 	pw      []string // what SetupPassword got (only the tests look)
 	refuse  bool
+	// secrets: each action's Secrets as they were when Do got them (the caller wipes its own right after)
+	secrets []map[string]string
+	dropped int // DropSecrets calls
 }
+
+func (f *fakeApp) DropSecrets() { f.dropped++ }
 
 func (f *fakeApp) AppSnapshot() AppSnapshot { return f.snap }
 func (f *fakeApp) Watch(w AppWatch)         { f.watches = append(f.watches, w) }
@@ -25,6 +30,11 @@ func (f *fakeApp) Do(a AppAction) bool {
 		return false
 	}
 	f.did = append(f.did, a)
+	sec := map[string]string{}
+	for k, v := range a.Secrets {
+		sec[k] = string(v)
+	}
+	f.secrets = append(f.secrets, sec)
 	return true
 }
 func (f *fakeApp) SetupPassword(p []byte) bool {
@@ -251,6 +261,40 @@ func TestRenderEveryLanguage(t *testing.T) {
 			}})
 		}
 	}
+	rv := make([]renderView, len(views))
+	for i, v := range views {
+		rv[i] = renderView(v)
+	}
+	checkRenders(t, rv)
+}
+
+// pageApp opens Settings on a page with a fake app (device, setup done, updates idle) that mod may change: for the
+// drawing tests of a page.
+func pageApp(h *harness, page string, mod func(a *AppSnapshot)) *fakeApp {
+	a := &fakeApp{snap: AppSnapshot{DeviceAPI: Yes, SetupAPI: Yes, UpdateAPI: Yes, Setup: &SetupInfo{Done: true},
+		Update: &UpdateInfo{Current: "0.1.0", State: "idle"}, Commit: "0123abcd", IPs: []string{"192.168.1.20"}}}
+	a.snap.Device = device(h.u.Tx.Code)
+	a.snap.Device.At = h.now()
+	if mod != nil {
+		mod(&a.snap)
+	}
+	h.u.App = a
+	h.wifiState()
+	h.u.settingsOpen = true
+	h.u.openPage(page)
+	return a
+}
+
+// renderView is a state of the screen to draw (checkRenders): its name and how to get there.
+type renderView struct {
+	name string
+	set  func(h *harness)
+}
+
+// checkRenders draws every view in every language at 1024×600 and fails if a text of the table had to be cut
+// (fit() may shorten only data: SSIDs, names, URLs).
+func checkRenders(t *testing.T, views []renderView) {
+	t.Helper()
 	for _, code := range Languages {
 		for _, v := range views {
 			var cut []string
@@ -295,7 +339,11 @@ func tableText(tx *Strings, s string) bool {
 // walkStrings calls fn with every text of a table: strings, arrays and map values; a format, with what comes
 // before its first verb.
 func walkStrings(tx *Strings, fn func(string)) {
-	v := reflect.ValueOf(tx).Elem()
+	walkValue(reflect.ValueOf(tx).Elem(), fn)
+}
+
+// walkValue is walkStrings on a table or one of its areas' (a struct inside it).
+func walkValue(v reflect.Value, fn func(string)) {
 	str := func(s string) {
 		if i := strings.IndexByte(s, '%'); i >= 0 {
 			s = s[:i]
@@ -305,6 +353,8 @@ func walkStrings(tx *Strings, fn func(string)) {
 	for i := range v.NumField() {
 		f := v.Field(i)
 		switch f.Kind() {
+		case reflect.Struct:
+			walkValue(f, fn)
 		case reflect.String:
 			str(f.String())
 		case reflect.Array, reflect.Slice:

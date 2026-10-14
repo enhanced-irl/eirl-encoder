@@ -2,9 +2,12 @@ package screen
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,9 +33,29 @@ func TestMain(m *testing.M) {
 
 const fontDir = "ui/testdata/fonts"
 
-// The screen pipeline is the Python engine's (Screen.describe), token by token. One deliberate change: the
-// snapshot's appsink is pulled from Go (emit-signals=false), not a signal.
+// tileDelayed is the second deliberate change (Oct 14): each tile is converted into a pool of its own and
+// waits in its queue mvd<i>, whose pad offset (ProgramDelay) shows it as late as the program.
+var tileDelayed = regexp.MustCompile(`nvvidconv output-buffers=10 ! (video/x-raw\(memory:NVMM\),format=RGBA,width=\d+,height=\d+) ! mv\.sink_([1-9])`)
+
+func delayTiles(desc string, latency time.Duration, fps int) string {
+	tq, tb := tileQueue(0, latency, fps)
+	return tileDelayed.ReplaceAllStringFunc(desc, func(s string) string {
+		m := tileDelayed.FindStringSubmatch(s)
+		n, _ := strconv.Atoi(m[2])
+		return fmt.Sprintf("nvvidconv output-buffers=%d ! %s ! queue name=mvd%d max-size-buffers=%d leaky=downstream ! mv.sink_%d",
+			tb, m[1], n-1, tq, n)
+	})
+}
+
+// The screen pipeline is the Python engine's (Screen.describe), token by token. Deliberate changes: the
+// snapshot's appsink is pulled from Go (emit-signals=false), not a signal; and the tiles are delayed
+// (delayTiles).
 func TestDescribeLikePython(t *testing.T) {
+	// With the default MIXER_SYNC (120) and latency (60), at 60 fps a tile waits up to ~203 ms: 10 frames, a
+	// pool of 16
+	if q, b := tileQueue(120*time.Millisecond, 60*time.Millisecond, 60); q != 10 || b != 16 {
+		t.Errorf("tileQueue %d %d, want 10 16", q, b)
+	}
 	b, err := os.ReadFile("testdata/describe-python.txt")
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +68,8 @@ func TestDescribeLikePython(t *testing.T) {
 			Latency: 100 * time.Millisecond}),
 	}
 	for i := range want {
-		w := strings.Fields(strings.Replace(want[i], "appsink name=snap emit-signals=true", "appsink name=snap emit-signals=false", 1))
+		w := strings.Fields(delayTiles(strings.Replace(want[i], "appsink name=snap emit-signals=true", "appsink name=snap emit-signals=false", 1),
+			[]time.Duration{60 * time.Millisecond, 100 * time.Millisecond}[i], []int{60, 30}[i]))
 		g := strings.Fields(got[i])
 		if len(w) != len(g) {
 			t.Fatalf("case %d: %d tokens, want %d\n%s", i, len(g), len(w), got[i])
@@ -234,6 +258,12 @@ func TestScreenLifecycle(t *testing.T) {
 	host.mu.Unlock()
 	if att != "mvs0 mvs1 mvs2 mvs3 mvp" {
 		t.Fatalf("attached %q", att)
+	}
+	// Each tile as late as the program on the screen: latency + MVMargin, minus a program frame
+	for i := range 4 {
+		if d := p.El(fmt.Sprintf("mvd%d", i)).Offset("src"); d != 100*time.Millisecond-time.Second/60 {
+			t.Errorf("mvd%d offset %v, want 83.3ms", i, d)
+		}
 	}
 	// The UI layer goes through the feeder, full frames
 	waitFor(t, "a UI frame", func() bool { return pushed(m.feeder(0)) > 0 })

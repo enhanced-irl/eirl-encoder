@@ -253,7 +253,7 @@ func TestSetupLocalSocket(t *testing.T) {
 		t.Errorf("complete over the socket: %d", code)
 	}
 	// Not on the whitelist
-	for _, r := range [][2]string{{"DELETE", "/api/v1/cloud"}, {"PUT", "/api/v1/password"}} {
+	for _, r := range [][2]string{{"POST", "/api/v1/service/stop"}, {"GET", "/api/v1/logs"}} {
 		if code, body := do(r[0], r[1], "{}"); code != 403 || !strings.Contains(body, "local_forbidden") {
 			t.Errorf("%s %s over the socket: %d %s", r[0], r[1], code, body)
 		}

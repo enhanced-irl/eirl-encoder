@@ -880,3 +880,142 @@ int eg_streamoff(const char *node)
 	closedir(d);
 	return n;
 }
+
+// --- the compositor's layers ---
+
+struct EgAnim {
+	GMutex lock;          // everything below: the probe (the compositor's thread) and eg_anim_play (Go)
+	GstElement *comp;
+	GstPad *src;
+	gulong probe;
+	int npads;
+	GstPad **pads;        // sink_0 … (NULL if missing)
+	EgLayer *cur;         // what each pad has, once have_cur
+	gboolean have_cur;
+	gint64 frame_ns;
+	EgLayer *steps;       // the table being played (NULL: none)
+	int nsteps;
+	gint64 start;         // pts of the frame that gets step 0; -1 = the next one
+};
+
+static void anim_apply(EgAnim *a, const EgLayer *l)
+{
+	for (int i = 0; i < a->npads; i++) {
+		GstPad *p = a->pads[i];
+		if (p == NULL)
+			continue;
+		const EgLayer *n = &l[i];
+		EgLayer *c = &a->cur[i];
+		gboolean all = !a->have_cur;
+		if (all || n->x != c->x)
+			g_object_set(p, "xpos", (gint)n->x, NULL);
+		if (all || n->y != c->y)
+			g_object_set(p, "ypos", (gint)n->y, NULL);
+		if (all || n->w != c->w)
+			g_object_set(p, "width", (gint)n->w, NULL);
+		if (all || n->h != c->h)
+			g_object_set(p, "height", (gint)n->h, NULL);
+		if (all || n->alpha != c->alpha)
+			g_object_set(p, "alpha", n->alpha, NULL);
+		if (all || n->z != c->z)
+			g_object_set(p, "zorder", (guint)n->z, NULL);
+		*c = *n;
+	}
+	a->have_cur = TRUE;
+}
+
+static GstPadProbeReturn on_anim(GstPad *pad, GstPadProbeInfo *info, gpointer data)
+{
+	EgAnim *a = data;
+	GstBuffer *buf = GST_PAD_PROBE_INFO_BUFFER(info);
+	if (buf == NULL || !GST_BUFFER_PTS_IS_VALID(buf))
+		return GST_PAD_PROBE_OK;
+	gint64 dur = GST_BUFFER_DURATION_IS_VALID(buf) ? (gint64)GST_BUFFER_DURATION(buf) : a->frame_ns;
+	gint64 next = (gint64)GST_BUFFER_PTS(buf) + dur;
+	g_mutex_lock(&a->lock);
+	if (a->steps != NULL) {
+		if (a->start < 0)
+			a->start = next;
+		// by the frame's time: a frame the compositor skips skips its step too
+		gint64 k = (next - a->start + a->frame_ns / 2) / a->frame_ns;
+		if (k >= a->nsteps - 1) {
+			anim_apply(a, a->steps + (gsize)(a->nsteps - 1) * a->npads);
+			g_free(a->steps);
+			a->steps = NULL;
+		} else if (k >= 0) {
+			anim_apply(a, a->steps + (gsize)k * a->npads);
+		}
+	}
+	g_mutex_unlock(&a->lock);
+	return GST_PAD_PROBE_OK;
+}
+
+EgAnim *eg_anim_new(GstElement *comp, int npads, gint64 frame_ns)
+{
+	EgAnim *a = g_new0(EgAnim, 1);
+	g_mutex_init(&a->lock);
+	a->comp = gst_object_ref(comp);
+	a->npads = npads;
+	a->pads = g_new0(GstPad *, npads);
+	a->cur = g_new0(EgLayer, npads);
+	a->frame_ns = frame_ns > 0 ? frame_ns : GST_SECOND / 60;
+	a->start = -1;
+	for (int i = 0; i < npads; i++) {
+		char name[32];
+		snprintf(name, sizeof(name), "sink_%d", i);
+		a->pads[i] = gst_element_get_static_pad(comp, name);
+	}
+	a->src = gst_element_get_static_pad(comp, "src");
+	if (a->src != NULL)
+		a->probe = gst_pad_add_probe(a->src, GST_PAD_PROBE_TYPE_BUFFER, on_anim, a, NULL);
+	return a;
+}
+
+void eg_anim_play(EgAnim *a, const EgLayer *steps, int nsteps)
+{
+	if (nsteps <= 0)
+		return;
+	EgLayer *copy = g_memdup(steps, (guint)((gsize)nsteps * a->npads * sizeof(EgLayer)));
+	g_mutex_lock(&a->lock);
+	g_free(a->steps);
+	a->steps = copy;
+	a->nsteps = nsteps;
+	a->start = -1;
+	g_mutex_unlock(&a->lock);
+}
+
+int eg_anim_busy(EgAnim *a)
+{
+	g_mutex_lock(&a->lock);
+	int busy = a->steps != NULL;
+	g_mutex_unlock(&a->lock);
+	return busy;
+}
+
+void eg_anim_free(EgAnim *a)
+{
+	if (a->src != NULL) {
+		if (a->probe != 0)
+			gst_pad_remove_probe(a->src, a->probe);
+		gst_object_unref(a->src);
+	}
+	for (int i = 0; i < a->npads; i++)
+		if (a->pads[i] != NULL)
+			gst_object_unref(a->pads[i]);
+	g_free(a->pads);
+	g_free(a->cur);
+	g_free(a->steps);
+	gst_object_unref(a->comp);
+	g_mutex_clear(&a->lock);
+	g_free(a);
+}
+
+int eg_set_pad_offset(GstElement *el, const char *pad, gint64 offset_ns)
+{
+	GstPad *p = gst_element_get_static_pad(el, pad);
+	if (p == NULL)
+		return 0;
+	gst_pad_set_offset(p, offset_ns);
+	gst_object_unref(p);
+	return 1;
+}

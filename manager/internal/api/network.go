@@ -33,18 +33,10 @@ func (s *Server) getNetwork(w http.ResponseWriter, r *http.Request) {
 }
 
 // getNetworkCredentials: the Wi-Fi password and the URL (with key) of each camera. Only when "Show" is
-// pressed in the web; never in /status or to the cloud.
+// pressed in the web; never in /status or to the cloud. The screen has its own (getLocalCredentials).
 func (s *Server) getNetworkCredentials(w http.ResponseWriter, r *http.Request) {
 	if cr, ok := s.credentials(w, r); ok {
 		writeJSON(w, 200, cr)
-	}
-}
-
-// getWiFiCredentials: only the Wi-Fi, without the cameras (local socket: the cameras' keys are not shown
-// on the screen).
-func (s *Server) getWiFiCredentials(w http.ResponseWriter, r *http.Request) {
-	if cr, ok := s.credentials(w, r); ok {
-		writeJSON(w, 200, map[string]any{"wifi": cr.WiFi})
 	}
 }
 

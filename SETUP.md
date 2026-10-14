@@ -236,11 +236,35 @@ registered there, like the updater's, needs no second registration); the rest st
 | `GET/PUT /sources/slots` | Source arrangement and aliases; the on_air rule protects the program |
 | `GET /update`, `POST /update/check`, `POST /update/install` | The updater's (UPDATES.md): it refuses to install while streaming and re-verifies signatures as root |
 | `GET /cloud`, `POST /cloud/pair` (`?qr=rows` → `linkQrRows`) | The link state and the pairing code with its QR; `cloud.View` never carries the token or the `pollSecret` |
+| `DELETE /cloud` | Unlink, or cancel a code in progress (Oct 14). Whoever holds the screen holds the board. With a destination the cloud set, unlinking restarts the engine (the caller): the app does not let the closing socket cut the cloud's notification |
+| `GET /destination`, `PUT /destination` | The stream destination (Oct 14). `GET` masks the key, as on the web; `PUT` has the web's validation, `409 managed` and the new-server rule (a new host needs the secrets again) |
+| `GET /status` | The web's SSE snapshot (Oct 14), for the screen's Stream and Sources pages: uplinks, the saved input, `pendingRestart`, `transport`. Reviewed (`collect`): no destination URL, key or passphrase, `network` and `wifi` without secrets (as in `GET /network`), the engine's own mixer state with its output detail redacted |
+| `PUT /uplinks/{name}`, `PUT /input`, `GET /sources` | What the web's Stream and Sources pages change (Oct 14): nothing secret |
+| `POST /service/restart` | "Apply" of saved changes, like the web's pending banner (Oct 14). Only `restart`: `start` and `stop` stay `403`. It restarts the engine, which is the caller: the screen never sees the `202`, and the restart (like `"apply": true` in a `PUT`) is not cut when the socket closes |
+| `POST /cameras`, `PATCH /cameras/{id}`, `DELETE /cameras/{id}` | Network cameras (Oct 14). The answers carry the camera's URLs with its key, as on the web |
+| `PUT /password` | The admin password with the current one (Oct 14). The same validation and errors as the web (`403 bad_password`, `400 validation`); `429` after 5 wrong current passwords in a minute (the screen counts as one caller, the web per IP); `503 setup_required` without a password. No session to keep: **every web session is closed** |
+
+Two routes have **their own handlers on the socket** (not forwarded): `GET /destination/secrets` does not exist on the web
+(`404` there), and the web's `GET /network/credentials` is still its own (everything, with a session):
+
+| Route | What |
+|---|---|
+| `GET /destination/secrets` | `200 {"streamId": "…", "passphrase": "…"}` in clear, as saved (`""` when unset), for the screen's eye button. Also with `managedBy: eirl`: the web never reveals them, the screen does (the owner's decision). `Cache-Control: no-store`; the request is logged (method, path, code, caller), never the body. `500 internal` if the configuration cannot be read |
+| `GET /network/credentials` | Without `?cameras=1`, only the Wi-Fi, as before: `{"wifi": {"ssid", "channel", "password", "qr"} \| null}`. With `?cameras=1`, the same as the web: `{"wifi", "cameras": [{"id", "srt", "rtmp", "rtmpServer", "rtmpKey", "lan"}]}`, for a camera's eye button (the screen draws its QR from the URL). `?qr=rows` adds `wifi.qrRows` in both. Another value of `cameras` or `qr`: `400 bad_request`; `503 network_unavailable` without `eirl-netsetup` |
+
+**Why, since Oct 14.** The owner decided that everything the web configures can be configured on the touch screen,
+secrets included: the screen shows them as dots and reveals them with an eye button. Until then the destination with
+its key, the cameras with theirs, `PUT /password` and `DELETE /cloud` were left out on purpose; that decision is
+reversed. It is acceptable because the screen is physical access (it already shows the Wi-Fi password and the setup
+code, and whoever holds it can reset the board), the engine already holds the stream key to stream it, and
+`screen.jpg` (what the web and the cloud can see of the screen) is not updated while Settings is open. What stays out:
+`start`/`stop` of the service, reboot and power off of the board (those go through `screen.power`), the logs, the
+mixer and `PUT /output` (the engine is the mixer), the live preview, the QR images and the web session.
 
 `POST /setup/restart` is on the socket too (Settings → About on the screen): the password is kept and its step
-skipped, and every other step is already reachable from the screen's Settings. Not added, on purpose: `DELETE /cloud`
-(unlinking stays in the web, with a session), `PUT /password`. Requests over the socket are marked in their context (`isLocal`): the setup
-code and the language-only rule depend on it.
+skipped, and every other step is already reachable from the screen's Settings. Mutations over the socket have the
+web's body limit (16 KB). Requests over the socket are marked in their context (`isLocal`): the setup code, the
+language-only rule and the password change (no session to keep, its own attempt count) depend on it.
 
 ## 9. How to test
 
@@ -269,7 +293,9 @@ setup code, commands passed to timedatectl/hostnamectl, zones), `internal/slots`
 `internal/mixer` (slots command, state bounding), `internal/api` (`setup_test.go`: gating with and without a
 password, the code over the web vs the socket, rate limit, CSRF, device validation and system calls, Host after a
 rename, cloud results in the device language, pairing over the socket; `slots_test.go`: unknown_command, catalog
-candidates, duplicate/invalid codes, on_air rollback, engine stopped).
+candidates, duplicate/invalid codes, on_air rollback, engine stopped; `local_test.go`: the whitelist, the routes of
+§8 over a real socket, the secrets in clear only there, `start`/`stop` refused, the password change from the screen
+closing the web sessions, its attempt limit, the body limit).
 
 On the board (not done tonight): `PUT /device` time zone/NTP/time/name through polkit; that `sudo` still works after
 a rename; mDNS of the new name; the Python engine answering `unknown_command` to `slots`.

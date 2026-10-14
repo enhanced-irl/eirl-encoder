@@ -112,6 +112,19 @@ func (h *harness) press(key any, seconds float64) {
 	h.u.OnTouch("up", x, y, secs(seconds))
 }
 
+// openPage goes to a Settings page as a finger would: its group's entry in the list, then its tab (Settings open).
+func (h *harness) openPage(page string) {
+	h.t.Helper()
+	g := groupOf(page)
+	if g == nil {
+		h.t.Fatalf("no group for %s", page)
+	}
+	h.press("s_page_"+g.ID, 0.1)
+	if len(g.Pages) > 1 {
+		h.press("s_tab_"+page, 0.1)
+	}
+}
+
 func (h *harness) tapKey(key string, held float64) {
 	var r Rect
 	if b, ok := h.lay.Buttons[key]; ok {
@@ -310,9 +323,19 @@ func TestSettingsPanel(t *testing.T) {
 		}
 	}
 	net.calls = net.calls[:4]
-	// Without cameras, or without the API (an older app), no switch
-	net.snap.Status.Cameras = 0
+	// Without cameras and the reception on, or without the API (an older app), no switch; without cameras and the
+	// reception off, the switch only to turn it on (the app adds a camera only with the reception on)
+	net.snap.Status.Cameras, net.snap.Status.Enabled = 0, true
 	h.press("s_net", 0.1)
+	if len(net.calls) != 4 {
+		t.Fatal(net.calls)
+	}
+	net.snap.Status.Enabled = false
+	h.press("s_net", 0.1)
+	if len(net.calls) != 5 || net.calls[4] != "net true" {
+		t.Fatal(net.calls)
+	}
+	net.calls = net.calls[:4]
 	net.snap.Status, net.snap.API = nil, No
 	h.press("s_net", 0.1)
 	h.press("s_page_wifi", 0.1)
@@ -531,7 +554,7 @@ func TestKeyboardSecret(t *testing.T) {
 	if net.sent[len(net.sent)-1] != "Nueva abcD1{xyz" { // straight to the app (Net), not to the engine
 		t.Fatal(net.sent)
 	}
-	if kb.n != 0 || kb.buf != [PSKMax]byte{} || h.u.kb != nil || h.u.settingsView != "main" || len(h.cmds) != 0 {
+	if kb.n != 0 || !allZero(kb.buf) || h.u.kb != nil || h.u.settingsView != "main" || len(h.cmds) != 0 {
 		t.Fatal("the password stays in memory") // out of memory
 	}
 	// At most PSKMax; holding erase empties it
@@ -550,7 +573,7 @@ func TestKeyboardSecret(t *testing.T) {
 	h.u.kbKey("q", 0)
 	kb = h.u.kb
 	h.u.openSettings(false)
-	if kb.buf != [PSKMax]byte{} || h.u.kb != nil || h.u.settingsView != "main" {
+	if !allZero(kb.buf) || h.u.kb != nil || h.u.settingsView != "main" {
 		t.Fatal("closing Settings keeps the password")
 	}
 	h.press("settings", 0.1)
@@ -559,7 +582,7 @@ func TestKeyboardSecret(t *testing.T) {
 	kb = h.u.kb
 	h.setLocked(true) // locked from the web
 	h.u.Tick()
-	if kb.buf != [PSKMax]byte{} || h.u.kb != nil || h.u.settingsOpen {
+	if !allZero(kb.buf) || h.u.kb != nil || h.u.settingsOpen {
 		t.Fatal("locking keeps the password")
 	}
 }
@@ -671,7 +694,7 @@ func TestReviewFixes(t *testing.T) {
 	kb := h.u.kb
 	h.u.State = "off"
 	h.u.Tick()
-	if kb.buf != [PSKMax]byte{} || h.u.kb != nil || h.u.settingsOpen {
+	if !allZero(kb.buf) || h.u.kb != nil || h.u.settingsOpen {
 		t.Fatal("unplugged with the keyboard")
 	}
 	h.u.State = "on"
@@ -773,4 +796,14 @@ func TestCommandDone(t *testing.T) {
 	if h.u.hint != "" {
 		t.Fatal(h.u.hint)
 	}
+}
+
+// allZero: every byte of b is zero (a wiped secret).
+func allZero(b []byte) bool {
+	for _, c := range b {
+		if c != 0 {
+			return false
+		}
+	}
+	return true
 }

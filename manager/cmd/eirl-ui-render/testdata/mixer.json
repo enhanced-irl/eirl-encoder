@@ -106,7 +106,11 @@
     "detail": ""
    }
   ],
-  "links": {}
+  "links": {
+   "hdmi": "i2s",
+   "/dev/v4l/by-path/platform-70090000.xusb-usb-0:2.4:1.0-video-index0": "alsa:MS2109",
+   "/dev/v4l/by-id/usb-046d_Logi_4K_Stream_Edition_0000ABCD-video-index0": "alsa:Logi"
+  }
  },
  "slotConfig": [
   {
