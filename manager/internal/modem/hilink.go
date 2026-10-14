@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,6 +42,27 @@ type HiLink struct {
 	mu    sync.Mutex
 	skip  map[string]time.Time  // interface|MAC that never answered like a HiLink → until when it is not asked
 	known map[string]knownModem // interface|MAC that did: its last good reading
+	cfg   map[string]hlConfig   // interface|MAC → its mode and roaming, read every cfgEvery
+}
+
+// hlConfig: what a HiLink has configured, read less often than its signal.
+type hlConfig struct {
+	mode    string
+	roaming bool
+	at      time.Time
+}
+
+const cfgEvery = time.Minute
+
+// forget: the next reading asks for the modem's configuration again (after changing it).
+func (h *HiLink) forget(md Modem) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for k := range h.cfg {
+		if strings.HasPrefix(k, md.Iface+"|") {
+			delete(h.cfg, k)
+		}
+	}
 }
 
 type knownModem struct {
@@ -76,20 +98,37 @@ func (h *HiLink) List(ctx context.Context, links []Link) ([]Modem, error) {
 	}
 	var wg sync.WaitGroup
 	results := make(chan result, len(links))
-	for _, l := range links {
+	// Two identical sticks hand out the same address: the dispatcher routes the first by name (its /sys/class/net
+	// order) and marks the other one in conflict. Asking from that address reaches the first, so the other one is not
+	// asked at all (its readings would be its twin's, and an order for it would go to its twin)
+	byIP := map[string]string{}
+	type twin struct {
+		l       Link
+		gw, mac string
+		of      string // the reachable one's interface
+	}
+	var twins []twin
+	sorted := append([]Link(nil), links...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+	for _, l := range sorted {
 		if !hilinkDrivers[h.driver(l.Name)] {
 			continue
 		}
 		mac := h.mac(l.Name)
 		key := l.Name + "|" + mac
+		gw := gateway(h.RouteFile, l.Name)
+		if gw == "" {
+			continue
+		}
+		if first, dup := byIP[l.IP]; dup && l.IP != "" {
+			twins = append(twins, twin{l, gw, mac, first})
+			continue
+		}
+		byIP[l.IP] = l.Name
 		h.mu.Lock()
 		until, skipped := h.skip[key]
 		h.mu.Unlock()
 		if skipped && now.Before(until) {
-			continue
-		}
-		gw := gateway(h.RouteFile, l.Name)
-		if gw == "" {
 			continue
 		}
 		wg.Add(1)
@@ -124,6 +163,17 @@ func (h *HiLink) List(ctx context.Context, links []Link) ([]Modem, error) {
 			h.skip[r.key] = now.Add(notHiLinkFor)
 		}
 	}
+	// A twin of a HiLink is taken for one (same driver, same address): all it can do is move a network apart
+	for _, t := range twins {
+		for _, md := range out {
+			if md.Iface == t.of {
+				out = append(out, Modem{Backend: "hilink", ID: stableID("h-", t.mac), Iface: t.l.Name, Manufacturer: "Huawei",
+					Model: "HiLink", State: "unknown", SIM: "unknown", Mode: "auto", gateway: t.gw, localIP: t.l.IP,
+					twinOf: md.ID, Can: []string{"subnet"}})
+				break
+			}
+		}
+	}
 	return out, nil
 }
 
@@ -147,6 +197,13 @@ func (h *HiLink) read(ctx context.Context, l Link, gw, mac string) (Modem, bool)
 		hdr.Set("__RequestVerificationToken", v)
 	}
 	paths := []string{"/api/monitoring/status", "/api/device/signal", "/api/net/current-plmn", "/api/pin/status"}
+	key := l.Name + "|" + mac
+	h.mu.Lock()
+	cfg, haveCfg := h.cfg[key]
+	h.mu.Unlock()
+	if !haveCfg || h.now().Sub(cfg.at) >= cfgEvery {
+		paths = append(paths, "/api/net/net-mode", "/api/dialup/connection")
+	}
 	pages := make([]map[string]string, len(paths))
 	var wg sync.WaitGroup
 	for i, path := range paths {
@@ -160,7 +217,8 @@ func (h *HiLink) read(ctx context.Context, l Link, gw, mac string) (Modem, bool)
 	}
 	wg.Wait()
 	md := Modem{Backend: "hilink", ID: stableID("h-", mac), Iface: l.Name, Manufacturer: "Huawei", Model: "HiLink",
-		State: "unknown", SIM: "unknown"}
+		State: "unknown", SIM: "unknown", gateway: gw, localIP: l.IP, Modes: []string{"auto", "4g"},
+		Can: []string{"apn", "roaming", "mode", "pin", "reset", "subnet"}}
 	if st := pages[0]; st != nil {
 		hilinkStatus(&md, st)
 	}
@@ -178,6 +236,20 @@ func (h *HiLink) read(ctx context.Context, l Link, gw, mac string) (Modem, bool)
 		if s := hilinkSIM(pin["SimState"]); s != "" {
 			md.SIM = s
 		}
+	}
+	if len(pages) > 4 && pages[4] != nil && pages[5] != nil {
+		cfg = hlConfig{mode: hilinkMode(pages[4]["NetworkMode"]), roaming: pages[5]["RoamAutoConnectEnable"] == "1", at: h.now()}
+		haveCfg = true
+		h.mu.Lock()
+		if h.cfg == nil {
+			h.cfg = map[string]hlConfig{}
+		}
+		h.cfg[key] = cfg
+		h.mu.Unlock()
+	}
+	md.Mode, md.Roaming = "auto", false
+	if haveCfg {
+		md.Mode, md.Roaming = cfg.mode, cfg.roaming
 	}
 	return md, true
 }

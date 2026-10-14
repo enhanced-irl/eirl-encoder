@@ -1,4 +1,4 @@
-> **Status:** IN PROGRESS — plan approved on Oct 14 (§10); phase M1 (the app's modem service, the health of every link, `links.json`) and the kernel modules written and tested off the board; M0 waits for the test modems and hub
+> **Status:** IN PROGRESS — plan approved on Oct 14 (§10). M1-M3 merged (the app's modem service and the dots, the web's card, the screen's header and tab). M4 (configuration, a modem's page on the screen and the web) written from the documentation of ModemManager, NetworkManager and the HiLink API, and tested against fakes and the simulator: §11 is what M0 checks with real modems. M0 waits for the test modems and hub
 > **Updated:** 2026-10-14
 
 # Cellular modems and the health of every connection
@@ -185,9 +185,10 @@ does their end. A link that disappears starts afresh when it comes back.
 ## 6. Screen (M3)
 
 Written Oct 14 (MIXER.md §18 and §21): the header's dots (`screen/ui/linkdots.go`, the engine reading `links.json`
-through `appapi.Links`) and the dot and reason in every row of the "Connections" tab (`screen/ui/uplinks.go`). The
-modem's own page (signal on its scales, settings) comes with the configuration, M4. Previews:
-`eirl-ui-render live+srtla+ant3+dots|dots6 settings-uplinks-health`.
+through `appapi.Links`) and the dot and reason in every row of the "Connections" tab (`screen/ui/uplinks.go`). With
+M4, a modem's row has a «›» to its page (`screen/ui/modempage.go`), and a modem without a usable link (a SIM asking
+for its PIN) has a row of its own that opens it. Previews: `eirl-ui-render live+srtla+ant3+dots|dots6
+settings-uplinks-health settings-uplinks-modems settings-uplinks-modem-page settings-uplinks-modem-pin`.
 
 - **Header**: the middle area ("5,8 Mbps · SRTLA · 2 links · RTT 57 ms" today) becomes two lines: a dot
   and a short name per connection (alias, operator, "Cable", "Wi-Fi"), and below it the rate, RTT,
@@ -196,8 +197,9 @@ modem's own page (signal on its scales, settings) comes with the configuration, 
   antenna becomes its dot. `screen.jpg` shows the header (no secrets).
 - **Settings**: Settings has 7 groups with tabs (decided Oct 14). The "Links" tab of the Streaming group
   (one row per link with its switch, the web's parity) becomes **"Connections"**: a row per connection
-  with its dot, kind, reason, upload and switch (6 rows per page: cable, Wi-Fi, four modems), and a page per
-  modem with RSRP/SINR/RSRQ on their scales, operator, technology, SIM, data used and its settings.
+  with its dot, kind, reason, upload and switch (5 rows: cable, Wi-Fi, three modems), and a page per modem: RSRP,
+  SINR and RSRQ on their scales (§5's thresholds), SIM, network, operator, model and the IMEI's last digits, and its
+  settings (§7.4). Data used: not yet.
 - A capture of the screen goes to the owner before installing; `draw()` stays under 50 ms on the board.
 
 ## 7. Configuration and security (M4)
@@ -218,6 +220,97 @@ modem's own page (signal on its scales, settings) comes with the configuration, 
 - IMSI, ICCID, phone number and IMEI are personal data: the cloud gets state, health, signal, operator and
   technology only; the web and the screen show the last 4 digits.
 
+### 7.1 API (M4)
+
+- `PUT /api/v1/modems/{id}` `{"alias"?, "apn"? ("" = automatic), "roaming"?, "mode"? (auto | 4g | 5g), "force"?}` →
+  the modem as `GET /modems` shows it. Applied on the modem first, then kept in `/etc/eirl-encoder/modems.json`
+  (0640; alias, APN, roaming and mode by stable id; never the PIN). What the order names is applied even if
+  `modems.json` already says it (the modem may not: a stick's own page). A change of APN, roaming or mode
+  reconnects the modem: `409 last_link` when it is the only link carrying an SRTLA stream, unless `force` (the web
+  and the screen ask first). `mode: "auto"` is kept as such; a modem nobody set (`""`) keeps its own mode.
+- `POST /api/v1/modems/{id}/pin` `{"pin", "remove"?}` → `204`: enter the PIN of a SIM that asks for it and keep it
+  (D-M6), or turn the SIM's PIN off (`remove`). `400 pin_wrong`, `409 pin_puk`, `409 pin_not_needed` (a PIN for a
+  SIM that is not asking: it could not be checked). The PIN is never logged nor answered.
+- `POST /api/v1/modems/{id}/reset` `{"force"?}` → `202` (the same `last_link` rule); `POST
+  /api/v1/modems/{id}/subnet` `{"force"?}` → `202`: separates two HiLink sticks with the same IP (§7.3). The `last_link`
+  rule is checked on the stick the move really cuts (the routed twin).
+- Errors: `404 modem_unknown`, `400 validation` (with the field), `409 not_supported` (the modem's `can` does not
+  list it), `409 busy` (one order at a time, background profile writes included), `409 modem_unavailable`, `502
+  modem_failed`, `503 modems_disabled`.
+- `GET /modems` and `/status` `modems[]` add `alias`, `apn`, `apnAuto` (the operator's, shown as "automatic
+  (…)"), `roaming`, `mode`, `modes` (what this modem can be set to) and `can` (`apn | roaming | mode | pin | reset |
+  subnet`). The label of a link (§4.2) is the alias when there is one.
+- The screen's socket allows the same routes (SETUP.md §8). The PIN goes from the screen's secret keyboard to the
+  app straight away, never through the engine's state.
+
+### 7.2 ModemManager modems
+
+A ModemManager modem only connects through a NetworkManager `gsm` profile. The app keeps one per modem
+(`internal/modem/nmgsm.go`), system-wide, with the same `.pkla` as the Wi-Fi client (`settings.modify.system`,
+`network-control`):
+
+- id `eirl-modem-<id>`, a fixed uuid derived from the id, `autoconnect`; `gsm.device-id` = ModemManager's
+  `DeviceIdentifier` (it binds the profile to that modem, so four modems do not share one); `gsm.sim-id` = the SIM's
+  ICCID (it binds the profile, and so its PIN, to that SIM); `gsm.home-only` = not roaming; IPv6 `ignore` (SRTLA and
+  the dispatcher are IPv4).
+- **Automatic APN**: the SIM's home operator (`Sim.OperatorIdentifier`, from the IMSI; the network's code only if the
+  SIM does not say) looked up in `mobile-broadband-provider-info`. Roaming, the APN is still the home operator's.
+  Virtual operators share their host's code: when the providers listed for a code have different APNs, the one named
+  as the SIM's operator (`Sim.OperatorName`) wins, and without a match there is none. Without the database, for an
+  unknown operator or an ambiguous code, no APN: the network's default bearer, which works for most LTE operators.
+  The SIM's last reading is kept, so a failed one does not flip the APN (and reconnect the modem).
+- **PIN**: `Sim.SendPin`, then kept in the profile as a system-owned secret (NetworkManager's root keyfile) **for that
+  SIM only**: another SIM in the same modem gets a profile without it (offering a stale PIN three times would block
+  it), and without the SIM's ICCID no PIN is kept at all. It is read back with `GetSecrets` only when the profile is
+  rewritten for the same SIM, and if that read fails the profile is not rewritten (it would lose the PIN). After
+  unlocking, the profile is activated again (NetworkManager gave up on the locked modem). `remove`: `SendPin` if the
+  SIM asks for it, then `Sim.EnablePin(pin, false)`, and the stored PIN is forgotten.
+- **Network mode**: `Modem.SetCurrentModes` with one of the modem's `SupportedModes` (auto = the widest; 4G = 4G
+  only; 5G = 4G+5G, only offered when the modem lists it).
+- **Reset**: `Modem.Reset`.
+- New modems: on the first round that sees one (with a SIM) the app writes its profile with the stored settings or
+  the defaults (automatic APN, roaming off, its own mode). Once per modem, SIM and configuration; retried a minute
+  later if it failed. Never for a modem whose link carries the stream (that would reconnect it: it waits), and never
+  while `modems.json` cannot be read (its defaults would overwrite the user's APN). A change rewrites the profile and
+  activates it again on the modem's NetworkManager device (its `Udi` is the ModemManager object path).
+
+### 7.3 HiLink sticks
+
+The stick's own web API (`internal/modem/hilinkctl.go`), with a fresh session per order (`SesTokInfo`):
+
+- **APN**: a profile of its own called "EnhancedIRL" (`dialup/profiles`, created or edited and made the default);
+  automatic = that profile deleted and, if it was the default, the stick's own first profile made the default again.
+  An `<error>` answer to the profile list is an error, never an empty list.
+- **Roaming**: `dialup/connection` `RoamAutoConnectEnable`.
+- **Network mode**: `net/net-mode` `NetworkMode` `00` (auto) / `03` (4G only), keeping its bands.
+- **PIN**: `pin/operate` (`OperateType` 0 = enter, 2 = turn off; a SIM asking for it gets 0 then 2), the PIN
+  encrypted with the stick's RSA key (`webserver/publickey`; PKCS#1 v1.5 or OAEP as `user/state-login` says). The
+  stick keeps an entered PIN only until it powers off and the app has nowhere to keep it, so on a HiLink D-M6 is
+  «Unlock and remove the PIN»; the screen and the web say so.
+- **Reset**: `device/control` `Control` 1 (reboot). Never 2 (factory reset).
+- **Two identical sticks** hand out the same address (`192.168.8.100`). The dispatcher routes the first by
+  interface name and marks the other `conflict`; anything asked from that address reaches the first. So the twin is
+  never asked (its readings would be its twin's): it shows as a HiLink that can only «Separate the networks», which
+  moves the **routed** stick's LAN (`dhcp/settings`, the new `192.168.X.1` and its DHCP range). That stick drops for a
+  few seconds, which is why `last_link` is checked on it. Afterwards both are routed.
+- **PIN errors**: `103002`/`103003` = the SIM did not take the PIN (`pin_wrong`, or `pin_puk` if `pin/status` says
+  so), `103004` = PUK; anything else (an expired session, a busy SIM) is the modem's failure, not a wrong PIN.
+
+### 7.4 Screen and web
+
+- **Web** (the "Connections" card, shown whenever there is a modem: one asking for its PIN may be the board's only way
+  out): a «›» per modem opens its panel: signal, facts, the PIN form (with "Remove the PIN" and what happens next
+  time), alias, APN, network mode and roaming with «Save» (only what changed is sent, and only what the modem allows:
+  a new name alone never reconnects it), «Restart» and «Separate the networks» (only for a stick in conflict; both
+  ask first). `409 last_link` asks, then sends again with `force`.
+- **Screen** (Settings › Streaming › Connections › «›»): three tiles (RSRP, SINR, RSRQ) with their scales, the SIM and
+  network line, and six buttons: Network (a picker), APN and Name (keyboards), Roaming (a tap), Restart (a second
+  tap) and, when it applies, «Unlock the SIM» (a choice, as the web's checkbox: unlock, or unlock and remove the PIN,
+  each saying what happens next time; then a secret numeric keyboard, 4-8 digits) or «Separate the networks» (a
+  second tap). What would cut the only connection on air asks first, saying so: a second tap on the same button, and
+  only then the picker or the keyboard (nothing typed is thrown away); it goes with `force`. What the modem cannot do
+  says so (`can`). Actions `modem_save | modem_pin | modem_reset | modem_subnet` (MIXER.md §21.2).
+
 ## 8. Hardware
 
 - **Power**: four modems use more than the whole board (4G ≈ 2-4 W with ~1 A peaks at 5 V; 5G ≈ 5-8 W).
@@ -235,14 +328,15 @@ modem's own page (signal on its scales, settings) comes with the configuration, 
 |---|---|---|
 | **M0** | Test bench: the hub and modems (§10, D-M9/D-M11); modules installed (`tools/modem-modules.sh`); ModemManager started by hand; read each family; power, CPU and RAM of ModemManager; HDMI capture with every modem uploading | slot without streaming, ~2 h |
 | **M1** | ✅ code: `internal/modem` (ModemManager, HiLink), `internal/linkhealth`, `internal/links` (with the internet check of modems and phones, §5), `/status` fields, `GET /modems`, `links.json`, polkit rule, kind `modem` in the web | installing the app does not cut a stream |
-| M2 | Web: the "Links" card becomes "Connections" (dots, reason, modem detail) | — |
-| M3 | ✅ code: header dots and the "Connections" tab (dot and reason per row); the modem page goes with M4 | engine install: slot |
-| M4 | Configuration (§7), security review | — |
+| M2 | ✅ Web: the "Links" card becomes "Connections" (dots, reason) | — |
+| M3 | ✅ code: header dots and the "Connections" tab (dot and reason per row) | engine install: slot |
+| M4 | ✅ code, from documentation: configuration (§7) on the app, the web and the screen (a modem's page); the security review; **adjusted in M0 (§11)** | engine install: slot |
 | M5 | Robustness: staged recovery of a hung modem without cutting SRTLA; in-use links protected from the hub cut; per-link stats from `srtla_send` (`link_weak`); thresholds calibrated with 3+ real modems for 30 min, walking | streams to the test relay |
 | M6 | Cloud: health and signal in `status.network` (ENCODER_CLOUD.md §5) and the dashboard; a newer ModemManager if the 5G modems need it; modules in the SD image and, if decided, in updates | — |
 
 Enabling ModemManager at boot (`systemctl enable ModemManager`, today disabled by the base) and shipping
-the modules are decided after M0, with real modems.
+the modules are decided after M0, with real modems. The SD image needs `mobile-broadband-provider-info` for the
+automatic APN (without it, §7.2's fallback).
 
 ## 10. Decisions (Oct 14)
 
@@ -258,3 +352,33 @@ the modules are decided after M0, with real modems.
 - D-M10 to the cloud: state, health, signal, operator and technology; never IMSI, ICCID, IMEI or number.
 - D-M11 test bench: 2 × Huawei E3372h-320 (HiLink), 1 × Quectel EG25/EC25 on a USB adapter (QMI),
   1 × Quectel RM520N on a USB 3 adapter (5G), SIMs from different operators.
+
+## 11. M0: what to check with real modems
+
+M4 was written from documentation, without a modem. On the bench (one slot without streaming, ~2 h), each item
+says what was assumed and how to see it. What does not hold is fixed in the code, and the table says so.
+
+**Setup**: `tools/modem-modules.sh` (then `--check`), `sudo systemctl start ModemManager` (not `enable`), the app
+restarted so that it sees the bus; `mmcli -L`, `mmcli -m 0`, `nmcli -f all device`.
+
+| # | Assumed | How to check |
+|---|---|---|
+| 1 | The patched `qmi_wwan`/`option` bind the EG25 and the RM520N; the RM520N goes as QMI over USB, not MBIM | `lsusb -t` (driver per interface), `dmesg`, `mmcli -m N` (`primary port`, `ports`) |
+| 2 | ModemManager 1.10 reports `DeviceIdentifier`, `Sim.OperatorIdentifier`, `SupportedModes`/`CurrentModes` and the LTE signal (`Signal.Setup`) for both Quectels | `mmcli -m N`, `mmcli -m N --signal-get`, `mmcli -i N`; `GET /api/v1/modems` |
+| 3 | The RM520N in 5G NSA shows as `5g-nsa` with the LTE anchor's RSRP (D-M2); if 1.10 cannot set 4G+5G, the mode offers auto and 4G only | `mmcli -m N` (access tech, modes); the screen's Network picker |
+| 4 | NetworkManager 1.10 accepts the `gsm` profile as written (`device-id`, `sim-id`, `home-only`, no APN, `pin-flags` 0) and connects with it; the profile binds to its modem and its SIM and not another | `nmcli -s connection show eirl-modem-<id>`, `nmcli device`, two modems at once; another SIM in the same modem |
+| 5 | `GetSecrets` returns the stored PIN to the app's user (with `settings.modify.system`), so a change of APN keeps it; a profile without secrets answers `NoSecrets` (or nothing), not a failure; the SIM unlocks itself after a reboot of the board | change the APN, then `nmcli -s -g gsm.pin connection show …` as root; reboot with a PIN SIM |
+| 5b | ModemManager gives the SIM's ICCID (`SimIdentifier`) once unlocked, at least; if it also does while locked, nothing changes | `mmcli -i N` before and after the PIN |
+| 6 | `SendPin` with a wrong PIN answers `IncorrectPassword` (→ `pin_wrong`) and the third wrong one `SimPuk` (→ `pin_puk`); «unlock and remove» (`SendPin`, then `EnablePin false`) leaves the SIM without a PIN | **a SIM you can lose**, or stop at two wrong tries; `mmcli -i N` |
+| 7 | `SetCurrentModes` takes effect without a reset, and the activation after a profile change reconnects in under 30 s | the screen's Network and APN; `journalctl -u NetworkManager` |
+| 8 | The automatic APN of each test SIM's operator is in `mobile-broadband-provider-info` and works; a wrong APN gives `no_internet` (§5) | the APN field "automatic (…)"; a wrong APN on purpose |
+| 9 | Data roaming off = `home-only` stops data in roaming without breaking the registration (a foreign SIM, or a home SIM where the operator roams) | `roaming_off` on the dot |
+| 10 | The E3372h-320's firmware answers `pin/operate`, `net/net-mode`, `dialup/profiles`, `dialup/connection`, `device/control` and `dhcp/settings` as huawei-lte-api documents; its RSA padding (`rsapadingtype`) | each order from the web, then the stick's own page |
+| 10b | A HiLink forgets an entered PIN when it powers off (so D-M6 there is removing it); if its firmware has an automatic PIN of its own (`pin/save-pin`, which huawei-lte-api only reads), it can be used instead | unplug and plug the stick after «Unlock»; `GET /api/pin/save-pin` |
+| 11 | Two E3372h on `192.168.8.1`: the second shows `ip_conflict` and is not asked; «Separate the networks» moves the first one's LAN and then both are used | two sticks at once |
+| 11b | Deleting our APN profile when it was the default: the stick's own becomes the default again and it connects | the APN back to automatic, then `dialup/profiles` |
+| 12 | `Modem.Reset` and the HiLink reboot come back by themselves, with the same id, in under a minute | «Restart» while watching `GET /modems` |
+| 13 | Power, CPU and RAM: ModemManager's and the app's with four modems; the HDMI capture with every modem uploading (§8) | `tegrastats`, `top`, the engine's capture counters |
+
+Results: a line per item here (✅, or what changed and the commit).
+

@@ -94,7 +94,8 @@ func TestParityRoutes(t *testing.T) {
 	a, d := newDevice(t)
 	for _, k := range []string{"POST /service/restart", "PUT /uplinks/usb%200", "PUT /input", "DELETE /cloud",
 		"PUT /password", "POST /cameras", "PATCH /cameras/cam2", "DELETE /cameras/cam2", "PUT /network/ap",
-		"PUT /network/lan"} {
+		"PUT /network/lan", "PUT /modems/m-5a1d0c3e9b21", "POST /modems/m-5a1d0c3e9b21/pin", "POST /modems/m-5a1d0c3e9b21/reset",
+		"POST /modems/h-9b2c41d07e5a/subnet"} {
 		a.route(k, 200, map[string]any{})
 	}
 	cases := []struct {
@@ -122,6 +123,15 @@ func TestParityRoutes(t *testing.T) {
 			seenReq{"PUT", "/api/v1/network/lan", map[string]any{"enabled": true}}},
 		{ui.AppAction{What: "password", Secrets: map[string][]byte{"current": []byte("vieja-0123"), "new": []byte("nueva-0123")}},
 			seenReq{"PUT", "/api/v1/password", map[string]any{"current": "vieja-0123", "new": "nueva-0123"}}},
+		{ui.AppAction{What: "modem_save", ID: "m-5a1d0c3e9b21", Body: map[string]any{"apn": "web.es", "force": true}},
+			seenReq{"PUT", "/api/v1/modems/m-5a1d0c3e9b21", map[string]any{"apn": "web.es", "force": true}}},
+		{ui.AppAction{What: "modem_pin", ID: "m-5a1d0c3e9b21", Body: map[string]any{"remove": false},
+			Secrets: map[string][]byte{"pin": []byte("1234")}},
+			seenReq{"POST", "/api/v1/modems/m-5a1d0c3e9b21/pin", map[string]any{"pin": "1234", "remove": false}}},
+		{ui.AppAction{What: "modem_reset", ID: "m-5a1d0c3e9b21", Body: map[string]any{}},
+			seenReq{"POST", "/api/v1/modems/m-5a1d0c3e9b21/reset", map[string]any{}}},
+		{ui.AppAction{What: "modem_subnet", ID: "h-9b2c41d07e5a", Body: map[string]any{}},
+			seenReq{"POST", "/api/v1/modems/h-9b2c41d07e5a/subnet", map[string]any{}}},
 	}
 	for _, c := range cases {
 		if r := run(t, d, c.act); !r.OK {
@@ -204,6 +214,48 @@ func TestParityReads(t *testing.T) {
 	d.PollDest()
 	if s := d.AppSnapshot(); s.DestAPI != ui.No || s.Dest != nil {
 		t.Errorf("%+v", s.DestAPI)
+	}
+}
+
+// GET /status's modems and links (MODEMS.md §4.2): every field validated, what does not fit dropped
+func TestModemsRead(t *testing.T) {
+	a, d := newDevice(t)
+	a.route("GET /status", 200, map[string]any{"service": map[string]any{"state": "active"}, "transport": "srtla",
+		"uplinks": []any{map[string]any{"name": "wwan0", "ip": "10.64.12.7", "kind": "modem", "modemId": "m-5a1d0c3e9b21",
+			"label": "Movistar", "health": "good", "healthCode": "ok"},
+			map[string]any{"name": "wwan1", "kind": "modem", "modemId": "../../etc"}},
+		"modems": []any{
+			map[string]any{"id": "m-5a1d0c3e9b21", "iface": "wwan0", "manufacturer": "Quectel", "model": "RM520N-GL",
+				"state": "connected", "sim": "ready", "registration": "home", "operator": "Movistar", "tech": "5g-nsa",
+				"signal":   map[string]any{"rsrp": -88.0, "rsrq": -9.0, "sinr": 14.5, "rssi": 900.0},
+				"imeiTail": "4412", "iccidTail": "01934", "alias": "", "apn": "", "apnAuto": "telefonica.es", "roaming": false,
+				"mode": "auto", "modes": []any{"auto", "4g", "5g", "6g"}, "can": []any{"apn", "pin", "format"}},
+			map[string]any{"id": "m-7d3e2a1b9c04", "state": "locked", "sim": "pin", "mode": "ludicrous"},
+			map[string]any{"id": "rm -rf /", "state": "connected"}},
+		"links": []any{
+			map[string]any{"name": "wwan0", "kind": "modem", "health": "good", "code": "ok", "available": true},
+			map[string]any{"name": "m-7d3e2a1b9c04", "kind": "modem", "health": "bad", "code": "sim_pin", "available": false},
+			map[string]any{"name": "x;y", "kind": "modem", "health": "bad"}}})
+	d.PollStatus()
+	st := d.AppSnapshot().Status
+	if st == nil || len(st.Modems) != 2 || len(st.Uplinks) != 2 {
+		t.Fatalf("%+v", st)
+	}
+	if st.Uplinks[0].ModemID != "m-5a1d0c3e9b21" || st.Uplinks[1].ModemID != "" {
+		t.Errorf("modem ids %q %q", st.Uplinks[0].ModemID, st.Uplinks[1].ModemID)
+	}
+	m := st.Modems[0]
+	if m.Iface != "wwan0" || m.Operator != "Movistar" || m.Tech != "5g-nsa" || m.RSRP == nil || *m.RSRP != -88 ||
+		m.SINR == nil || *m.SINR != 14.5 || m.RSSI != nil || m.IMEITail != "4412" || m.ICCIDTail != "" ||
+		m.APNAuto != "telefonica.es" || !reflect.DeepEqual(m.Modes, []string{"auto", "4g", "5g"}) ||
+		!reflect.DeepEqual(m.Can, []string{"apn", "pin"}) || m.Label() != "Movistar" {
+		t.Errorf("%+v", m)
+	}
+	if l := st.Modems[1]; l.SIM != "pin" || l.Mode != "" || l.Label() != "" {
+		t.Errorf("%+v", l)
+	}
+	if len(st.Links) != 1 || st.Links[0].Name != "m-7d3e2a1b9c04" || st.Links[0].Code != "sim_pin" {
+		t.Errorf("links %+v", st.Links)
 	}
 }
 

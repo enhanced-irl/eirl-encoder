@@ -73,9 +73,13 @@ for d in /sys/class/net/*; do
   [ -n "$cidr" ] || continue
   ip4=${cidr%/*}
   [[ $ip4 =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || continue
-  # Puerta de enlace: la ruta por defecto que NetworkManager pone en main para esta interfaz
-  gw=$(ip -4 route show default dev "$i" table main 2>/dev/null | awk '/^default via/ {print $3; exit}')
-  [ -n "$gw" ] || continue
+  # Gateway: the default route NetworkManager puts in main for this interface. A QMI/MBIM modem in
+  # raw-ip mode may have a point-to-point default route without a gateway ("default dev wwan0"): it counts too,
+  # routed through the device itself (MODEMS.md §4)
+  defroute=$(ip -4 route show default dev "$i" table main 2>/dev/null | head -n 1)
+  [ -n "$defroute" ] || continue
+  gw=$(awk '/^default via/ {print $3; exit}' <<<"$defroute")
+  [ -z "$gw" ] || [[ $gw =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || continue
   if [ -n "${seen_ip[$ip4]:-}" ]; then
     lines+="$i $ip4 conflict"$'\n'
     continue
@@ -84,7 +88,11 @@ for d in /sys/class/net/*; do
   table=$((TABLE_BASE + idx)) prio=$((PRIO_MIN + idx))
   net=$(ip -4 route show dev "$i" table main proto kernel scope link 2>/dev/null | awk '{print $1; exit}')
   [ -n "$net" ] && run ip -4 route replace "$net" dev "$i" src "$ip4" table "$table"
-  run ip -4 route replace default via "$gw" dev "$i" table "$table"
+  if [ -n "$gw" ]; then
+    run ip -4 route replace default via "$gw" dev "$i" table "$table"
+  else
+    run ip -4 route replace default dev "$i" table "$table"
+  fi
   # Regla: si ya hay una con esta prioridad para otra IP (DHCP cambió la IP), se sustituye
   cur=$(ip -4 rule show 2>/dev/null | awk -v p="$prio:" '$1 == p {print $3; exit}')
   if [ "$cur" != "$ip4" ]; then

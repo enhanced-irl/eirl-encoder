@@ -149,6 +149,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/output", s.putOutput)
 	mux.HandleFunc("PUT /api/v1/uplinks/{name}", s.putUplink)
 	mux.HandleFunc("GET /api/v1/modems", s.getModems)
+	mux.HandleFunc("PUT /api/v1/modems/{id}", s.putModem)
+	mux.HandleFunc("POST /api/v1/modems/{id}/{action}", s.postModem)
 	mux.HandleFunc("PUT /api/v1/input", s.putInput)
 	mux.HandleFunc("GET /api/v1/sources", s.getSources)
 	mux.HandleFunc("POST /api/v1/service/{action}", s.serviceAction)

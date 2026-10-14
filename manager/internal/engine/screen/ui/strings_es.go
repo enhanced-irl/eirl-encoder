@@ -301,7 +301,7 @@ var Spanish = &Strings{
 	ApplyCuts:       "Corta la emisión unos segundos: toca otra vez",
 	Unsaved:         "Hay cambios sin guardar",
 	ManagedByCloud:  "Lo gestiona tu cuenta de EnhancedIRL: se cambia en su app",
-	Stream:          streamES, Input: inputES, NetX: netES, Cloud: cloudES, Account: accountES, AudioX: audioES,
+	Stream:          streamES, Modem: modemES, Input: inputES, NetX: netES, Cloud: cloudES, Account: accountES, AudioX: audioES,
 	CmdErrors: map[string]string{"on_air": "está al aire", "hidden_source": "la fuente está oculta",
 		"unknown_source": "esa fuente ya no está", "no_secondary": "no hay segunda fuente", "bad_request": "valor no válido",
 		"unknown_command": "el motor no lo admite", "unsupported": "el motor no lo admite"},

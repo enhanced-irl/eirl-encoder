@@ -94,6 +94,25 @@ func TestMMList(t *testing.T) {
 
 func ptrModem(m linkhealth.Modem) *linkhealth.Modem { return &m }
 
+// The automatic APN comes from the SIM's home operator: roaming, the network's code is the visited one
+func TestMMHomeOperatorForTheAPN(t *testing.T) {
+	objs := eg25(11, 1, 5)
+	objs[mm3gpp]["RegistrationState"], objs[mm3gpp]["OperatorCode"] = v(uint32(5)), v("20801") // roaming in France
+	sim := map[string]dbus.Variant{"SimIdentifier": v("8934071100294821"), "OperatorIdentifier": v("21401")}
+	bus := &fakeBus{owner: true, objs: map[dbus.ObjectPath]map[string]map[string]dbus.Variant{"/m/0": objs},
+		other: map[dbus.ObjectPath]map[string]dbus.Variant{"/org/freedesktop/ModemManager1/SIM/0": sim}}
+	list, _ := (&MM{bus: bus}).List(context.Background(), nil)
+	if len(list) != 1 || list[0].Registration != "roaming" || list[0].netCode != "21401" {
+		t.Fatalf("%+v", list)
+	}
+	// A SIM that does not say: the network's
+	delete(sim, "OperatorIdentifier")
+	list, _ = (&MM{bus: bus}).List(context.Background(), nil)
+	if list[0].netCode != "20801" {
+		t.Fatalf("%q", list[0].netCode)
+	}
+}
+
 func TestMMLockedAndAbsent(t *testing.T) {
 	objs := eg25(2, 2, 5) // locked, SIM PIN
 	bus := &fakeBus{owner: true, objs: map[dbus.ObjectPath]map[string]map[string]dbus.Variant{"/m/1": objs}}
@@ -207,6 +226,50 @@ func TestHiLink(t *testing.T) {
 	}
 	if *m.Signal.RSRP != -95 || *m.Signal.RSRQ != -11 || *m.Signal.SINR != 8 || *m.Signal.RSSI != -51 || *m.Signal.Bars != 3 {
 		t.Fatalf("signal: %+v", m.Signal)
+	}
+}
+
+// Two identical sticks with the same address: the first by name is asked; the other is its twin, never asked (its
+// answers would be the first's), and all it can do is move a network apart, which goes to the first
+func TestHiLinkTwins(t *testing.T) {
+	srv := hilinkServer(t, map[string]string{
+		"/api/webserver/SesTokInfo": xmlHead + `<response><SesInfo>SessionID=abc</SesInfo><TokInfo>tok123</TokInfo></response>`,
+		"/api/monitoring/status":    xmlHead + `<response><ConnectionStatus>901</ConnectionStatus><SimStatus>1</SimStatus></response>`,
+	})
+	dir := sysnet(t, "enx0c5b8f279a64", "cdc_ether", "0c:5b:8f:27:9a:64")
+	dev := filepath.Join(dir, "enx0c5b8f27aaaa", "device")
+	os.MkdirAll(dev, 0o755)
+	os.Symlink(filepath.Join(dir, "drivers", "cdc_ether"), filepath.Join(dev, "driver"))
+	os.WriteFile(filepath.Join(dir, "enx0c5b8f27aaaa", "address"), []byte("0c:5b:8f:27:aa:aa\n"), 0o644)
+	h := &HiLink{SysNet: dir, RouteFile: routes(t, "enx0c5b8f27aaaa\t00000000\t0108A8C0\t0003\t0\t0\t102\t00000000\t0\t0\t0",
+		"enx0c5b8f279a64\t00000000\t0108A8C0\t0003\t0\t0\t101\t00000000\t0\t0\t0"),
+		Client: func(string) *http.Client { return srv.Client() }}
+	asked := 0
+	h.baseURL = func(string) string { asked++; return srv.URL }
+	m := &Manager{Backends: []Backend{h}, Links: func() []Link {
+		return []Link{{Name: "enx0c5b8f27aaaa", IP: "192.168.8.100"}, {Name: "enx0c5b8f279a64", IP: "192.168.8.100"}}
+	}}
+	m.Refresh(context.Background())
+	list := m.Snapshot()
+	if len(list) != 2 || asked != 1 {
+		t.Fatalf("%d modems, asked %d times: %+v", len(list), asked, list)
+	}
+	var first, twin Modem
+	for _, md := range list {
+		if md.Iface == "enx0c5b8f279a64" {
+			first = md
+		} else {
+			twin = md
+		}
+	}
+	if first.twinOf != "" || twin.twinOf != first.ID || twin.ID == first.ID || strings.Join(twin.Can, ",") != "subnet" {
+		t.Fatalf("first %+v twin %+v", first, twin)
+	}
+	if m.SubnetTarget(twin.ID) != first.ID || m.SubnetTarget(first.ID) != first.ID {
+		t.Fatal("subnet target")
+	}
+	if err := m.Reset(context.Background(), twin.ID); !errors.Is(err, ErrCannot) {
+		t.Fatalf("a twin reset (it would reach the first): %v", err)
 	}
 }
 

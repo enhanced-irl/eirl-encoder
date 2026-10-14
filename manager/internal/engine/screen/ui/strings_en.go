@@ -301,7 +301,7 @@ var English = &Strings{
 	ApplyCuts:       "It cuts the stream for a few seconds: tap again",
 	Unsaved:         "There are unsaved changes",
 	ManagedByCloud:  "Your EnhancedIRL account sets it: change it in its app",
-	Stream:          streamEN, Input: inputEN, NetX: netEN, Cloud: cloudEN, Account: accountEN, AudioX: audioEN,
+	Stream:          streamEN, Modem: modemEN, Input: inputEN, NetX: netEN, Cloud: cloudEN, Account: accountEN, AudioX: audioEN,
 	CmdErrors: map[string]string{"on_air": "it is on air", "hidden_source": "the source is hidden",
 		"unknown_source": "that source is gone", "no_secondary": "there is no second source", "bad_request": "not a valid value",
 		"unknown_command": "the engine does not support it", "unsupported": "the engine does not support it"},

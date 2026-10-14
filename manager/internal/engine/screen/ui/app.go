@@ -1,6 +1,9 @@
 package ui
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // --- the app's device, setup, update, sources and cloud API, as the screen reads it (CONTRACT §1-§5) ---
 
@@ -80,7 +83,7 @@ type AppAction struct {
 //	lan_enabled   PUT /network/lan  Body: enabled (the cameras by cable)
 var AppActions = []string{"dest_save", "dest_reveal", "restart", "uplink", "input_save", "sources_scan",
 	"cloud_unlink", "password", "cam_add", "cam_rename", "cam_rotate", "cam_remove", "cam_creds", "ap_enabled",
-	"ap_channel", "ap_rotate", "lan_enabled"}
+	"ap_channel", "ap_rotate", "lan_enabled", "modem_save", "modem_pin", "modem_reset", "modem_subnet"}
 
 // SecretsDropper is an App that can forget the secrets it read for the screen (DestSecrets, CamCreds): the page
 // that showed them calls it when it goes.
@@ -294,6 +297,45 @@ type StatusInfo struct {
 	HasUplinks     bool // the board has the uplinks dispatcher (else the page says SRTLA is not available)
 	Uplinks        []UplinkInfo
 	Input          InputInfo
+	// Modems and every connection's dot (MODEMS.md §4.2); empty from an app without them
+	Modems []ModemInfo
+	Links  []LinkDot
+}
+
+// ModemInfo is one cellular modem (GET /status modems[], MODEMS.md §4.2), validated.
+type ModemInfo struct {
+	ID, Iface, Manufacturer, Model string
+	Backend                        string // mm | hilink (a HiLink forgets the PIN when it powers off)
+	State, SIM, Registration       string
+	Operator, Tech                 string
+	RSRP, RSRQ, SINR, RSSI         *float64
+	IMEITail, ICCIDTail            string
+	Alias, APN, APNAuto            string
+	Roaming                        bool
+	Mode                           string   // auto | 4g | 5g
+	Modes                          []string // what Mode can be set to
+	Can                            []string // apn | roaming | mode | pin | reset | subnet
+}
+
+// Label: the modem's name: its alias, its operator, else its model.
+func (m ModemInfo) Label() string {
+	switch {
+	case m.Alias != "":
+		return m.Alias
+	case m.Operator != "":
+		return m.Operator
+	}
+	return strings.TrimSpace(m.Manufacturer + " " + m.Model)
+}
+
+// CanDo: the modem lets that be done from here.
+func (m ModemInfo) CanDo(what string) bool {
+	for _, c := range m.Can {
+		if c == what {
+			return true
+		}
+	}
+	return false
 }
 
 // UplinkInfo is one internet uplink (GET /status uplinks[]).
@@ -305,6 +347,7 @@ type UplinkInfo struct {
 	NoInternet     bool
 	TxKbps         int
 	// The app's judgement of the link (MODEMS.md §5); empty from an app without it
+	ModemID    string // the modem behind it (StatusInfo.Modems)
 	Label      string // the modem's operator or its alias: the row's title instead of the interface
 	Health     string // good | weak | bad | off: the row's dot
 	HealthCode string // why: the closed list of MODEMS.md §5, translated by Stream.UplinkHealth

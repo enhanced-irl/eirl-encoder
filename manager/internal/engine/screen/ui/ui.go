@@ -57,6 +57,7 @@ type UI struct {
 	menuOpen     bool
 	settingsOpen bool
 	linksZone    Rect      // the header's dots, as last drawn: a tap there opens Settings › Streaming › Connections
+	modemView    string    // Streaming › Connections: the modem whose page is open ("" = the list); MODEMS.md §7
 	settingsPage string    // the page on the right: SettingsPages (the last one stays)
 	settingsView string    // main | networks | zones | keyboard
 	pageSince    time.Time // when the page was opened: older results are not its own

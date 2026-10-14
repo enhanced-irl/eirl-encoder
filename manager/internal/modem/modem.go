@@ -14,6 +14,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"net"
 	"os"
 	"sort"
 	"strings"
@@ -44,6 +45,47 @@ type Modem struct {
 	// The last 4 digits only, to tell modems and SIMs apart
 	IMEITail  string `json:"imeiTail,omitempty"`
 	ICCIDTail string `json:"iccidTail,omitempty"`
+
+	// Configuration (MODEMS.md §7): what the user chose (Config) and what is in force
+	Alias string `json:"alias,omitempty"`
+	APN   string `json:"apn,omitempty"` // the APN asked for; "" = automatic
+	// APNAuto: with "automatic", the operator's from the database ("" = the network's default)
+	APNAuto string   `json:"apnAuto,omitempty"`
+	Roaming bool     `json:"roaming"`         // data roaming allowed
+	Mode    string   `json:"mode,omitempty"`  // auto | 4g | 5g, in force
+	Modes   []string `json:"modes,omitempty"` // what Mode can be set to on this modem
+	// Can: what this modem lets be done from here: apn | roaming | mode | pin | reset | subnet
+	Can []string `json:"can,omitempty"`
+
+	// For the backends, never in the API
+	path    string // ModemManager's object path
+	simPath string
+	devID   string  // ModemManager's DeviceIdentifier (NetworkManager's gsm.device-id)
+	netCode string  // the SIM's home MCC+MNC (else the network's): the automatic APN
+	simName string  // the SIM's operator name (its SPN): tells apart operators sharing an MCC+MNC
+	simID   string  // the SIM's ICCID, whole: binds a stored PIN to that SIM (never in the API)
+	twinOf  string  // a HiLink with the same address as another: the id of the one that is reachable
+	combos  []combo // ModemManager's supported (allowed, preferred) modes
+	gateway string  // a HiLink's web API address
+	localIP string  // the link's IP (a HiLink is asked from it)
+}
+
+// Label: what the screen and the web call it: its alias, else its operator.
+func (m Modem) Label() string {
+	if m.Alias != "" {
+		return m.Alias
+	}
+	return m.Operator
+}
+
+// can: whether the modem lets that be done.
+func (m Modem) can(what string) bool {
+	for _, c := range m.Can {
+		if c == what {
+			return true
+		}
+	}
+	return false
 }
 
 // Signal: every field optional (nil = not reported). dBm for RSRP and RSSI, dB for RSRQ and SINR.
@@ -92,11 +134,23 @@ type Manager struct {
 	Every time.Duration // default 5 s
 	// Log: errors, once per backend until it works again (nil = silent)
 	Log func(msg string, args ...any)
+	// Store: the users' configuration (nil = read-only: no changes, no profiles)
+	Store *Store
+	// Providers: the APN database ("" = ProvidersFile)
+	Providers string
+	// Addrs: the board's IPv4 addresses (nil = the system's; tests)
+	Addrs func() []net.IP
+	// Hold: a modem whose link carries the stream right now: its profile is not rewritten in the background (that
+	// reconnects it); only the user's own change does (nil = never)
+	Hold func(id string) bool
 
-	mu     sync.Mutex
-	snap   []Modem
-	at     time.Time
-	failed map[string]string
+	mu          sync.Mutex
+	snap        []Modem
+	at          time.Time
+	failed      map[string]string
+	applied     map[string]applied
+	reconciling bool
+	opMu        sync.Mutex // one change at a time (Configure, Unlock, Reset, MoveSubnet, the profiles)
 }
 
 // Snapshot: the latest list (a copy), sorted by interface and id.
@@ -157,9 +211,16 @@ func (m *Manager) Refresh(ctx context.Context) {
 		}
 		return out[i].ID < out[j].ID
 	})
+	if m.Store != nil {
+		all, _ := m.Store.All()
+		for i := range out {
+			out[i] = m.decorate(out[i], all[out[i].ID])
+		}
+	}
 	m.mu.Lock()
 	m.snap, m.at = out, time.Now()
 	m.mu.Unlock()
+	m.reconcile(ctx, out)
 }
 
 func (m *Manager) report(backend, err string) {

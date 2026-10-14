@@ -302,7 +302,7 @@ var French = &Strings{
 	ApplyCuts:       "Coupe la diffusion quelques secondes : touchez encore",
 	Unsaved:         "Des changements ne sont pas enregistrés",
 	ManagedByCloud:  "Votre compte EnhancedIRL le définit : modifiez-le dans son app",
-	Stream:          streamFR, Input: inputFR, NetX: netFR, Cloud: cloudFR, Account: accountFR, AudioX: audioFR,
+	Stream:          streamFR, Modem: modemFR, Input: inputFR, NetX: netFR, Cloud: cloudFR, Account: accountFR, AudioX: audioFR,
 	CmdErrors: map[string]string{"on_air": "elle est à l'antenne", "hidden_source": "la source est masquée",
 		"unknown_source": "cette source n'est plus là", "no_secondary": "il n'y a pas de deuxième source",
 		"bad_request": "valeur non valide", "unknown_command": "le moteur ne le prend pas en charge",

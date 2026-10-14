@@ -1,0 +1,3 @@
+- Each 4G/5G modem has its own page, on the touch screen (Settings › Stream › Connections, the «›» button) and in the Connections card of the web page: its signal in detail, the SIM and the network, and its settings: name, APN (automatic or typed in), data roaming (off by default), network type and restart. If the SIM asks for its PIN, you can unlock it there, or unlock it and remove the PIN so that it does not ask again.
+- If two identical modems clash because they use the same network, «Separate the networks» gets both working.
+- For now it works with USB modems that show up as a network card (Huawei HiLink ones, for example). This is a first version: it will be refined with more models.

@@ -1093,7 +1093,8 @@ group's entry and on the tab. The wizard keeps using the pages by id, without ta
   the saved input) and `GET /sources` only while their page is on the screen (`AppWatch.Dest|Status|Sources`, every
   2 s, 2 s and 10 s), and runs this section's actions through the same queue as the device's
   (`ui.AppActions`: `dest_save`, `dest_reveal`, `restart`, `uplink`, `input_save`, `sources_scan`, `cloud_unlink`,
-  `password`, `cam_add|rename|rotate|remove`, `cam_creds`, `ap_enabled|channel|rotate`, `lan_enabled`;
+  `password`, `cam_add|rename|rotate|remove`, `cam_creds`, `ap_enabled|channel|rotate`, `lan_enabled`,
+  `modem_save|pin|reset|subnet`;
   appapi/parity.go), each with its route's `{id}`, its JSON body and its **secret fields**, which `Do` copies, the
   body is built from without turning them into a string, and are wiped once sent. The app's side (the socket's
   whitelist and its two local-only routes): SETUP.md §8, MANAGER.md §3.
@@ -1126,7 +1127,10 @@ group's entry and on the tab. The wizard keeps using the pages by id, without ta
 - **Connections** (formerly Uplinks; renamed Oct 14, MODEMS.md D-M5): one row per uplink (kind, IP, what it sends, or
   why not); the row is its switch in or out of the SRTLA share. With the app's judgement (MODEMS.md §5) each row has
   its dot before the icon, a modem's operator as its title (its interface goes to the second line), and the reason
-  of an amber or red dot, translated (`Stream.UplinkHealth`). Taking out the last usable one while streaming over SRTLA needs a second tap. The rates come from the
+  of an amber or red dot, translated (`Stream.UplinkHealth`). Taking out the last usable one while streaming over SRTLA needs a second tap. A
+  modem's row has a «›» to **its page** (`modempage.go`, MODEMS.md §7.4: signal on its scales, SIM and network, and
+  Network, APN, Roaming, Name, Restart and «Unlock the SIM» or «Separate the networks»); a modem without a usable link
+  has a row of its own that opens it. The rates come from the
   app's shared sample (one baseline of at least 1.5 s for every caller: the web's SSE and the screen no longer
   disturb each other's rates).
 - **Pause**: the card's text (the engine's rule: 1-60 characters, letters, digits and some punctuation) and whether

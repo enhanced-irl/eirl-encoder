@@ -39,6 +39,9 @@ func init() {
 		"cam_creds":  {"GET", "/network/credentials?cameras=1"},
 		"ap_enabled": {"PUT", "/network/ap"}, "ap_channel": {"PUT", "/network/ap"}, "ap_rotate": {"PUT", "/network/ap"},
 		"lan_enabled": {"PUT", "/network/lan"},
+		// Cellular modems (MODEMS.md §7); modem_pin's PIN goes as a secret field
+		"modem_save": {"PUT", "/modems/{id}"}, "modem_pin": {"POST", "/modems/{id}/pin"},
+		"modem_reset": {"POST", "/modems/{id}/reset"}, "modem_subnet": {"POST", "/modems/{id}/subnet"},
 	}
 	for _, w := range ui.AppActions {
 		r, ok := routes[w]
@@ -245,6 +248,15 @@ var (
 	reAudioID   = regexp.MustCompile(`^(auto|none|i2s|silence|test|alsa:[A-Za-z0-9_.-]{1,64}|net:cam[1-8])$`)
 	reEDID      = regexp.MustCompile(`^[A-Za-z0-9_.@-]{1,32}$`)
 	reUplink    = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,32}$`)
+	reModemID   = regexp.MustCompile(`^[mh]-[0-9a-f]{12}$`)
+	modemStates = set("failed", "locked", "disabled", "enabling", "searching", "registered", "connecting", "connected",
+		"disconnected", "unknown")
+	simStates     = set("ready", "missing", "pin", "puk", "error", "unknown")
+	regStates     = set("home", "roaming", "searching", "denied", "idle", "unknown")
+	modemModes    = set("auto", "4g", "5g")
+	modemBackends = set("mm", "hilink")
+	modemCans     = set("apn", "roaming", "mode", "pin", "reset", "subnet")
+	reTail        = regexp.MustCompile(`^[0-9A-Fa-f]{4}$`)
 	// MODEMS.md §5: a level and its code (closed lists: anything else is dropped and the row shows no dot)
 	healthLevels = set("good", "weak", "bad", "off")
 	healthCodes  = set("ok", "off", "ip_conflict", "disconnected", "searching", "sim_missing", "sim_pin", "sim_puk",
@@ -327,11 +339,36 @@ func statusInfo(v any) *ui.StatusInfo {
 			u.NoInternet, _ = boolOf(um["noInternet"])
 			u.TxKbps, _ = intIn(um["txKbps"], 0, 10000000)
 			u.Label = textField(um, "label", 32)
+			if id, _ := um["modemId"].(string); reModemID.MatchString(id) {
+				u.ModemID = id
+			}
 			u.Health = oneOf(um, "health", healthLevels)
 			if u.Health != "" {
 				u.HealthCode = oneOf(um, "healthCode", healthCodes)
 			}
 			st.Uplinks = append(st.Uplinks, u)
+		}
+	}
+	if mods, ok := m["modems"].([]any); ok {
+		for _, x := range mods {
+			if md, ok := modemInfo(obj(x)); ok && len(st.Modems) < 8 {
+				st.Modems = append(st.Modems, md)
+			}
+		}
+	}
+	if links, ok := m["links"].([]any); ok {
+		for _, x := range links {
+			lm := obj(x)
+			name, _ := lm["name"].(string)
+			if lm == nil || !reUplink.MatchString(name) || len(st.Links) >= MaxLinks {
+				continue
+			}
+			l := ui.LinkDot{Name: name, Kind: oneOf(lm, "kind", linkKinds), Label: textField(lm, "label", 32),
+				Tech: oneOf(lm, "tech", linkTechs), Health: oneOf(lm, "health", healthLevels), Code: oneOf(lm, "code", healthCodes)}
+			l.Disabled, _ = boolOf(lm["disabled"])
+			if av, _ := boolOf(lm["available"]); !av && l.Kind != "" && l.Health != "" {
+				st.Links = append(st.Links, l) // only the ones without a link: the others are uplinks[]
+			}
 		}
 	}
 	if in := obj(m["input"]); in != nil {
@@ -479,4 +516,48 @@ func camCreds(v any) []ui.CamConnect {
 		out = append(out, c)
 	}
 	return out
+}
+
+// modemInfo: one modem of GET /status, every field validated (the app runs as another user).
+func modemInfo(m map[string]any) (ui.ModemInfo, bool) {
+	id, _ := m["id"].(string)
+	if m == nil || !reModemID.MatchString(id) {
+		return ui.ModemInfo{}, false
+	}
+	md := ui.ModemInfo{ID: id, Backend: oneOf(m, "backend", modemBackends), Manufacturer: textField(m, "manufacturer", 32),
+		Model: textField(m, "model", 32),
+		State: oneOf(m, "state", modemStates), SIM: oneOf(m, "sim", simStates), Registration: oneOf(m, "registration", regStates),
+		Operator: textField(m, "operator", 32), Tech: oneOf(m, "tech", linkTechs), Alias: textField(m, "alias", 48),
+		APN: textField(m, "apn", 63), APNAuto: textField(m, "apnAuto", 63), Mode: oneOf(m, "mode", modemModes)}
+	if v, _ := m["iface"].(string); reUplink.MatchString(v) {
+		md.Iface = v
+	}
+	for k, dst := range map[string]*string{"imeiTail": &md.IMEITail, "iccidTail": &md.ICCIDTail} {
+		if v, _ := m[k].(string); reTail.MatchString(v) {
+			*dst = v
+		}
+	}
+	md.Roaming, _ = boolOf(m["roaming"])
+	if sig := obj(m["signal"]); sig != nil {
+		for k, dst := range map[string]**float64{"rsrp": &md.RSRP, "rsrq": &md.RSRQ, "sinr": &md.SINR, "rssi": &md.RSSI} {
+			if f, ok := numberOf(sig[k]); ok && f > -200 && f < 100 {
+				v := f
+				*dst = &v
+			}
+		}
+	}
+	for _, list := range []struct {
+		key     string
+		allowed map[string]bool
+		dst     *[]string
+	}{{"modes", modemModes, &md.Modes}, {"can", modemCans, &md.Can}} {
+		if xs, ok := m[list.key].([]any); ok {
+			for _, x := range xs {
+				if s, ok := x.(string); ok && list.allowed[s] && len(*list.dst) < 8 {
+					*list.dst = append(*list.dst, s)
+				}
+			}
+		}
+	}
+	return md, true
 }

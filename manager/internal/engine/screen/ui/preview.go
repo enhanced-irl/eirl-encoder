@@ -38,7 +38,10 @@ func (p Preview) Holding(key string, d time.Duration) {
 }
 
 // OpenSettings opens the panel like ui_render.py does (without telling Net).
-func (p Preview) OpenSettings()            { p.u.settingsOpen = true }
+func (p Preview) OpenSettings() { p.u.settingsOpen = true }
+
+// OpenModem shows a modem's page (Streaming › Connections).
+func (p Preview) OpenModem(id string)      { p.u.openModem(id) }
 func (p Preview) SettingsPage(page string) { p.u.settingsPage = page }
 func (p Preview) OpenZones()               { p.u.openZones() }
 func (p Preview) ConfirmUpdate() {

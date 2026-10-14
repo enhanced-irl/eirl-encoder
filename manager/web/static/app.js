@@ -1247,10 +1247,12 @@ $('cams-via-wifi').addEventListener('change', (ev) => setVia('wifi', ev.target))
 $('cams-via-lan').addEventListener('change', (ev) => setVia('lan', ev.target));
 
 function renderUplinks(st, running) {
-  const list = st.uplinks;
+  const mods = st.modems || [];
+  const list = st.uplinks || [];
   const srtla = st.transport === 'srtla';
   const card = $('uplinks-card');
-  card.hidden = !list || (!srtla && list.length < 2);
+  // A modem is always shown: its SIM may be asking for the PIN while it is the board's only way out (no uplinks)
+  card.hidden = !mods.length && (!st.uplinks || (!srtla && list.length < 2));
   if (card.hidden) return;
   const live = srtla && running && st.output === 'on';
   $('uplinks-mode').textContent = srtla ? 'SRTLA' : t('uplinks.noSrtla');
@@ -1284,13 +1286,18 @@ function renderUplinks(st, running) {
       info.append(name, meta);
       const rate = document.createElement('span');
       rate.className = 'rate';
-      li.append(cb, info, rate);
+      const more = moreButton();
+      li.append(cb, info, rate, more);
       return li;
     }));
   }
   list.forEach((u, i) => {
     const li = ul.children[i];
-    const [cb, info, rate] = li.children;
+    const [cb, info, rate, more] = li.children;
+    more.hidden = !u.modemId;
+    more.dataset.id = u.modemId || '';
+    more.setAttribute('aria-label', t('modem.details', { name: u.label || u.name }));
+    more.classList.toggle('open', !!u.modemId && state.modemOpen === u.modemId);
     li.className = u.disabled ? 'off' : '';
     if (!cb.disabled) cb.checked = !u.disabled; // disabled = being saved: what was tapped wins
     // A modem: its operator (or alias) as the title, its interface on the second line (MODEMS.md §4.2)
@@ -1309,6 +1316,300 @@ function renderUplinks(st, running) {
     rate.classList.toggle('warn', why ? health === 'weak' : !!u.conflict || (!u.disabled && !!u.noInternet));
     rate.classList.toggle('bad', !!why && health === 'bad');
   });
+  renderModemsOff(st);
+  renderModemPanel(st);
+}
+
+// --- Cellular modems (MODEMS.md §7) -------------------------------------------------------------------
+// A modem row's «›» opens its panel under the list: its signal, SIM and settings. The data come with every /status
+// (modems[] and links[]): nothing is asked for while it is open.
+
+function moreButton() {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'btn small ghost more';
+  b.textContent = '›';
+  b.hidden = true;
+  b.addEventListener('click', () => {
+    state.modemOpen = state.modemOpen === b.dataset.id ? '' : b.dataset.id;
+    renderUplinks(state.status, true);
+  });
+  return b;
+}
+
+// renderModemsOff: modems without a usable link (no SIM, PIN, searching): not in the share, but they say why.
+function renderModemsOff(st) {
+  const ul = $('modems-off');
+  const mods = st.modems || [];
+  const list = (st.links || []).filter((l) => l.kind === 'modem' && !l.available)
+    .map((l) => ({ l, m: mods.find((m) => m.iface === l.name || m.id === l.name) })).filter((x) => x.m);
+  ul.hidden = list.length === 0;
+  const ids = list.map((x) => x.m.id).join(' ');
+  if (ul.dataset.ids !== ids) {
+    ul.dataset.ids = ids;
+    ul.replaceChildren(...list.map(() => {
+      const li = document.createElement('li');
+      const info = document.createElement('div');
+      const name = document.createElement('span');
+      name.className = 'name';
+      const dot = document.createElement('i');
+      dot.className = 'hdot';
+      name.append(dot, document.createElement('span'));
+      const meta = document.createElement('span');
+      meta.className = 'meta';
+      info.append(name, meta);
+      const rate = document.createElement('span');
+      rate.className = 'rate';
+      li.append(document.createElement('span'), info, rate, moreButton());
+      return li;
+    }));
+  }
+  list.forEach(({ l, m }, i) => {
+    const [, info, rate, more] = ul.children[i].children;
+    const [dot, title] = info.firstChild.children;
+    const health = HEALTH.includes(l.health) ? l.health : 'bad';
+    dot.className = `hdot ${health}`;
+    title.textContent = m.alias || m.operator || [m.manufacturer, m.model].filter(Boolean).join(' ') || t('kind.modem');
+    info.lastChild.textContent = m.imeiTail ? `${t('kind.modem')} · IMEI …${m.imeiTail}` : t('kind.modem');
+    rate.textContent = t('health.' + (l.code || 'disconnected'));
+    rate.className = 'rate ' + (health === 'off' ? '' : health === 'weak' ? 'warn' : 'bad');
+    more.hidden = false;
+    more.dataset.id = m.id;
+    more.setAttribute('aria-label', t('modem.details', { name: title.textContent }));
+    more.classList.toggle('open', state.modemOpen === m.id);
+  });
+}
+
+// renderModemPanel: the open modem's panel; built when another modem opens, its values refreshed in place (what is
+// being typed is kept).
+function renderModemPanel(st) {
+  const box = $('modem-panel');
+  const m = (st.modems || []).find((x) => x.id === state.modemOpen);
+  if (!m) {
+    box.hidden = true;
+    box.replaceChildren();
+    delete box.dataset.id;
+    return;
+  }
+  box.hidden = false;
+  if (box.dataset.id !== m.id) {
+    box.dataset.id = m.id;
+    box.replaceChildren(buildModemPanel(m));
+  }
+  fillModemPanel(box, m, st);
+}
+
+function field(labelKey, input, hintKey) {
+  const wrap = document.createElement('div');
+  wrap.className = 'mp-field';
+  const lab = document.createElement('label');
+  lab.textContent = t(labelKey);
+  lab.htmlFor = input.id;
+  wrap.append(lab, input);
+  if (hintKey) {
+    const h = document.createElement('p');
+    h.className = 'hint';
+    h.textContent = t(hintKey);
+    wrap.append(h);
+  }
+  return wrap;
+}
+
+function buildModemPanel(m) {
+  const root = document.createElement('div');
+  const head = document.createElement('div');
+  head.className = 'mp-head';
+  const title = document.createElement('b');
+  title.className = 'mp-title';
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'btn small ghost';
+  close.textContent = t('modem.close');
+  close.addEventListener('click', () => { state.modemOpen = ''; renderUplinks(state.status, true); });
+  head.append(title, close);
+  const sig = document.createElement('p');
+  sig.className = 'mp-signal';
+  const facts = document.createElement('dl');
+  facts.className = 'mp-facts';
+
+  // The settings: one form, saved together
+  const form = document.createElement('form');
+  form.className = 'mp-form';
+  const alias = document.createElement('input');
+  alias.id = 'mp-alias'; alias.type = 'text'; alias.maxLength = 12; alias.autocomplete = 'off';
+  const apn = document.createElement('input');
+  apn.id = 'mp-apn'; apn.type = 'text'; apn.maxLength = 63; apn.autocomplete = 'off'; apn.spellcheck = false;
+  const mode = document.createElement('select');
+  mode.id = 'mp-mode';
+  const roam = document.createElement('input');
+  roam.id = 'mp-roam'; roam.type = 'checkbox';
+  const roamWrap = document.createElement('label');
+  roamWrap.className = 'mp-check';
+  roamWrap.append(roam, document.createTextNode(' ' + t('modem.roaming')));
+  const save = document.createElement('button');
+  save.type = 'submit';
+  save.className = 'btn small primary';
+  save.textContent = t('modem.save');
+  form.append(field('modem.alias', alias, 'modem.aliasHint'), field('modem.apn', apn), field('modem.mode', mode), roamWrap, save);
+  for (const el of [alias, apn, mode, roam]) el.addEventListener('input', () => { form.dataset.dirty = '1'; });
+  form.addEventListener('submit', (ev) => { ev.preventDefault(); saveModem(m.id, form); });
+
+  // The PIN, only while the SIM asks for it
+  const pin = document.createElement('form');
+  pin.className = 'mp-pin';
+  const pinIn = document.createElement('input');
+  pinIn.id = 'mp-pinv'; pinIn.type = 'password'; pinIn.inputMode = 'numeric'; pinIn.autocomplete = 'off';
+  pinIn.pattern = '[0-9]{4,8}'; pinIn.maxLength = 8; pinIn.required = true;
+  const rm = document.createElement('input');
+  rm.id = 'mp-pinrm'; rm.type = 'checkbox';
+  const rmWrap = document.createElement('label');
+  rmWrap.className = 'mp-check';
+  rmWrap.append(rm, document.createTextNode(' ' + t('modem.pinRemove')));
+  const unlock = document.createElement('button');
+  unlock.type = 'submit';
+  unlock.className = 'btn small primary';
+  unlock.textContent = t('modem.unlock');
+  const pinNote = document.createElement('p');
+  pinNote.className = 'hint mp-pinnote'; // what happens next time: kept (ModemManager) or asked again (HiLink)
+  pin.append(field('modem.pin', pinIn), pinNote, rmWrap, unlock);
+  pin.addEventListener('submit', (ev) => { ev.preventDefault(); unlockModem(m.id, pinIn, rm); });
+
+  const acts = document.createElement('div');
+  acts.className = 'mp-actions';
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.className = 'btn small';
+  reset.textContent = t('modem.reset');
+  reset.addEventListener('click', () => modemAction(m.id, 'reset'));
+  const subnet = document.createElement('button');
+  subnet.type = 'button';
+  subnet.className = 'btn small';
+  subnet.textContent = t('modem.subnet');
+  subnet.title = t('modem.subnetHint');
+  subnet.addEventListener('click', () => modemAction(m.id, 'subnet'));
+  acts.append(reset, subnet);
+  root.append(head, sig, facts, pin, form, acts);
+  return root;
+}
+
+function fillModemPanel(box, m, st) {
+  const can = (x) => (m.can || []).includes(x);
+  box.querySelector('.mp-title').textContent = m.alias || m.operator || [m.manufacturer, m.model].filter(Boolean).join(' ');
+  const s = m.signal || {};
+  const parts = [];
+  if (s.rsrp != null) parts.push(`RSRP ${t('modem.dbm', { v: num(s.rsrp, 0) })}`);
+  if (s.sinr != null) parts.push(`SINR ${t('modem.db', { v: num(s.sinr, 1) })}`);
+  if (s.rsrq != null) parts.push(`RSRQ ${t('modem.db', { v: num(s.rsrq, 0) })}`);
+  if (!parts.length && s.rssi != null) parts.push(`RSSI ${t('modem.dbm', { v: num(s.rssi, 0) })}`);
+  if (m.tech) parts.push(m.tech.replace('-nsa', ' NSA').toUpperCase());
+  box.querySelector('.mp-signal').textContent = parts.length ? parts.join(' · ') : t('modem.noSignal');
+  const link = (st.links || []).find((l) => l.name === m.iface || l.name === m.id);
+  box.querySelector('.mp-signal').className = 'mp-signal ' + (link ? link.health : '');
+  const facts = [
+    ['modem.operator', m.operator || '—'],
+    ['modem.sim', [t('modem.simState.' + (m.sim || 'unknown')), m.iccidTail ? '…' + m.iccidTail : ''].filter(Boolean).join(' · ')],
+    ['modem.registration', t('modem.reg.' + (m.registration || 'unknown'))],
+    ['modem.device', [m.manufacturer, m.model, m.imeiTail ? 'IMEI …' + m.imeiTail : '', m.iface].filter(Boolean).join(' · ')],
+  ];
+  const dl = box.querySelector('.mp-facts');
+  dl.replaceChildren(...facts.flatMap(([k, v]) => {
+    const dt = document.createElement('dt');
+    dt.textContent = t(k);
+    const dd = document.createElement('dd');
+    dd.textContent = v;
+    return [dt, dd];
+  }));
+  box.querySelector('.mp-pin').hidden = !(can('pin') && (m.sim === 'pin'));
+  box.querySelector('.mp-pinnote').textContent = t(m.backend === 'hilink' ? 'modem.pinOnce' : 'modem.pinKeep');
+  const form = box.querySelector('.mp-form');
+  const mode = box.querySelector('#mp-mode');
+  if (!form.dataset.dirty && !form.contains(document.activeElement)) {
+    box.querySelector('#mp-alias').value = m.alias || '';
+    box.querySelector('#mp-alias').placeholder = m.operator || '';
+    box.querySelector('#mp-apn').value = m.apn || '';
+    box.querySelector('#mp-apn').placeholder = m.apnAuto ? t('modem.apnAutoKnown', { apn: m.apnAuto }) : t('modem.apnAutoNet');
+    box.querySelector('#mp-roam').checked = !!m.roaming;
+    const modes = (m.modes && m.modes.length ? m.modes : ['auto']);
+    if (mode.dataset.modes !== modes.join(',')) {
+      mode.dataset.modes = modes.join(',');
+      mode.replaceChildren(...modes.map((x) => {
+        const o = document.createElement('option');
+        o.value = x;
+        o.textContent = t('modem.mode.' + x);
+        return o;
+      }));
+    }
+    mode.value = m.mode || 'auto';
+    // What the form showed: «Save» sends only what changed (a new name alone must not reconnect the modem)
+    form.dataset.orig = JSON.stringify({ alias: m.alias || '', apn: m.apn || '', roaming: !!m.roaming, mode: mode.value });
+  }
+  box.querySelector('#mp-apn').disabled = !can('apn');
+  box.querySelector('#mp-roam').disabled = !can('roaming');
+  mode.disabled = !can('mode');
+  const [reset, subnet] = box.querySelector('.mp-actions').children;
+  reset.hidden = !can('reset');
+  subnet.hidden = !can('subnet') || !(st.uplinks || []).some((u) => u.modemId === m.id && u.conflict); // its own link
+}
+
+// lastLinkRetry: a 409 last_link asks before cutting the stream, then sends it again with force.
+async function lastLinkRetry(fn) {
+  try {
+    return await fn(false);
+  } catch (e) {
+    if (e.status === 409 && e.data && e.data.error === 'last_link' && confirm(t('modem.lastConfirm'))) return fn(true);
+    throw e;
+  }
+}
+
+async function saveModem(id, form) {
+  let orig = {};
+  try { orig = JSON.parse(form.dataset.orig || '{}'); } catch { /* none: everything counts as changed */ }
+  const body = {};
+  const take = (key, input, value) => {
+    if (!input.disabled && value !== orig[key]) body[key] = value; // what the modem cannot change is not sent
+  };
+  const alias = form.querySelector('#mp-alias');
+  const apn = form.querySelector('#mp-apn');
+  const roam = form.querySelector('#mp-roam');
+  const mode = form.querySelector('#mp-mode');
+  take('alias', alias, alias.value.trim());
+  take('apn', apn, apn.value.trim());
+  take('roaming', roam, roam.checked);
+  take('mode', mode, mode.value);
+  if (!Object.keys(body).length) {
+    delete form.dataset.dirty;
+    toast(t('modem.saved'));
+    return;
+  }
+  try {
+    await lastLinkRetry((force) => api('PUT', '/modems/' + encodeURIComponent(id), force ? { ...body, force } : body));
+    delete form.dataset.dirty;
+    toast(t('modem.saved'));
+  } catch (e) {
+    toast(e.data && e.data.fields ? Object.values(e.data.fields).join(' · ') : e.message, true);
+  }
+}
+
+async function unlockModem(id, pinIn, rm) {
+  const pin = pinIn.value;
+  pinIn.value = ''; // out of the page at once: it only goes to the modem
+  try {
+    await api('POST', '/modems/' + encodeURIComponent(id) + '/pin', { pin, remove: rm.checked });
+    toast(rm.checked ? t('modem.pinRemoved') : t('modem.unlocked'));
+  } catch (e) {
+    toast(e.data && e.data.fields ? Object.values(e.data.fields).join(' · ') : e.message, true);
+  }
+}
+
+async function modemAction(id, action) {
+  if (action === 'reset' && !confirm(t('modem.resetConfirm'))) return;
+  if (action === 'subnet' && !confirm(t('modem.subnetConfirm'))) return;
+  try {
+    await lastLinkRetry((force) => api('POST', '/modems/' + encodeURIComponent(id) + '/' + action, force ? { force } : {}));
+    toast(t(action === 'reset' ? 'modem.resetDone' : 'modem.subnetDone'));
+  } catch (e) {
+    toast(e.message, true);
+  }
 }
 
 // One uplink at a time: the server changes it on top of what the file already has (an uplink disabled

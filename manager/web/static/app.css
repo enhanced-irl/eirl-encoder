@@ -466,6 +466,30 @@ input[type=range]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 4px rgba(7
 .uplinks .hdot.bad { background: var(--error); }
 .uplinks .hdot.off { background: transparent; box-shadow: inset 0 0 0 2px var(--gray-500); }
 .uplinks .rate.bad { color: var(--error-300); }
+.uplinks li { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+.uplinks .more { min-width: 36px; padding: 4px 10px; font-size: 1.1rem; line-height: 1; }
+.uplinks .more.open { transform: rotate(90deg); }
+#modems-off { margin-top: -6px; }
+/* A modem's panel (MODEMS.md §7) */
+.modem-panel { margin: 0 0 12px; padding: 12px 14px; border: 1px solid var(--gray-800); border-radius: var(--radius-sm); background: var(--gray-950, rgba(0, 0, 0, .2)); display: grid; gap: 10px; }
+.modem-panel .mp-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.modem-panel .mp-title { color: var(--gray-50); font-size: 1rem; }
+.modem-panel .mp-signal { margin: 0; font: .85rem/1.4 var(--mono); color: var(--gray-300); font-variant-numeric: tabular-nums; }
+.modem-panel .mp-signal.good { color: var(--success-300); }
+.modem-panel .mp-signal.weak { color: var(--warning-300); }
+.modem-panel .mp-signal.bad { color: var(--error-300); }
+.modem-panel .mp-facts { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; font-size: .85rem; }
+.modem-panel .mp-facts dt { color: var(--gray-400); }
+.modem-panel .mp-facts dd { margin: 0; color: var(--gray-200); overflow-wrap: anywhere; }
+.modem-panel form { display: grid; gap: 8px; }
+.modem-panel .mp-form { padding-top: 12px; border-top: 1px solid var(--gray-800); } /* the settings, apart from the facts */
+.modem-panel .mp-field { display: grid; gap: 4px; }
+.modem-panel .mp-field label { font-size: .8rem; color: var(--gray-400); }
+.modem-panel .mp-field .hint { margin: 0; }
+.modem-panel .mp-check { display: flex; align-items: center; gap: 8px; font-size: .9rem; color: var(--gray-200); }
+.modem-panel .mp-pin { padding: 10px; border-radius: var(--radius-sm); background: var(--error-a); }
+.modem-panel .mp-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.modem-panel form > button { justify-self: start; }
 .uplinks-warn { margin: 0 0 10px; padding: 8px 12px; border-radius: var(--radius-sm); font-size: .85rem; color: var(--warning-300); background: var(--warning-a); border: 1px solid rgba(247, 144, 9, .3); }
 
 /* --- Configuración ---------------------------------------------------------------------------- */

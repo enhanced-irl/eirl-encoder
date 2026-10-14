@@ -140,7 +140,7 @@ func (s *Service) Refresh(ctx context.Context) Snapshot {
 		l := Link{Name: u.Name, Available: true, InUse: u.InUse, Disabled: u.Disabled, TxKbps: u.TxKbps}
 		if md, ok := byIface[u.Name]; ok {
 			seen[md.ID] = true
-			u.Kind, u.ModemID, u.Label = "modem", md.ID, md.Operator
+			u.Kind, u.ModemID, u.Label = "modem", md.ID, md.Label()
 			mh := md.Health()
 			in.Kind, in.Modem = "modem", &mh
 			l.Tech, l.Bars = md.Tech, bars(md)
@@ -174,7 +174,7 @@ func (s *Service) Refresh(ctx context.Context) Snapshot {
 		in := linkhealth.Input{Kind: "modem", Disabled: off[name], Modem: &mh}
 		r := s.Health.Update(name, linkhealth.Judge(in), now)
 		keys[name] = true
-		out = append(out, Link{Name: name, Kind: "modem", Label: md.Operator, Tech: md.Tech, Bars: bars(md),
+		out = append(out, Link{Name: name, Kind: "modem", Label: md.Label(), Tech: md.Tech, Bars: bars(md),
 			Health: string(r.Level), Code: r.Code, Disabled: off[name]})
 	}
 	s.Health.Keep(keys)

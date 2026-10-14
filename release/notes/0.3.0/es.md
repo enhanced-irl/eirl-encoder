@@ -1,0 +1,3 @@
+- Cada módem 4G/5G tiene su propia página, en la pantalla táctil (Ajustes › Emisión › Conexiones, botón «›») y en la tarjeta Conexiones de la web: la señal en detalle, la SIM y la red, y sus ajustes: nombre, APN (automático o a mano), itinerancia de datos (apagada de serie), tipo de red y reinicio. Si la SIM pide el PIN, se desbloquea desde ahí, o se desbloquea y se le quita el PIN para que no lo vuelva a pedir.
+- Si dos módems iguales chocan porque usan la misma red, «Separar las redes» hace que funcionen los dos.
+- Por ahora sirve para los módems USB que se presentan como una tarjeta de red (por ejemplo, los Huawei HiLink). Es una primera versión: se irá afinando con más modelos.

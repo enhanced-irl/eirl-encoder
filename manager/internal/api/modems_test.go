@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,5 +92,111 @@ func TestModemsWithoutTheService(t *testing.T) {
 	}
 	if e.srv.StreamingSRTLA() {
 		t.Error("nothing running is not streaming")
+	}
+}
+
+type ctlModems struct {
+	stubModems
+	applied []modem.Config
+	pins    []string
+	resets  int
+	pinErr  error
+}
+
+func (c *ctlModems) Apply(_ context.Context, _ modem.Modem, cfg modem.Config) error {
+	c.applied = append(c.applied, cfg)
+	return nil
+}
+func (c *ctlModems) Unlock(_ context.Context, _ modem.Modem, _ modem.Config, pin string, _ bool) error {
+	c.pins = append(c.pins, pin)
+	return c.pinErr
+}
+func (c *ctlModems) Reset(context.Context, modem.Modem) error { c.resets++; return nil }
+
+func TestModemOrders(t *testing.T) {
+	e := setup(t, true)
+	var logBuf strings.Builder
+	e.srv.Log = slog.New(slog.NewTextHandler(&logBuf, nil))
+	e.srv.Uplinks = &uplinks.Reader{Available: filepath.Join(e.dir, "available"), InUse: filepath.Join(e.dir, "inuse"),
+		Disabled: filepath.Join(e.dir, "uplinks-disabled"), SysNet: filepath.Join(e.dir, "net")}
+	os.WriteFile(e.srv.Uplinks.Available, []byte("wwan0 10.64.12.7\n"), 0o644)
+	os.WriteFile(e.srv.Uplinks.InUse, []byte("wwan0 10.64.12.7\n"), 0o644)
+	os.WriteFile(e.srv.RunStatePath, []byte("OUTPUT=on\nSOURCE=hdmi\nCONF_SHA=x\nTRANSPORT=srtla\n"), 0o644)
+	b := &ctlModems{stubModems: stubModems{list: []modem.Modem{{ID: "m-0c7e44a19f02", Backend: "mm", Iface: "wwan0", State: "connected",
+		SIM: "ready", Operator: "Vodafone", Mode: "auto", Modes: []string{"auto", "4g"}, Can: []string{"apn", "roaming", "mode", "pin", "reset"}}}}}
+	mgr := &modem.Manager{Backends: []modem.Backend{b}, Store: &modem.Store{Path: filepath.Join(e.dir, "modems.json"),
+		Write: func(p string, d []byte, m os.FileMode) error { return os.WriteFile(p, d, m) }}}
+	mgr.Refresh(context.Background())
+	e.srv.Links = &links.Service{Uplinks: e.srv.Uplinks, Modems: mgr, Streaming: e.srv.StreamingSRTLA}
+	e.srv.Links.Refresh(context.Background())
+	tok := e.login(t)
+	origin := []string{"Origin", "http://example.com", "Host", "example.com"}
+	put := func(body string) *httptest.ResponseRecorder {
+		return e.do("PUT", "/api/v1/modems/m-0c7e44a19f02", body, tok, origin...)
+	}
+	// An alias does not reconnect: allowed while it is the only link on air
+	if w := put(`{"alias":"Voda"}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"alias":"Voda"`) {
+		t.Fatalf("alias: %d %s", w.Code, w.Body)
+	}
+	// An APN would reconnect the only link carrying the stream: 409, then with force
+	if w := put(`{"apn":"ac.vodafone.es"}`); w.Code != 409 || !strings.Contains(w.Body.String(), "last_link") {
+		t.Fatalf("last link: %d %s", w.Code, w.Body)
+	}
+	if w := put(`{"apn":"ac.vodafone.es","mode":"4g","force":true}`); w.Code != 200 || len(b.applied) != 1 || b.applied[0].APN != "ac.vodafone.es" {
+		t.Fatalf("force: %d %s %+v", w.Code, w.Body, b.applied)
+	}
+	for body, field := range map[string]string{`{"alias":"Un nombre demasiado largo"}`: "alias", `{"apn":"bad apn"}`: "apn",
+		`{"mode":"6g"}`: "mode"} {
+		if w := put(body); w.Code != 400 || !strings.Contains(w.Body.String(), `"`+field+`"`) {
+			t.Errorf("%s: %d %s", body, w.Code, w.Body)
+		}
+	}
+	if w := put(`{}`); w.Code != 400 {
+		t.Errorf("empty: %d", w.Code)
+	}
+	if w := e.do("PUT", "/api/v1/modems/m-000000000000", `{"alias":"x"}`, tok, origin...); w.Code != 404 {
+		t.Errorf("unknown: %d", w.Code)
+	}
+	// The PIN: never in the log; a wrong one is 400 pin_wrong
+	if w := e.do("POST", "/api/v1/modems/m-0c7e44a19f02/pin", `{"pin":"4711"}`, tok, origin...); w.Code != 204 || len(b.pins) != 1 {
+		t.Fatalf("pin: %d %s", w.Code, w.Body)
+	}
+	b.pinErr = modem.ErrWrongPIN
+	if w := e.do("POST", "/api/v1/modems/m-0c7e44a19f02/pin", `{"pin":"0815"}`, tok, origin...); w.Code != 400 || !strings.Contains(w.Body.String(), "pin_wrong") {
+		t.Fatalf("wrong pin: %d %s", w.Code, w.Body)
+	}
+	if w := e.do("POST", "/api/v1/modems/m-0c7e44a19f02/pin", `{"pin":"12"}`, tok, origin...); w.Code != 400 {
+		t.Errorf("short pin: %d", w.Code)
+	}
+	b.pinErr = modem.ErrNotLocked
+	if w := e.do("POST", "/api/v1/modems/m-0c7e44a19f02/pin", `{"pin":"0815"}`, tok, origin...); w.Code != 409 || !strings.Contains(w.Body.String(), "pin_not_needed") {
+		t.Fatalf("not locked: %d %s", w.Code, w.Body)
+	}
+	b.pinErr = nil
+	if strings.Contains(logBuf.String(), "4711") || strings.Contains(logBuf.String(), "0815") {
+		t.Fatalf("a PIN in the log: %s", logBuf.String())
+	}
+	// Reset: the only link on air needs force; subnet: not on a ModemManager modem
+	if w := e.do("POST", "/api/v1/modems/m-0c7e44a19f02/reset", ``, tok, origin...); w.Code != 409 {
+		t.Errorf("reset last link: %d %s", w.Code, w.Body)
+	}
+	if w := e.do("POST", "/api/v1/modems/m-0c7e44a19f02/reset", `{"force":true}`, tok, origin...); w.Code != 202 || b.resets != 1 {
+		t.Errorf("reset: %d %s", w.Code, w.Body)
+	}
+	if w := e.do("POST", "/api/v1/modems/m-0c7e44a19f02/subnet", ``, tok, origin...); w.Code != 409 || !strings.Contains(w.Body.String(), "not_supported") {
+		t.Errorf("subnet: %d %s", w.Code, w.Body)
+	}
+	if w := e.do("POST", "/api/v1/modems/m-0c7e44a19f02/explode", ``, tok, origin...); w.Code != 404 {
+		t.Errorf("unknown action: %d", w.Code)
+	}
+	// The screen's socket reaches them
+	for _, route := range []string{"GET /api/v1/modems", "PUT /api/v1/modems/{id}", "POST /api/v1/modems/{id}/{action}"} {
+		found := false
+		for _, r := range localRoutes {
+			found = found || r == route
+		}
+		if !found {
+			t.Errorf("not on the socket: %s", route)
+		}
 	}
 }

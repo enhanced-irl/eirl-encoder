@@ -324,7 +324,7 @@ func (d *DeviceState) loop() {
 				upd = time.Time{}
 			case "slots":
 				slots = time.Time{}
-			case "dest_save", "restart", "input_save", "uplink":
+			case "dest_save", "restart", "input_save", "uplink", "modem_save", "modem_pin", "modem_reset", "modem_subnet":
 				dest, status = time.Time{}, time.Time{}
 			case "cloud_unlink":
 				cloud = time.Time{}

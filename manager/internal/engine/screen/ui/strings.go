@@ -241,6 +241,7 @@ type Strings struct {
 	CmdErrors map[string]string
 	// Each area's own (one file each: strings_<area>.go, with its three tables)
 	Stream  StreamStrings  // Stream: Destination, Uplinks, Pause
+	Modem   ModemStrings   // a modem's page (Streaming › Connections, MODEMS.md §7)
 	Input   InputStrings   // Sources: the Input tab and the slots' Hide
 	NetX    NetStrings     // Wi-Fi (channel, new password) and Network cameras (switches, add, a camera's page)
 	Cloud   CloudStrings   // EnhancedIRL

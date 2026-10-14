@@ -349,6 +349,11 @@ func drawIcon(c *Canvas, p *Path, kind string, cx, cy, r, lw float64, col Color)
 		p.LineTo(cx-0.75*r, cy)
 		p.LineTo(cx-0.2*r, cy+0.55*r)
 		stroke()
+	case "next": // ›
+		p.MoveTo(cx-0.3*r, cy-0.6*r)
+		p.LineTo(cx+0.35*r, cy)
+		p.LineTo(cx-0.3*r, cy+0.6*r)
+		stroke()
 	case "close":
 		for _, a := range []float64{-1, 1} {
 			p.MoveTo(cx-0.55*r, cy+a*0.55*r)

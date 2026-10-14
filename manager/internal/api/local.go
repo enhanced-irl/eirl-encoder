@@ -55,6 +55,10 @@ var localRoutes = []string{
 	"POST /api/v1/cameras", "PATCH /api/v1/cameras/{id}", "DELETE /api/v1/cameras/{id}",
 	// The admin password, with the current one (no session to keep: every web session is closed)
 	"PUT /api/v1/password",
+	// Cellular modems (MODEMS.md §7): the list (only the last digits of IMEI and ICCID), their configuration, the SIM's
+	// PIN (typed on the screen, straight to the modem or NetworkManager; never in a GET or a log), a reset and a HiLink's
+	// subnet
+	"GET /api/v1/modems", "PUT /api/v1/modems/{id}", "POST /api/v1/modems/{id}/{action}",
 }
 
 // LocalHandler: the handler of the local socket. Handler must have been called (it builds the route table).

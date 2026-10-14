@@ -213,7 +213,24 @@ func main() {
 			}
 			return out
 		},
-		Log: func(msg string, args ...any) { log.Warn(msg, args...) }}
+		Log: func(msg string, args ...any) { log.Warn(msg, args...) },
+		// A modem carrying the stream: its profile is not rewritten in the background (that reconnects it)
+		Hold: func(id string) bool {
+			if srv.Links == nil {
+				return false
+			}
+			snap := srv.Links.Current()
+			for _, u := range snap.Uplinks {
+				if snap.Streaming && u.InUse && u.ModemID == id {
+					return true
+				}
+			}
+			return false
+		},
+		// The users' configuration of each modem (MODEMS.md §7): alias, APN, roaming, mode. Never the PIN
+		Store: &modem.Store{Path: filepath.Join(*confDir, "modems.json"),
+			Read:  func(p string) ([]byte, error) { return safefile.ReadOwned(p, 64<<10) },
+			Write: config.WriteAtomic}}
 	srv.Links = &links.Service{Uplinks: srv.Uplinks, Modems: mods, Streaming: srv.StreamingSRTLA,
 		Path: linksFile, Write: config.WriteAtomic,
 		WiFi: func(ctx context.Context) (string, *int) {

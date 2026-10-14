@@ -42,18 +42,25 @@ type mmBus interface {
 // MM: the ModemManager backend.
 type MM struct {
 	bus mmBus
+	nm  nmBus // NetworkManager: the modems' gsm profiles
+	// Providers: the APN database ("" = ProvidersFile)
+	Providers string
 
 	mu      sync.Mutex
 	setupAt map[dbus.ObjectPath]time.Time // when Signal.Setup was last asked for that modem object
+	home    map[string]simHome            // by modem id: the SIM's last reading (a failed one keeps it)
 	now     func() time.Time
 }
+
+// simHome: what the SIM said last: its ICCID, home operator code and name.
+type simHome struct{ id, code, name string }
 
 // setupRetry: how often Signal.Setup is asked again while the readings stay off (Rate 0): a refusal (no polkit)
 // or a timeout does not leave a modem without them for good, and a restarted ModemManager reuses /Modem/0.
 const setupRetry = time.Minute
 
 // NewMM: the backend on the real system bus.
-func NewMM() *MM { return &MM{bus: &systemBus{}} }
+func NewMM() *MM { return &MM{bus: &systemBus{}, nm: &nmSystem{}} }
 
 func (b *MM) Name() string { return "mm" }
 
@@ -92,7 +99,8 @@ func (b *MM) List(ctx context.Context, _ []Link) ([]Modem, error) {
 }
 
 func (b *MM) modem(ctx context.Context, path dbus.ObjectPath, p map[string]dbus.Variant, ifaces map[string]map[string]dbus.Variant) Modem {
-	md := Modem{Backend: "mm", Manufacturer: str(p, "Manufacturer"), Model: str(p, "Model")}
+	md := Modem{Backend: "mm", Manufacturer: str(p, "Manufacturer"), Model: str(p, "Model"), path: string(path),
+		devID: str(p, "DeviceIdentifier"), Can: []string{"apn", "roaming", "pin", "reset"}}
 	state := i32(p, "State")
 	md.State = mmState(state)
 	imei := str(p, "EquipmentIdentifier")
@@ -113,17 +121,45 @@ func (b *MM) modem(ctx context.Context, path dbus.ObjectPath, p map[string]dbus.
 	}
 	md.Registration = mmRegistration(g3)
 	md.Operator = str(g3, "OperatorName")
+	md.netCode = str(g3, "OperatorCode")
+	md.combos = mmCombos(p["SupportedModes"])
+	md.Mode, md.Modes = mmModeNow(p["CurrentModes"], md.combos)
+	if len(md.Modes) > 1 {
+		md.Can = append(md.Can, "mode")
+	}
 
 	// SIM: the lock first (PIN/PUK), then whether there is a SIM at all
 	simPath, _ := p["Sim"].Value().(dbus.ObjectPath)
 	md.SIM = mmSIM(state, u32(p, "StateFailedReason"), u32(p, "UnlockRequired"), simPath)
 	if simPath != "" && simPath != "/" {
+		md.simPath = string(simPath)
 		if sp, err := b.bus.props(ctx, simPath, mmSim); err == nil {
-			md.ICCIDTail = tail(str(sp, "SimIdentifier"))
+			h := simHome{id: str(sp, "SimIdentifier"), code: str(sp, "OperatorIdentifier"), name: str(sp, "OperatorName")}
+			b.mu.Lock()
+			if b.home == nil {
+				b.home = map[string]simHome{}
+			}
+			b.home[md.ID] = h
+			b.mu.Unlock()
+		}
+		// A failed reading keeps the last one: the automatic APN (and so the profile) does not flap with it
+		b.mu.Lock()
+		h, known := b.home[md.ID]
+		b.mu.Unlock()
+		if known {
+			md.ICCIDTail, md.simID, md.simName = tail(h.id), h.id, h.name
 			if md.Operator == "" {
-				md.Operator = str(sp, "OperatorName")
+				md.Operator = h.name
+			}
+			// The SIM's home operator (from its IMSI) gives the APN: roaming, the network's code is the visited one
+			if h.code != "" {
+				md.netCode = h.code
 			}
 		}
+	} else {
+		b.mu.Lock()
+		delete(b.home, md.ID) // no SIM: a new one is read afresh
+		b.mu.Unlock()
 	}
 	// The bearer gives the interface once connected (some modems have no NET port before)
 	if bearers, ok := p["Bearers"].Value().([]dbus.ObjectPath); ok {

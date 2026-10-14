@@ -11,6 +11,7 @@ type LinkDot struct {
 	Label    string // the modem's operator or its alias ("" = named by its kind)
 	Tech     string // 2g | 3g | 4g | 5g-nsa | 5g (modems)
 	Health   string // good | weak | bad | off
+	Code     string // why (MODEMS.md §5): Stream.UplinkHealth translates it
 	Disabled bool
 }
 
