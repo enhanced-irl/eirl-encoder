@@ -1,0 +1,74 @@
+--- btrtl.c
++++ btrtl.c
+@@ -88,6 +88,7 @@
+ 		{ RTL_ROM_LMP_8821A, 2 },
+ 		{ RTL_ROM_LMP_8761A, 3 },
+ 		{ RTL_ROM_LMP_8822B, 8 },
++		{ RTL_ROM_LMP_8761A, 14 },	/* 8761B (eirl-encoder: from upstream v5.10) */
+ 	};
+ 
+ 	ret = rtl_read_rom_version(hdev, &rom_version);
+@@ -322,7 +323,7 @@
+ }
+ 
+ static int btrtl_setup_rtl8723b(struct hci_dev *hdev, u16 lmp_subver,
+-				const char *fw_name)
++				const char *fw_name, const char *cfg_override)
+ {
+ 	unsigned char *fw_data = NULL;
+ 	const struct firmware *fw;
+@@ -351,6 +352,8 @@
+ 		break;
+ 	}
+ 
++	if (cfg_override)
++		cfg_name = (char *)cfg_override;
+ 	if (cfg_name) {
+ 		cfg_sz = rtl_load_config(hdev, cfg_name, &cfg_buff);
+ 		if (cfg_sz < 0)
+@@ -424,7 +427,7 @@
+ {
+ 	struct sk_buff *skb;
+ 	struct hci_rp_read_local_version *resp;
+-	u16 lmp_subver;
++	u16 lmp_subver, hci_rev;
+ 
+ 	skb = btrtl_read_local_version(hdev);
+ 	if (IS_ERR(skb))
+@@ -436,6 +439,7 @@
+ 		resp->lmp_ver, resp->lmp_subver);
+ 
+ 	lmp_subver = le16_to_cpu(resp->lmp_subver);
++	hci_rev = le16_to_cpu(resp->hci_rev);
+ 	kfree_skb(skb);
+ 
+ 	/* Match a set of subver values that correspond to stock firmware,
+@@ -450,16 +454,24 @@
+ 		return btrtl_setup_rtl8723a(hdev);
+ 	case RTL_ROM_LMP_8723B:
+ 		return btrtl_setup_rtl8723b(hdev, lmp_subver,
+-					    "rtl_bt/rtl8723b_fw.bin");
++					    "rtl_bt/rtl8723b_fw.bin", NULL);
+ 	case RTL_ROM_LMP_8821A:
+ 		return btrtl_setup_rtl8723b(hdev, lmp_subver,
+-					    "rtl_bt/rtl8821a_fw.bin");
++					    "rtl_bt/rtl8821a_fw.bin", NULL);
+ 	case RTL_ROM_LMP_8761A:
++		/* The 8761B shares the 8761A's subver: told apart by hci_rev
++		 * (eirl-encoder: from upstream v5.10; its USB firmware is
++		 * rtl8761bu, and its config is optional)
++		 */
++		if (hci_rev == 0x000b)
++			return btrtl_setup_rtl8723b(hdev, lmp_subver,
++						    "rtl_bt/rtl8761bu_fw.bin",
++						    "rtl_bt/rtl8761bu_config.bin");
+ 		return btrtl_setup_rtl8723b(hdev, lmp_subver,
+-					    "rtl_bt/rtl8761a_fw.bin");
++					    "rtl_bt/rtl8761a_fw.bin", NULL);
+ 	case RTL_ROM_LMP_8822B:
+ 		return btrtl_setup_rtl8723b(hdev, lmp_subver,
+-					    "rtl_bt/rtl8822b_fw.bin");
++					    "rtl_bt/rtl8822b_fw.bin", NULL);
+ 	default:
+ 		BT_INFO("rtl: assuming no firmware upload needed.");
+ 		return 0;

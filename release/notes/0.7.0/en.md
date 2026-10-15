@@ -1,0 +1,3 @@
+- Bluetooth: if the encoder has a Bluetooth adapter (for example a USB one such as the TP-Link UB500), in Settings › Wireless › Bluetooth on the touch screen or on the web page you can connect headphones or a speaker to listen to the program (the monitor moves to them by itself and comes back to the screen when they disconnect), and use a headset's microphone (phone quality) or a phone as one more audio input.
+- It comes switched off, and a phone can only find the encoder during the 2 minutes you make it visible.
+- This is a first version: if something does not work, let us know.

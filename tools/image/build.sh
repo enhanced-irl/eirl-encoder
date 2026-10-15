@@ -67,7 +67,8 @@ echo "== image $NAME ($MODE) with release $VERSION"
 # --- 2. Our kernel bits (build/build.sh: the patched tc358743 module and the B01 DTB with the TC358743)
 DTB=tegra210-p3448-0000-p3449-0000-b00-tc358743.dtb
 KOUT="$ROOT/build/out"
-if [ ! -f "$KOUT/tc358743.ko" ] || [ ! -f "$KOUT/$DTB" ] || ! ls "$KOUT"/modules/*.ko >/dev/null 2>&1; then
+if [ ! -f "$KOUT/tc358743.ko" ] || [ ! -f "$KOUT/$DTB" ] || ! ls "$KOUT"/modules/*.ko >/dev/null 2>&1 ||
+   ! ls "$KOUT"/modules-bt/*.ko >/dev/null 2>&1 || [ ! -f "$KOUT/firmware/rtl_bt/rtl8761bu_fw.bin" ]; then
   "$ROOT/build/build.sh"
 fi
 

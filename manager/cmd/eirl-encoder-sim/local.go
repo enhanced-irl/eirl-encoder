@@ -14,6 +14,7 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/api"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/audiolevel"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/auth"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/bluetooth"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/cloud"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/config"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/device"
@@ -130,6 +131,13 @@ func runLocal(ctx context.Context, o localOpts, log *slog.Logger) error {
 	if _, err := srv.Network.EnsureNetwork(); err != nil {
 		log.Warn("access point: could not write its name and password", "err", err)
 	}
+	// Bluetooth audio (BLUETOOTH.md) over a fake BlueZ: devices around to search, pair (one refuses, one is off) and
+	// use; the engine's file in the data folder
+	bt := bluetooth.NewSim(bluetooth.Options{ConfigPath: filepath.Join(o.dataDir, "bluetooth.json"),
+		EnginePath: filepath.Join(o.dataDir, "bluetooth-engine.json"), Name: func() string { return st.Get().Name },
+		Log: log.With("component", "bluetooth"), Write: config.WriteAtomic})
+	srv.Bluetooth = bt
+	go bt.Run(ctx)
 	// The run state the API reads: the mixer is on (live output, slots). TRANSPORT carries the protocol; the engine
 	// rewrites it on output_config (OUTPUTS.md §8), here at each reading of the output configuration
 	writeRunState := func(protocol string) {

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/btaudio"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/config"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/sources"
 )
@@ -65,6 +66,8 @@ func probe(args []string) int {
 	sc := sources.New()
 	cat := sc.Scan()
 	if *list {
+		// The Bluetooth inputs ready now (the app's file): the engine opens them like a loose USB microphone
+		cat.Audio = append(cat.Audio, sources.BluetoothAudio(btaudio.Read(btaudio.Path))...)
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		enc.Encode(cat)

@@ -532,6 +532,47 @@ func drawIcon(c *Canvas, p *Path, kind string, cx, cy, r, lw float64, col Color)
 		p.LineTo(bx+bw+0.12*r, cy+0.12*r)
 		p.ClosePath()
 		stroke()
+	case "bluetooth": // the rune: a stem with two loops to the right, crossed by two strokes from the left
+		p.MoveTo(cx-0.5*r, cy-0.45*r)
+		p.LineTo(cx+0.45*r, cy+0.42*r)
+		p.LineTo(cx, cy+0.9*r)
+		p.LineTo(cx, cy-0.9*r)
+		p.LineTo(cx+0.45*r, cy-0.42*r)
+		p.LineTo(cx-0.5*r, cy+0.45*r)
+		stroke()
+	case "headphones", "headset": // a band over two cups; the headset, with its microphone's boom
+		p.NewSubPath()
+		p.Arc(cx, cy+0.1*r, 0.8*r, math.Pi, 2*math.Pi)
+		stroke()
+		roundRect(cx-0.95*r, cy+0.05*r, 0.42*r, 0.75*r, 0.12*r)
+		roundRect(cx+0.53*r, cy+0.05*r, 0.42*r, 0.75*r, 0.12*r)
+		stroke()
+		if kind == "headset" { // inside the icon's square: everything within r of its centre
+			p.MoveTo(cx-0.74*r, cy+0.8*r)
+			p.LineTo(cx-0.5*r, cy+0.95*r)
+			p.LineTo(cx-0.12*r, cy+0.95*r)
+			stroke()
+			c.FillCircle(cx-0.08*r, cy+0.95*r, max(lw*0.8, 0.1*r), col)
+		}
+	case "speaker": // a speaker's box with its cone
+		roundRect(cx-0.7*r, cy-0.95*r, 1.4*r, 1.9*r, 0.18*r)
+		stroke()
+		p.NewSubPath()
+		p.Arc(cx, cy+0.25*r, 0.42*r, 0, 2*math.Pi)
+		stroke()
+		c.FillCircle(cx, cy-0.5*r, max(lw*0.7, 0.1*r), col)
+	case "phone": // a phone, upright, with its speaker's slot
+		roundRect(cx-0.55*r, cy-0.95*r, 1.1*r, 1.9*r, 0.2*r)
+		stroke()
+		p.MoveTo(cx-0.15*r, cy+0.68*r)
+		p.LineTo(cx+0.15*r, cy+0.68*r)
+		stroke()
+	case "computer": // a laptop: its screen and its base
+		roundRect(cx-0.7*r, cy-0.75*r, 1.4*r, 1.0*r, 0.1*r)
+		stroke()
+		p.MoveTo(cx-0.98*r, cy+0.55*r)
+		p.LineTo(cx+0.98*r, cy+0.55*r)
+		stroke()
 	}
 	p.NewPath()
 }

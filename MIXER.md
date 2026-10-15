@@ -380,6 +380,17 @@ Since §15: `mode` (`single` · `mix`) and, on each input, `inMix` and `gainDb`.
 support audio: `detail` says which) · `on` · `error` (retrying; `detail` = the reason). It is saved with the scene
 (`audioSettings.phones`).
 
+**Bluetooth audio ([`BLUETOOTH.md`](BLUETOOTH.md) §3.4)**, additive:
+- `audio.phones` gains `target` (`screen` · `bluetooth`: where the monitor plays, or would play while off) and, with
+  `bluetooth`, `device` (the headphones' name). With Bluetooth headphones ready (the app's file
+  `/run/eirl-encoder/bluetooth.json`), the monitor plays through them; when they go, through the screen's jack again.
+  Same `phones` command, same switch and volume.
+- `audio.sources[].kind` gains `bluetooth`: a headset's microphone (hands-free) or a phone (A2DP), with id
+  `bt:<address without colons>` (`bt:38184C12A001`), valid wherever an audio id is (`audio`, `audio_link`, `audio_delay`,
+  `audio_mix`). It takes an audio slot like a loose USB microphone. Its `no_signal` is `bt_no_audio` (connected, sending
+  nothing: a phone that is not playing), and it is not reopened; disconnected, `gone`, and its slot is freed after the
+  same grace as an unplugged card.
+
 Camera image settings ([`SOURCES.md`](SOURCES.md) §7.3): a USB source whose camera has some of the standard
 controls carries `controls` (`id`, `group`, `type` `int` · `bool` · `menu`, `min`, `max`, `step`, `default`, `value`,
 `inactive`, `options`); without any, the key is absent.
@@ -1126,7 +1137,7 @@ title row (`SettingsGroups`, settings_layout.go; a list entry is `s_page_<group>
 |---|---|
 | Stream | Destination (`dest`) · Uplinks (`uplinks`) · Pause (`pause`) |
 | Sources | Slots (`sources`) · Input (`input`) · Image (`camera`) |
-| Wi-Fi | — (`wifi`) |
+| Wireless (since Oct 15; Wi-Fi before) | Wi-Fi (`wifi`) · Bluetooth (`bluetooth`, [`BLUETOOTH.md`](BLUETOOTH.md) §3.6). The group's id stays `wifi` |
 | Network cameras | — (`cams`) |
 | EnhancedIRL | — (`cloud`) |
 | Device | Language (`language`) · Date & time (`time`) · Name & password (`account`) |
@@ -1154,7 +1165,9 @@ group's entry and on the tab. The wizard keeps using the pages by id, without ta
   2 s, 2 s and 10 s), and runs this section's actions through the same queue as the device's
   (`ui.AppActions`: `dest_save`, `dest_reveal`, `restart`, `uplink`, `input_save`, `sources_scan`, `cloud_unlink`,
   `password`, `cam_add|rename|rotate|remove`, `cam_creds`, `ap_enabled|channel|rotate`, `lan_enabled`,
-  `modem_save|pin|reset|subnet`;
+  `modem_save|pin|reset|subnet`, and since Oct 15 Bluetooth's `bt_power`, `bt_scan`, `bt_visible`, `bt_device` (the order
+  in the action's `Value`: `POST /bluetooth/devices/{address}/{action}`) and `bt_use`, with `AppWatch.Bluetooth`
+  (`GET /bluetooth` every 2 s, 1 s while searching, visible or with an order running);
   appapi/parity.go), each with its route's `{id}`, its JSON body and its **secret fields**, which `Do` copies, the
   body is built from without turning them into a string, and are wiped once sent. The app's side (the socket's
   whitelist and its two local-only routes): SETUP.md §8, MANAGER.md §3.
@@ -1232,6 +1245,8 @@ group's entry and on the tab. The wizard keeps using the pages by id, without ta
 - The screen's previews: `eirl-ui-render settings-dest|dest-reveal|dest-edited|dest-managed|dest-pending|dest-error,
   settings-uplinks|uplinks-single|uplinks-none|uplinks-health, settings-pause, settings-input…, settings-sources-hidden,
   settings-camera|camera-exposure|camera-framing|camera-reset|camera-two|camera-empty,
+  settings-bluetooth|bluetooth-unavailable|bluetooth-nostack|bluetooth-noaudio|bluetooth-off|bluetooth-scanning|
+  bluetooth-visible|bluetooth-busy|bluetooth-many|bluetooth-page2|bluetooth-device|bluetooth-forget, audio+phbt, audio+btin,
   settings-cloud|cloud-pairing|cloud-linked|cloud-unlink, settings-account|account-kb, audioset, audiosetpick` and the
   Wi-Fi and cameras ones (its file's header lists them all).
 

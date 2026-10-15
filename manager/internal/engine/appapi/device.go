@@ -183,7 +183,7 @@ func (d *DeviceState) Watch(w ui.AppWatch) {
 	}
 	if (w.Device && !old.Device) || (w.Setup && !old.Setup) || (w.Update && !old.Update) || (w.Slots && !old.Slots) ||
 		(w.Zones && !old.Zones) || (w.Cloud && !old.Cloud) || (w.About && !old.About) || (w.Dest && !old.Dest) ||
-		(w.Status && !old.Status) || (w.Sources && !old.Sources) {
+		(w.Status && !old.Status) || (w.Sources && !old.Sources) || (w.Bluetooth && !old.Bluetooth) {
 		d.kick = true
 	}
 	d.mu.Unlock()
@@ -307,14 +307,14 @@ func (d *DeviceState) take() (q *queued, kick bool, w ui.AppWatch, snap ui.AppSn
 }
 
 func (d *DeviceState) loop() {
-	var dev, setup, upd, slots, zones, cloud, about, dest, status, srcs time.Time
+	var dev, setup, upd, slots, zones, cloud, about, dest, status, srcs, bt time.Time
 	timer := time.NewTimer(time.Hour)
 	defer timer.Stop()
 	for d.ctx.Err() == nil {
 		q, kick, w, snap := d.take()
 		if kick {
 			dev, setup, upd, slots, cloud, about = time.Time{}, time.Time{}, time.Time{}, time.Time{}, time.Time{}, time.Time{}
-			dest, status, srcs = time.Time{}, time.Time{}, time.Time{}
+			dest, status, srcs, bt = time.Time{}, time.Time{}, time.Time{}, time.Time{}
 			if snap.Zones == nil {
 				zones = time.Time{}
 			}
@@ -334,6 +334,8 @@ func (d *DeviceState) loop() {
 				dest, status = time.Time{}, time.Time{}
 			case "cloud_unlink":
 				cloud = time.Time{}
+			case "bt_power", "bt_scan", "bt_visible", "bt_device", "bt_use":
+				bt = time.Time{}
 			}
 			d.changed()
 			continue
@@ -371,6 +373,8 @@ func (d *DeviceState) loop() {
 		due(&dest, every(snap.DestAPI, false, DestEvery, DestEvery), w.Dest, d.pollDest)
 		due(&status, every(snap.StatusAPI, false, StatusEvery, StatusEvery), w.Status, d.pollStatus)
 		due(&srcs, every(snap.SourcesAPI, false, SourcesEvery, SourcesEvery), w.Sources, d.pollSources)
+		due(&bt, every(snap.BluetoothAPI, btFast(snap.Bluetooth), BluetoothEvery, BluetoothFast), w.Bluetooth,
+			d.pollBluetooth)
 		if news {
 			d.changed()
 		}

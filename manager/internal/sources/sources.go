@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/btaudio"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/netcfg"
 )
 
@@ -94,10 +95,22 @@ type USBInfo struct {
 
 // AudioInput: an audio input the stream can use. ID is the AUDIO_SOURCE value.
 type AudioInput struct {
-	ID   string `json:"id"`   // i2s | alsa:<card id> | net:camN
-	Kind string `json:"kind"` // i2s | usb | network
+	ID   string `json:"id"`   // i2s | alsa:<card id> | net:camN | bt:<address without colons>
+	Kind string `json:"kind"` // i2s | usb | network | bluetooth
 	Name string `json:"name"`
 	Card string `json:"card,omitempty"` // ALSA id (hw:CARD=<card>)
+	// Profile: a Bluetooth input's (a2dp | sco), for the engine to open it (BLUETOOTH.md §3.3)
+	Profile string `json:"profile,omitempty"`
+}
+
+// BluetoothAudio: the Bluetooth devices ready as audio inputs (the app's file, BLUETOOTH.md §3.3). Only in
+// `probe -list`, for the engine: they are not a start audio, so GET /sources does not list them.
+func BluetoothAudio(f btaudio.File) []AudioInput {
+	out := []AudioInput{}
+	for _, d := range f.In {
+		out = append(out, AudioInput{ID: btaudio.ID(d.Addr), Kind: "bluetooth", Name: d.Name, Profile: d.Profile})
+	}
+	return out
 }
 
 // Source: a video source. ID is what is stored in VIDEO_DEVICE: a /dev/v4l path that does not change

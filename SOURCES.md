@@ -401,6 +401,8 @@ a slot took an audio slot. Now (`Engine.syncAudio`, after every change of the ca
   open input, and that is how the user goes back to it.
 - The board's HDMI audio (I2S) and a **USB sound card that belongs to no camera** (a microphone, an interface) are
   always opened.
+- A **Bluetooth** headset's microphone or phone (BLUETOOTH.md §3.3) counts as a loose card: always opened while the app
+  lists it as ready, last in the order.
 - They take the audio slots in the order of their video slots (the I2S in the HDMI's place), the loose cards last.
   With four audio slots, the HDMI and three cameras with sound fill them: a loose microphone only gets a slot if
   one is left, and one that had a slot gives it up to the sound of a camera that gets a video slot

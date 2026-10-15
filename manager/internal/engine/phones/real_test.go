@@ -67,7 +67,7 @@ func TestRealPlaysThroughTheTap(t *testing.T) {
 	m := &recMedia{Real: g}
 	p := realPhones(t, m, pgm)
 	p.sink = "fakesink name=phsink sync=true"
-	p.find = func() (Device, bool) { return Device{"hw:99,0", 99}, true }
+	p.find = func() (Device, bool) { return Device{Name: "hw:99,0", Card: 99}, true }
 	p.Start()
 	for i := 0; i < 300 && p.Info().State != StateOn; i++ {
 		time.Sleep(10 * ms)
@@ -106,7 +106,7 @@ func TestRealAlsaFailsToOpen(t *testing.T) {
 	logs := quiet(t)
 	pgm := realProgram(t, g)
 	p := realPhones(t, g, pgm)
-	p.find = func() (Device, bool) { return Device{"hw:99,0", 99}, true }
+	p.find = func() (Device, bool) { return Device{Name: "hw:99,0", Card: 99}, true }
 	p.retry = []time.Duration{time.Hour}
 	p.Start()
 	for i := 0; i < 300 && p.Info().State != StateError; i++ {

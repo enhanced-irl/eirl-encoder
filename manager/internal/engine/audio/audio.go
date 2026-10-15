@@ -45,9 +45,10 @@ const (
 
 // Input kinds.
 const (
-	KindI2S     = "i2s"
-	KindUSB     = "usb"
-	KindNetwork = "network"
+	KindI2S       = "i2s"
+	KindUSB       = "usb"
+	KindNetwork   = "network"
+	KindBluetooth = "bluetooth" // a headset's microphone or a phone, through BlueALSA (BLUETOOTH.md §3.3)
 )
 
 // Input states (the state contract).
@@ -67,8 +68,9 @@ const (
 
 // Names and details of the state contract: Spanish, exactly as in the Python engine.
 const (
-	nameI2S     = "HDMI de la placa"
-	nameDefault = "Audio"
+	nameI2S       = "HDMI de la placa"
+	nameDefault   = "Audio"
+	nameBluetooth = "Bluetooth"
 )
 
 // stateText is how the log names each state (STATE_TEXT, in English).
@@ -76,8 +78,9 @@ var stateText = map[string]string{StateStarting: "opening", StateLive: "live", S
 	StateGone: "gone", StateError: "error"}
 
 var (
-	// reID is an audio id: none, the I2S, a USB card by name, or a network camera (F7).
-	reID   = regexp.MustCompile(`^(none|i2s|alsa:[A-Za-z0-9_-]{1,32}|net:cam[1-8])$`)
+	// reID is an audio id: none, the I2S, a USB card by name, a network camera (F7) or a Bluetooth device by its
+	// address without colons (BLUETOOTH.md §3.3).
+	reID   = regexp.MustCompile(`^(none|i2s|alsa:[A-Za-z0-9_-]{1,32}|net:cam[1-8]|bt:[0-9A-F]{12})$`)
 	rePeak = regexp.MustCompile(`peak=\(GValueArray\)< ?([^>]*?) ?>`)
 )
 
@@ -106,6 +109,12 @@ func Desc(kind, device, codec string) string {
 	case KindNetwork:
 		head = "rtspsrc name=cap location=" + device + " protocols=tcp latency=" + strconv.Itoa(RTSPLatencyMs) +
 			" drop-on-latency=true ! " + NetDecoders[codec] + " ! audioconvert ! audioresample ! " + Caps
+	case KindBluetooth:
+		// The BlueALSA plugin's device (bluealsa:DEV=…,PROFILE=…, built from a checked address and profile), quoted
+		// for its commas. Hands-free is mono at 8 kHz, A2DP 44.1 or 48 kHz; a bigger buffer than a card's: what
+		// arrives over the air comes in bursts
+		head = "alsasrc device=\"" + device + "\" provide-clock=false latency-time=40000 buffer-time=200000" +
+			" ! audioconvert ! audioresample ! " + Caps
 	default:
 		// audioconvert/audioresample: some microphones are mono or 44.1 kHz
 		head = "alsasrc device=" + device + " provide-clock=false latency-time=40000 ! audioconvert ! audioresample ! " + Caps

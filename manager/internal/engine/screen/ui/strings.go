@@ -249,6 +249,7 @@ type Strings struct {
 	AudioX  AudioStrings   // the audio view's settings: delay and each camera's audio
 	Camera  CameraStrings  // Sources: the Image tab (a USB camera's image settings)
 	Dests   DestStrings    // Stream: the saved destinations (OUTPUTS.md §11)
+	BT      BTStrings      // Wireless: the Bluetooth tab, and the headphones button's Bluetooth mark
 }
 
 // Languages are the screen's languages, in the order the Language page lists them.

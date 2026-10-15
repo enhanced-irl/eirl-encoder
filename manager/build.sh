@@ -63,6 +63,16 @@ if ! [ -x ../build/out/rist/ristsender ] || [ "$(head -1 ../build/out/rist/rist.
   ../build/rist.sh
 fi
 cp ../build/out/rist/ristsender dist/pkg/
+# Bluetooth audio (BLUETOOTH.md §3.7): BlueALSA's daemon and its ALSA plugins, built separately in build/out/bluealsa
+# (arm64 container, pinned release in build/bluealsa.sh); reused while build/out has the pinned one
+bluealsa_version=$(sed -n 's/^BLUEALSA_VERSION=\([^ ]*\).*/\1/p' ../build/bluealsa.sh)
+[ -n "$bluealsa_version" ] || { echo "build/bluealsa.sh without BLUEALSA_VERSION" >&2; exit 1; }
+if ! [ -x ../build/out/bluealsa/bluealsa ] || [ "$(head -1 ../build/out/bluealsa/bluealsa.version 2>/dev/null)" != "$bluealsa_version" ]; then
+  ../build/bluealsa.sh
+fi
+mkdir -p dist/pkg/bluealsa
+cp ../build/out/bluealsa/bluealsa ../build/out/bluealsa/libasound_module_pcm_bluealsa.so \
+  ../build/out/bluealsa/libasound_module_ctl_bluealsa.so ../build/out/bluealsa/20-bluealsa.conf dist/pkg/bluealsa/
 # Update helper (UPDATES.md §7)
 build dist/pkg/eirl-update ./cmd/eirl-update
 
@@ -70,7 +80,8 @@ build dist/pkg/eirl-update ./cmd/eirl-update
 # Go module linked into the binaries, MediaMTX (MIT), srtla_send (AGPL-3.0) and SRT (MPL-2.0), the last two
 # with where their source is
 doc=dist/pkg/doc
-mkdir -p "$doc/licenses/go" "$doc/licenses/mediamtx" "$doc/licenses/srtla" "$doc/licenses/srt" "$doc/licenses/rist"
+mkdir -p "$doc/licenses/go" "$doc/licenses/mediamtx" "$doc/licenses/srtla" "$doc/licenses/srt" "$doc/licenses/rist" \
+  "$doc/licenses/bluealsa"
 for f in LICENSE NOTICE; do [ -f "../$f" ] && cp "../$f" "$doc/$f"; done
 # The Go toolchain's licence (Homebrew keeps it next to GOROOT, not inside)
 goroot=$(go env GOROOT)
@@ -118,6 +129,22 @@ mbedtls (Apache-2.0, LICENSE.mbedtls), cJSON (MIT, LICENSE.cJSON) and LZ4 (BSD-2
 bundles. Source: https://code.videolan.org/rist/librist/-/tree/$rist_version
 It is built from that release without changes by build/rist.sh of eirl-encoder
 (https://github.com/enhanced-irl/eirl-encoder), which also gives the build options.
+SRC
+cp ../build/out/bluealsa/LICENSE ../build/out/bluealsa/LICENSE.sbc "$doc/licenses/bluealsa/"
+# libsbc is LGPL and linked statically: its source goes with the binary (the exact tarball the build verified)
+sbc_tarball="${CACHE:-$HOME/.cache/l4t-r32.7.6}/sbc-$(sed -n 's/^SBC_VERSION=\([^ ]*\).*/\1/p' ../build/bluealsa.sh).tar.xz"
+[ -f "$sbc_tarball" ] || { echo "no $sbc_tarball: run build/bluealsa.sh" >&2; exit 1; }
+cp "$sbc_tarball" "$doc/licenses/bluealsa/"
+sbc_version=$(sed -n 's/^SBC_VERSION=\([^ ]*\).*/\1/p' ../build/bluealsa.sh)
+cat > "$doc/licenses/bluealsa/SOURCE.txt" <<SRC
+bluealsa and its ALSA plugins (libasound_module_pcm_bluealsa.so, libasound_module_ctl_bluealsa.so) are BlueALSA
+(bluez-alsa) $bluealsa_version, MIT licence (LICENSE here). Source: https://github.com/arkq/bluez-alsa/tree/$bluealsa_version
+The daemon is statically linked with libsbc $sbc_version, GNU Lesser General Public License 2.1 or later
+(LICENSE.sbc here). Its source is next to this file (sbc-$sbc_version.tar.xz, as published at
+https://www.kernel.org/pub/linux/bluetooth/sbc-$sbc_version.tar.xz).
+Both are built from those releases without changes by build/bluealsa.sh of eirl-encoder
+(https://github.com/enhanced-irl/eirl-encoder), which also gives the build options: with it and those sources the
+daemon can be rebuilt, and relinked with another libsbc.
 SRC
 
 # What is installed (UPDATES.md §2) and every path install.sh installs (files.txt, for the OTA helper)

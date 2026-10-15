@@ -527,7 +527,7 @@ additive: `detail` keeps its Spanish text byte for byte for whoever already read
   - `output` already had its stable code, `output.reason` (`no_destination`, `no_uplinks`, `relay_unreachable`,
     `rejected`, `connection_lost`, `encoder_error`, `internal`). Its `detail` stays technical text, much of it lines
     from the tools after masking the streamid, so it gets no arguments.
-- **The closed list** (`manager/internal/engine/detail`, 39 codes): adding a code is a contract change, and
+- **The closed list** (`manager/internal/engine/detail`, 40 codes): adding a code is a contract change, and
   `detail_test.go` fails until the list here and the test are updated.
 
 | Code | Arguments | Spanish `detail` today |
@@ -554,6 +554,7 @@ additive: `detail` keeps its Spanish text byte for byte for whoever already read
 | `net_waiting` | | Esperando a la cámara |
 | `net_no_video` | `tracks` (comma separated) | la cámara no manda H.264 ni H.265 ({tracks}) |
 | `net_no_audio` | | la cámara no manda audio |
+| `bt_no_audio` | | el dispositivo Bluetooth no manda audio (BLUETOOTH.md) |
 | `net_disconnected` | | la cámara se ha desconectado |
 | `net_behind` | `seconds` (`2.4`) | va {seconds} s atrasada |
 | `phones_waiting_screen` | | Esperando a la pantalla |

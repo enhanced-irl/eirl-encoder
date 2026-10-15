@@ -218,6 +218,51 @@ func (d *dc) button(key string, b btn) {
 
 func colp(c Color) *Color { return &c }
 
+// phonesBT is the headphones button when the monitor plays over Bluetooth (BLUETOOTH.md §3.6): a small «BT» mark and
+// the device's name (shortened to fit) where «Headphones» goes, and the same warning line. It stays inside the
+// button, above the program's level meters (MIXER.md §17: those are only repainted over their own base).
+func (u *UI) phonesBT(d *dc, ph *PhonesStatus, col Color, warn string) {
+	tx, s := u.Tx, d.s
+	d.button("a_phones", btn{active: ph.On, col: colp(col), sub: warn, hasSub: warn != ""})
+	r := u.Lay.Buttons["a_phones"]
+	x, y, w, h := float64(r.X), float64(r.Y), float64(r.W), float64(r.H)
+	size := 18 * s
+	cy := y + h/2 + size*0.36
+	if warn != "" {
+		cy = y + h/2 - 2*s
+	}
+	name := ph.Device
+	if name == "" {
+		name = tx.Headphones
+	}
+	style := Sans
+	if ph.On {
+		style = SansBold
+	}
+	u.markedText(d, x+w/2, cy, name, size, style, w-16*s, cInk)
+}
+
+// markedText draws the small «BT» mark and t after it, the two centred on cx (t shortened to fit width); y is t's
+// baseline. A Bluetooth device's name: the headphones button, an input's strip.
+func (u *UI) markedText(d *dc, cx, y float64, t string, size float64, style FontStyle, width float64, col Color) {
+	s := d.s
+	ms := 11 * s
+	mark := u.Tx.BT.Mark
+	mw := d.advance(mark, ms, true) + 8*s
+	gap := 6 * s
+	t = d.fit(t, size, style, width-mw-gap)
+	tw, _ := d.c.Fonts.Extents(t, size, style)
+	x0 := cx - (mw+gap+tw)/2
+	mid := y - size*0.36 // the text's middle: the mark is centred on it
+	mh := ms + 7*s
+	d.c.FillRR(RR{x0, mid - mh/2, mw, mh, 4 * s}, cBrand)
+	d.c.Text(x0+4*s, mid+ms*0.36, mark, ms, SansBold, cWhite)
+	d.c.Text(x0+mw+gap, y, t, size, style, col)
+}
+
+// isBTInput: an audio input that is a Bluetooth device (BLUETOOTH.md §3.4: bt:<address without colons>).
+func isBTInput(id string) bool { return strings.HasPrefix(id, "bt:") }
+
 // draw is Screen.draw: the interface over the multiview, like the plan's sketch.
 func (u *UI) draw(c *Canvas, now time.Time) {
 	lay, tx := u.Lay, u.Tx
@@ -761,8 +806,12 @@ func (u *UI) drawAudioView(d *dc) {
 				if warnText != "" {
 					col = cWarn
 				}
-				d.button("a_phones", btn{label: tx.Headphones, active: ph.On, col: colp(col), sub: warnText,
-					hasSub: warnText != ""})
+				if ph.Target == "bluetooth" { // BLUETOOTH.md §3.6: «BT» and the device's name instead
+					u.phonesBT(d, ph, col, warnText)
+				} else {
+					d.button("a_phones", btn{label: tx.Headphones, active: ph.On, col: colp(col), sub: warnText,
+						hasSub: warnText != ""})
+				}
 				vc := cQuiet
 				if ph.On {
 					vc = cInk
@@ -790,7 +839,11 @@ func (u *UI) drawAudioView(d *dc) {
 			d.frame(ax, ay, aw, ah, cLine, 1.25, 10*s)
 		}
 		name := u.audioName(&a)
-		d.text(nx+sw/2, ny+18*s, name, 15*s, textOpt{col: cInk, bold: true, align: center, width: sw - 14*s})
+		if isBTInput(a.ID) { // a Bluetooth device: its name says nothing of how it comes in
+			u.markedText(d, nx+sw/2, ny+18*s, name, 15*s, SansBold, sw-14*s, cInk)
+		} else {
+			d.text(nx+sw/2, ny+18*s, name, 15*s, textOpt{col: cInk, bold: true, align: center, width: sw - 14*s})
+		}
 		sub, ok := tx.AudioState[a.State]
 		if !ok {
 			sub = a.State

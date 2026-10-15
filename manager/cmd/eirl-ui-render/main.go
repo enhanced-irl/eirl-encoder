@@ -19,9 +19,11 @@
 // settingsrenamed · audioset (the audio view's settings) · audiosetpick (a camera's audio being chosen) · audioseterr (the
 // engine refused a delay). Modifiers: +wifi +srtla (2 uplinks) +srtla1 +rtmp +rtmps +rist (the header's protocol) +h265 (the
 // output's codec) +tls +clock (the output's reason: tls_failed, clock_not_synced) +dots +dots6 (the connections' dots) +press +presstile +noclient +camstab +noalias +details +phoff +phwait
-// +pherr +phmute
+// +pherr +phmute +phbt (the headphones play over Bluetooth: «BT» and the device's name; BLUETOOTH.md §3.6) +btin (a
+// Bluetooth input, a phone sending nothing, in the free strip)
 // +gone (audioset: a camera linked to an input that is unplugged) +nophones +ant3 +ant1 +antnoinet +antsearch +anterror (the former tools/ui_render.py's header explained each) +apoff
-// («Create my Wi-Fi» off, its name known: e.g. wizard-3-network+apoff).
+// («Create my Wi-Fi» off, its name known: e.g. wizard-3-network+apoff). The Settings pages' variants (settings-…) are
+// listed in app.go, stream.go and bluetooth.go (settings-bluetooth…: Settings › Wireless › Bluetooth).
 package main
 
 import (
@@ -247,6 +249,14 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir, frames string
 		if has("phmute") {
 			ph["gainDb"] = -40
 		}
+		if has("phbt") { // the monitor plays over Bluetooth: a name long enough to be shortened
+			ph["target"], ph["device"] = "bluetooth", "Auriculares WH-1000XM4"
+		}
+		if has("btin") { // a phone over Bluetooth as an input, connected and not playing
+			as, _ := audio["sources"].([]any)
+			audio["sources"] = append(as, m("id", "bt:5CF7E6010203", "kind", "bluetooth", "name", "iPhone de Ana",
+				"state", "no_signal", "detail", "el dispositivo Bluetooth no manda audio", "detailCode", "bt_no_audio"))
+		}
 	} else if has("nophones") && audio != nil {
 		delete(audio, "phones")
 	}
@@ -369,6 +379,7 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir, frames string
 		if variant == "settings-old" {
 			app.snap.Device = &ui.DeviceInfo{Language: tx.Code} // only so the language stays
 		}
+		btFake(variant, &app.snap)
 	}
 	if has("noalias") && app.snap.Slots != nil {
 		for i := range app.snap.Slots.Slots {
@@ -554,6 +565,7 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir, frames string
 		streamPreview(p, variant)
 		camsPreview(variant, p)
 		cameraPreview(p, variant)
+		btPreview(p, variant)
 	}
 	if strings.HasPrefix(variant, "settingsnets") {
 		p.OpenNetworks()

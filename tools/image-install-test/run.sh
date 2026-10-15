@@ -139,11 +139,11 @@ grep -qx 'SRT_URL=' /etc/eirl-encoder/engine.env || fail "a new device with a de
 echo "new device: /etc/default/eirl-engine (root 644, SOURCE=hdmi), engine.env (OUTPUT=off, no destination)"
 
 # Users and groups
-for u in eirl-encoder eirl-engine eirl-media; do getent passwd $u >/dev/null || fail "no user $u"; done
+for u in eirl-encoder eirl-engine eirl-media bluealsa; do getent passwd $u >/dev/null || fail "no user $u"; done
 getent group eirl-usbhub >/dev/null || fail "no group eirl-usbhub"
 for g in video audio input i2c; do id -nG eirl-engine | grep -qw $g || fail "eirl-engine not in $g"; done
 for g in video i2c systemd-journal; do id -nG eirl-encoder | grep -qw $g || fail "eirl-encoder not in $g"; done
-echo "users: eirl-encoder ($(id -nG eirl-encoder)), eirl-engine ($(id -nG eirl-engine)), eirl-media"
+echo "users: eirl-encoder ($(id -nG eirl-encoder)), eirl-engine ($(id -nG eirl-engine)), eirl-media, bluealsa"
 
 # Units enabled for the first boot
 for u in eirl-encoderd eirl-engine eirl-hdmi-init eirl-update-recover eirl-ap \

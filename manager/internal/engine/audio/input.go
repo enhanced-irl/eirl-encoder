@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/btaudio"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/detail"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/elog"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/netcam"
@@ -147,13 +148,22 @@ func (in *Input) wait(d time.Duration) bool {
 
 func (in *Input) stopping() bool { return in.wait(0) }
 
-// present: a USB card is there while /proc/asound/<card> exists.
+// present: a USB card is there while /proc/asound/<card> exists; a Bluetooth device while the app's file lists it
+// with the same profile (connected, its PCM up and still used as an input).
 func (in *Input) present() bool {
-	if in.kind != KindUSB {
-		return true
+	switch in.kind {
+	case KindUSB:
+		_, err := os.Stat(filepath.Join(in.bus.asound, in.id[len("alsa:"):]))
+		return err == nil
+	case KindBluetooth:
+		for _, d := range in.bus.bt.Get().In {
+			if btaudio.ID(d.Addr) == in.id && btaudio.ALSADevice(d) == in.device {
+				return true
+			}
+		}
+		return false
 	}
-	_, err := os.Stat(filepath.Join(in.bus.asound, in.id[len("alsa:"):]))
-	return err == nil
+	return true
 }
 
 func (in *Input) run() {
@@ -277,6 +287,10 @@ func (in *Input) stream() (reason detail.D) {
 		case in.kind == KindI2S:
 			// The TC358743 stops the I2S clock without a camera or without sound: normal, not reopened
 			in.setState(StateNoSignal, detail.New("hdmi_no_audio"))
+		case in.kind == KindBluetooth:
+			// A phone that is not playing sends nothing, and BlueALSA's capture just waits: normal, not reopened
+			// (reopening would only queue behind the read that waits, BLUETOOTH.md §4)
+			in.setState(StateNoSignal, detail.New("bt_no_audio"))
 		case now-max(st.LastFrame, t0) > Watchdog:
 			return detail.New("no_samples", "seconds", fmt.Sprintf("%.0f", Watchdog.Seconds()))
 		}

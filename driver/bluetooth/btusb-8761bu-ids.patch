@@ -1,0 +1,17 @@
+--- btusb.c
++++ btusb.c
+@@ -362,6 +362,14 @@
+ 	{ USB_DEVICE(0x13d3, 0x3458), .driver_info = BTUSB_REALTEK },
+ 	{ USB_DEVICE(0x13d3, 0x3461), .driver_info = BTUSB_REALTEK },
+ 	{ USB_DEVICE(0x13d3, 0x3462), .driver_info = BTUSB_REALTEK },
++
++	/* Realtek 8761BU Bluetooth devices (eirl-encoder: from upstream v5.16-v6.1;
++	 * the ones with Realtek's own vendor id already match the rule above)
++	 */
++	{ USB_DEVICE(0x2357, 0x0604), .driver_info = BTUSB_REALTEK },	/* TP-Link UB500 */
++	{ USB_DEVICE(0x0b05, 0x190e), .driver_info = BTUSB_REALTEK },	/* ASUS USB-BT500 */
++	{ USB_DEVICE(0x2550, 0x8761), .driver_info = BTUSB_REALTEK },
++	{ USB_DEVICE(0x7392, 0xc611), .driver_info = BTUSB_REALTEK },	/* Edimax BT-8500 */
+ 
+ 	/* Additional Realtek 8822BE Bluetooth devices */
+ 	{ USB_DEVICE(0x0b05, 0x185c), .driver_info = BTUSB_REALTEK },

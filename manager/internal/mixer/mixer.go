@@ -27,6 +27,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/btaudio"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/i18n"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/service"
 )
@@ -207,7 +208,18 @@ type Phones struct {
 	// to translate; DetailArgs its arguments. Absent with an old engine (use Detail).
 	DetailCode string            `json:"detailCode,omitempty"`
 	DetailArgs map[string]string `json:"detailArgs,omitempty"`
+	// Target is where the monitor plays (BLUETOOTH.md §3.3): "screen" (the screen's jack, over HDMI) or
+	// "bluetooth" (headphones or a speaker); Device is then the Bluetooth device's name. Absent with an older
+	// engine: the screen's
+	Target string `json:"target,omitempty"`
+	Device string `json:"device,omitempty"`
 }
+
+// Phones targets
+const (
+	PhonesScreen    = "screen"
+	PhonesBluetooth = "bluetooth"
+)
 
 // MinPhonesGain and MaxPhonesGain: the headphones volume, in dB. The minimum is silence (−∞)
 const (
@@ -216,9 +228,9 @@ const (
 )
 
 type AudioInput struct {
-	ID     string `json:"id"`   // i2s | alsa:<tarjeta>
+	ID     string `json:"id"`   // i2s | alsa:<card> | net:camN | bt:<address>
 	Slot   int    `json:"slot"` // 1…4
-	Kind   string `json:"kind"` // i2s | usb
+	Kind   string `json:"kind"` // i2s | usb | network | bluetooth
 	Name   string `json:"name"`
 	State  string `json:"state"` // starting | live | no_signal | gone | error
 	Detail string `json:"detail"`
@@ -343,7 +355,12 @@ var reSource = regexp.MustCompile(`^(hdmi|test|net:cam[1-8]|/dev/v4l/by-(id|path
 
 // Ids of the audio inputs (source catalogue: i2s, alsa:<card> and the audio of each network camera,
 // net:camN); none = no audio
-var reAudio = regexp.MustCompile(`^(none|i2s|alsa:[A-Za-z0-9_-]{1,32}|net:cam[1-8])$`)
+// reAudio: an audio input id, or none. bt:<address without colons> is a Bluetooth device (BLUETOOTH.md §3.4)
+var reAudio = regexp.MustCompile(`^(none|i2s|alsa:[A-Za-z0-9_-]{1,32}|net:cam[1-8]|bt:[0-9A-F]{12})$`)
+
+// CleanDeviceName: a Bluetooth device's name for the web and the screen (its maker or its owner chose it: third-party
+// data), by the rule of the file the engine reads (btaudio.CleanName).
+func CleanDeviceName(s string) string { return btaudio.CleanName(s) }
 
 // fields: the fields each command allows besides cmd. One from another command is rejected here and
 // never reaches the engine.
@@ -692,6 +709,14 @@ func clean(st *State) *State {
 				p.Detail = string(r[:120])
 			}
 			cleanDetail(&p.DetailCode, &p.DetailArgs)
+			switch p.Target {
+			case PhonesScreen, "":
+				p.Device = ""
+			case PhonesBluetooth:
+				p.Device = CleanDeviceName(p.Device)
+			default:
+				p.Target, p.Device = "", ""
+			}
 		}
 	}
 	return st

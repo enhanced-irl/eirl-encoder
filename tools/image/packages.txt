@@ -1,9 +1,10 @@
 # tools/image/packages.txt — what the image installs on top of ubuntu-base 18.04.5, with
 # apt-get install --no-install-recommends (IMAGE.md §3.2). One package per line, a comment after it.
 # It is base/keep.txt (BASE.md §3) without the development group (D4), without what only the retired Python
-# engine used (python3-gi, python3-cairo, gir1.2-*) and without bluez (D-I6), plus what ubuntu-base lacks and
+# engine used (python3-gi, python3-cairo, gir1.2-*), plus what ubuntu-base lacks and
 # the Ubuntu dependencies of the NVIDIA packages (their dpkg -i needs them already installed).
-# The exact result, with versions, is tools/image/packages.lock.
+# The exact result, with versions, is tools/image/packages.lock. bluez left D-I6's exclusions on Oct 15 (Bluetooth
+# audio, BLUETOOTH.md).
 
 # --- System (ubuntu-base has none of it)
 systemd
@@ -54,7 +55,8 @@ modemmanager                  # 4G modems for SRTLA (stays, D-I6)
 mobile-broadband-provider-info # the APN database for a modem without one set (MODEMS.md §7.2)
 wireless-regdb                # Wi-Fi channels and power per country
 crda
-linux-firmware                # the Intel 8265 and USB adapters
+linux-firmware                # the Intel 8265 and USB adapters (its Bluetooth too: intel/ibt-12-16)
+bluez                         # Bluetooth audio (BLUETOOTH.md §3.7): bluetoothd; BlueALSA comes with the release bundle
 
 # --- Maintenance (D-I4): installed, ssh.service masked, no user and no key in the image
 openssh-server

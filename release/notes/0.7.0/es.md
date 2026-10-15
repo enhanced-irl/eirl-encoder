@@ -1,0 +1,3 @@
+- Bluetooth: si el codificador tiene un adaptador Bluetooth (por ejemplo, uno USB como el TP-Link UB500), en Ajustes › Inalámbrico › Bluetooth de la pantalla táctil o en la web puedes conectar unos auriculares o un altavoz para escuchar el programa (la escucha pasa a ellos sola y vuelve a la pantalla al desconectarlos), y usar el micrófono de unos cascos (calidad de teléfono) o un móvil como una entrada de audio más.
+- Viene apagado, y un móvil solo puede encontrar el codificador durante los 2 minutos en que lo haces visible.
+- Es una primera versión: si algo no va, cuéntanoslo.

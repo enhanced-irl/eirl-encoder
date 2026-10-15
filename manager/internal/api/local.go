@@ -63,6 +63,10 @@ var localRoutes = []string{
 	// PIN (typed on the screen, straight to the modem or NetworkManager; never in a GET or a log), a reset and a HiLink's
 	// subnet
 	"GET /api/v1/modems", "PUT /api/v1/modems/{id}", "POST /api/v1/modems/{id}/{action}",
+	// Bluetooth audio (BLUETOOTH.md §3.4): the state (no keys: BlueZ keeps them), on/off, search, the visible window,
+	// pair/connect/disconnect/forget a device and its use. The same as the web's: the screen is physical access
+	"GET /api/v1/bluetooth", "PUT /api/v1/bluetooth", "POST /api/v1/bluetooth/scan", "POST /api/v1/bluetooth/visible",
+	"POST /api/v1/bluetooth/devices/{address}/{action}", "PUT /api/v1/bluetooth/devices/{address}",
 }
 
 // LocalHandler: the handler of the local socket. Handler must have been called (it builds the route table).

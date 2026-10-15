@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/btaudio"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/elog"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/netcam"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/probe"
@@ -65,6 +66,9 @@ type Config struct {
 	Sync    time.Duration
 	NetSync time.Duration // MIXER_NET_SYNC: the wifi's cushion, on a network camera's video and audio
 	ASound  string        // "" = /proc/asound
+	// Bluetooth is the app's file of the Bluetooth devices ready for audio (btaudio.Path when ""): a Bluetooth input
+	// is there while the file lists it with the same profile (a missing file keeps the last one: btaudio.Reader)
+	Bluetooth string
 }
 
 // Bus is the program's audio slots (appsrc aaN → queue aqN → audiomixer amix) and which of them sound.
@@ -98,6 +102,7 @@ type Bus struct {
 	fading      *fadeState
 	cards       string
 	cardsRead   bool
+	bt          *btaudio.Reader // the app's Bluetooth file (kept through the app's restarts)
 
 	peaksMu  sync.Mutex
 	pgmPeaks []float64
@@ -153,6 +158,7 @@ func New(h Host, cfg Config) (*Bus, error) {
 	if b.asound == "" {
 		b.asound = "/proc/asound"
 	}
+	b.bt = btaudio.NewReader(b.cfg.Bluetooth)
 	if b.changed == nil {
 		b.changed = func() {}
 	}
@@ -347,17 +353,28 @@ func (b *Bus) Start(silenced bool) {
 	b.apply(nil)
 }
 
-// CardsChanged reports whether /proc/asound/cards changed since the last call: the engine then probes
-// again (a USB sound card plugged or unplugged).
+// CardsChanged reports whether /proc/asound/cards or the app's Bluetooth file changed since the last call: the
+// engine then probes again (a USB sound card plugged or unplugged, a Bluetooth device ready or gone).
 func (b *Bus) CardsChanged() bool {
 	data, _ := os.ReadFile(filepath.Join(b.asound, "cards"))
+	stamp := string(data) + "\x00" + btaudio.InputsKey(b.bt.Get())
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.cardsRead && string(data) == b.cards {
+	if b.cardsRead && stamp == b.cards {
 		return false
 	}
-	b.cards, b.cardsRead = string(data), true
+	b.cards, b.cardsRead = stamp, true
 	return true
+}
+
+// bluetoothDevice: the ALSA device of a Bluetooth input of the catalogue (bt:<address> and its profile), built here
+// from what checks out; "" if it does not.
+func bluetoothDevice(a probe.AudioEntry) string {
+	addr := btaudio.AddrOf(a.ID)
+	if addr == "" || a.Profile != btaudio.ProfileA2DP && a.Profile != btaudio.ProfileSCO {
+		return ""
+	}
+	return btaudio.ALSADevice(btaudio.Device{Addr: addr, Profile: a.Profile})
 }
 
 type wanted struct{ id, kind, name, device string }
@@ -369,6 +386,7 @@ func (b *Bus) Discover(c probe.Catalogue) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	var want []wanted
+	added := false
 	for _, a := range c.Audio {
 		if !ValidID(a.ID) {
 			continue
@@ -384,9 +402,31 @@ func (b *Bus) Discover(c probe.Catalogue) {
 			want = append(want, wanted{a.ID, KindUSB, name, "hw:" + a.ID[5:] + ",0"})
 		case strings.HasPrefix(a.ID, "net:") && a.Kind == KindNetwork:
 			want = append(want, wanted{a.ID, KindNetwork, netcam.CleanName(a.Name), netcam.RTSP + netcam.PathOf(a.ID)})
+		case strings.HasPrefix(a.ID, "bt:") && a.Kind == KindBluetooth:
+			if dev := bluetoothDevice(a); dev != "" {
+				name := btaudio.CleanName(a.Name)
+				if name == "" {
+					name = nameBluetooth
+				}
+				want = append(want, wanted{a.ID, KindBluetooth, name, dev})
+			}
 		}
 	}
-	added := false
+	// A Bluetooth input whose profile changed (its use went from a phone's input to a headset's microphone, or the
+	// other way) opens again on its new device
+	for i, in := range b.slots {
+		if in == nil || in.kind != KindBluetooth {
+			continue
+		}
+		for _, w := range want {
+			if w.id == in.id && w.device != in.device {
+				elog.Event("audio", "audio_input_removed", "slot", i+1, "input", in.Name(), "reason", "profile_changed")
+				b.lastSlot[in.id] = i
+				b.retire(i)
+				added = true
+			}
+		}
+	}
 	if c.OK {
 		// A removed network camera frees its slot; a renamed one changes its name
 		nets := map[string]string{}
@@ -472,7 +512,7 @@ func (b *Bus) DropGone(grace time.Duration, keep map[string]bool) []string {
 	now := b.now()
 	var dropped []string
 	for i, in := range b.slots {
-		if in == nil || in.kind != KindUSB || keep[in.id] {
+		if in == nil || in.kind != KindUSB && in.kind != KindBluetooth || keep[in.id] {
 			continue
 		}
 		if state, since := in.snapshot(); state != StateGone || now.Sub(since) < grace {

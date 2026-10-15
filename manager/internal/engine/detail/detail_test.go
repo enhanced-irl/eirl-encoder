@@ -38,6 +38,7 @@ func TestTexts(t *testing.T) {
 		{"net_no_video", []string{"tracks", "MPEG-4 Audio"}, "la cámara no manda H.264 ni H.265 (MPEG-4 Audio)"},
 		{"net_no_video", []string{"tracks", long}, ("la cámara no manda H.264 ni H.265 (" + long)[:120]},
 		{"net_no_audio", nil, "la cámara no manda audio"},
+		{"bt_no_audio", nil, "el dispositivo Bluetooth no manda audio"},
 		{"net_disconnected", nil, "la cámara se ha desconectado"},
 		{"net_behind", []string{"seconds", "2.4"}, "va 2.4 s atrasada"},
 		{"phones_waiting_screen", nil, "Esperando a la pantalla"},
@@ -72,7 +73,7 @@ func TestTexts(t *testing.T) {
 			t.Errorf("code %s has no test", c)
 		}
 	}
-	if len(Codes()) != 39 {
+	if len(Codes()) != 40 {
 		t.Errorf("%d codes: the list is a contract (ENGINE_GO.md §13), update both", len(Codes()))
 	}
 }

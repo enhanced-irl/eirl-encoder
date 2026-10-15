@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/btaudio"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/elog"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/sysx"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/gst"
@@ -74,6 +75,9 @@ type Options struct {
 	Run sysx.Runner
 	// NewTap makes the Tap on phtap; nil = NewBridgeTap.
 	NewTap func(media gst.Media, pgm gst.Pipeline, phtap gst.Element) Tap
+	// Bluetooth is the app's file of the Bluetooth devices ready for audio ("" = btaudio.Path): with an output
+	// in it, the monitor plays through those headphones instead of the HDMI (BLUETOOTH.md §3.3)
+	Bluetooth string
 }
 
 // Phones is the listening. One goroutine runs all of it (waits for the screen, opens, watches, retries,
@@ -94,6 +98,7 @@ type Phones struct {
 	gain   int
 	state  string
 	detail string
+	bt     *btaudio.Device // where it plays (or would): nil = the screen's HDMI
 
 	wake     chan struct{} // an auto-reset event: a command for the goroutine
 	stopping chan struct{}
@@ -114,6 +119,7 @@ type Phones struct {
 	session func(Device) (string, bool)
 	readELD func(card int) ELD
 	digital func(card int)
+	btOut   func() *btaudio.Device // the app's file's output, nil = none
 	noLat   sync.Once
 }
 
@@ -146,6 +152,8 @@ func New(o Options) (*Phones, error) {
 	}
 	p.tap = newTap(o.Media, o.Program, tapEl)
 	p.find, p.session, p.readELD, p.digital = p.findHDMI, p.listen, p.eldOf, p.digitalOn
+	bt := btaudio.NewReader(o.Bluetooth) // a missing file (the app restarting) keeps the headphones
+	p.btOut = func() *btaudio.Device { return bt.Get().Out }
 	return p, nil
 }
 
@@ -158,12 +166,33 @@ func (p *Phones) Settings() Settings {
 	return Settings{On: p.want, GainDb: p.gain}
 }
 
-// Info is audio.phones of the state.
+// Info is audio.phones of the state, with where it plays (or would play, off): the screen or Bluetooth headphones.
 func (p *Phones) Info() mixer.Phones {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	d := DetailOf(p.detail)
-	return mixer.Phones{On: p.want, GainDb: p.gain, State: p.state, Detail: p.detail, DetailCode: d.Code, DetailArgs: d.Args}
+	ph := mixer.Phones{On: p.want, GainDb: p.gain, State: p.state, Detail: p.detail, DetailCode: d.Code, DetailArgs: d.Args,
+		Target: mixer.PhonesScreen}
+	if p.bt != nil {
+		ph.Target, ph.Device = mixer.PhonesBluetooth, p.bt.Name
+	}
+	return ph
+}
+
+// setTarget: where it plays now (nil: the screen); it publishes when that changes.
+func (p *Phones) setTarget(bt *btaudio.Device) {
+	p.mu.Lock()
+	changed := !sameBT(bt, p.bt) || bt != nil && p.bt != nil && bt.Name != p.bt.Name
+	p.bt = bt
+	p.mu.Unlock()
+	if changed {
+		if bt != nil {
+			elog.Event(logPrefix, "phones_target", "target", "bluetooth", "device", bt.Addr, "profile", bt.Profile)
+		} else {
+			elog.Event(logPrefix, "phones_target", "target", "screen")
+		}
+		p.changed()
+	}
 }
 
 func (p *Phones) setStatus(state, detail string) {
@@ -292,23 +321,36 @@ func (p *Phones) screen() ScreenView {
 func (p *Phones) loop() {
 	defer close(p.done)
 	fails, lastErr := 0, ""
+	var lastBT *btaudio.Device
 	for !p.isStopping() {
+		bt := p.btOut()
+		p.setTarget(bt)
+		if !sameBT(bt, lastBT) {
+			fails, lastErr = 0, "" // another target: its failures start again
+		}
+		lastBT = bt
 		if want, _ := p.wanted(); !want {
 			fails, lastErr = 0, ""
 			p.setStatus(StateOff, "")
-			p.wait(offWait)
+			p.wait(min(offWait, TargetPoll))
 			continue
 		}
-		if !ScreenReady(p.screen()) {
-			p.setStatus(StatusOf(true, false, lastErr, ELDUnknown))
-			p.wait(screenPoll)
-			continue
-		}
-		dev, ok := p.find()
-		if !ok {
-			p.setStatus(StateError, NoDevice)
-			p.wait(NoDeviceWait)
-			continue
+		var dev Device
+		if bt != nil {
+			// Bluetooth headphones: no screen to wait for and no ELD; BlueALSA's device, built from the checked file
+			dev = Device{Name: btaudio.ALSADevice(*bt), Card: -1, BT: bt}
+		} else {
+			if !ScreenReady(p.screen()) {
+				p.setStatus(StatusOf(true, false, lastErr, ELDUnknown))
+				p.wait(screenPoll)
+				continue
+			}
+			var ok bool
+			if dev, ok = p.find(); !ok {
+				p.setStatus(StateError, NoDevice)
+				p.wait(min(NoDeviceWait, TargetPoll*5))
+				continue
+			}
 		}
 		t0 := time.Now()
 		e, failed := p.session(dev)
@@ -329,8 +371,8 @@ func (p *Phones) loop() {
 		for {
 			want, _ := p.wanted()
 			left := time.Until(end)
-			if !want || p.isStopping() || left <= 0 {
-				break
+			if !want || p.isStopping() || left <= 0 || !sameBT(p.btOut(), bt) {
+				break // off, stopping, time to retry, or somewhere else to play
 			}
 			p.wait(min(500*time.Millisecond, left))
 		}
@@ -404,7 +446,9 @@ func (p *Phones) sleepMeasure() {
 // listen opens the listening and watches it until it is switched off, the engine stops or it fails.
 // The error text and whether it failed.
 func (p *Phones) listen(dev Device) (string, bool) {
-	p.digital(dev.Card)
+	if dev.BT == nil {
+		p.digital(dev.Card)
+	}
 	// Before opening, how late the program audio arrives (valve open, nowhere to go: the Tap only
 	// measures)
 	p.tap.TakeLate()
@@ -420,15 +464,31 @@ func (p *Phones) listen(dev Device) (string, bool) {
 		p.valve.SetBool("drop", true)
 		return cannotBuild + err.Error(), true
 	}
+	buffer := SinkBuffer
+	if dev.BT != nil {
+		buffer = BTSinkBuffer
+	}
 	if snk := pipe.ByName("phsink"); snk != nil {
 		snk.Set("device", dev.Name)
+		if dev.BT != nil {
+			snk.Set("buffer-time", strconv.FormatInt(buffer.Microseconds(), 10))
+			// 🪤 No clock slaving over Bluetooth (BLUETOOTH.md §1): against BlueALSA's clock the default «skew»
+			// corrects ~20 ms again and again and ends up dropping everything (1-2 s of sound, then silence;
+			// measured with the owner's AirPods). Without it the drift is only corrected when it passes the
+			// sink's alignment threshold (40 ms): a tiny jump every several minutes
+			snk.Set("slave-method", "none")
+		}
 	}
 	// The program's clock and base_time: the buffers arrive with their marks as they are. And the screen's
-	// latency (they sound when its picture shows), unless the audio arrives even later
+	// latency (they sound when its picture shows), unless the audio arrives even later. Bluetooth headphones add
+	// their own delay after the ALSA device: it comes off the screen's
 	pipe.FixBase(p.pgm.BaseTime())
 	screen, _ := ScreenDelay(p.compLat, p.screen(), false)
 	screen += Trim
-	delay := TargetDelay(screen, late)
+	if dev.BT != nil {
+		screen -= time.Duration(dev.BT.DelayMs) * time.Millisecond
+	}
+	delay := TargetDelayFor(screen, late, buffer)
 	p.setLatency(pipe, delay)
 	if err := pipe.SetState(gst.StatePlaying); err != nil {
 		m := pipe.Pop(0, gst.MessageError)
@@ -447,8 +507,11 @@ func (p *Phones) listen(dev Device) (string, bool) {
 		p.vol = nil
 		p.close(pipe)
 	}()
-	// Open, the codec is awake and the ELD up to date (not before: §1 of HEADPHONES.md)
-	eld := p.readELD(dev.Card)
+	// Open, the codec is awake and the ELD up to date (not before: §1 of HEADPHONES.md). Bluetooth has no ELD
+	eld := ELDOK
+	if dev.BT == nil {
+		eld = p.readELD(dev.Card)
+	}
 	p.setStatus(StatusOf(true, true, "", eld))
 	_, gain := p.wanted()
 	eldLog := string(eld)
@@ -459,10 +522,19 @@ func (p *Phones) listen(dev Device) (string, bool) {
 		"screen_ms", screen.Milliseconds(), "late_ms", late.Milliseconds(), "eld", eldLog)
 	p.ramp(VolumeOf(gain))
 	nextELD := time.Now().Add(ELDEvery)
+	nextTarget := time.Now().Add(TargetPoll)
 	for {
 		want, gain := p.wanted()
 		if !want || p.isStopping() {
 			break
+		}
+		if now := time.Now(); !now.Before(nextTarget) {
+			nextTarget = now.Add(TargetPoll)
+			if bt := p.btOut(); !sameBT(bt, dev.BT) {
+				// Headphones connected or gone (or another pair): down and over to the new target
+				elog.Event(logPrefix, "phones_switch", "from", targetOf(dev.BT), "to", targetOf(bt))
+				break
+			}
 		}
 		if m := pipe.Pop(busPoll, gst.MessageError); m != nil {
 			dbg := ""
@@ -483,16 +555,21 @@ func (p *Phones) listen(dev Device) (string, bool) {
 		}
 		if now := time.Now(); !now.Before(nextELD) {
 			nextELD = now.Add(ELDEvery)
-			eld = p.readELD(dev.Card)
+			if dev.BT == nil {
+				eld = p.readELD(dev.Card)
+			}
 			p.setStatus(StatusOf(true, true, "", eld))
 			// The screen may have been rebuilt with another latency (only with it on; halfway through a
 			// reconnection, its own is unknown) and the audio may arrive later than when opening (only up:
 			// going down would cut again for nothing). It goes on playing
 			if s2, ok := ScreenDelay(p.compLat, p.screen(), true); ok {
 				screen = s2 + Trim
+				if dev.BT != nil {
+					screen -= time.Duration(dev.BT.DelayMs) * time.Millisecond
+				}
 			}
 			late = max(late, p.tap.TakeLate())
-			if next := TargetDelay(screen, late); DelayMoved(delay, next, true) {
+			if next := TargetDelayFor(screen, late, buffer); DelayMoved(delay, next, true) {
 				elog.Event(logPrefix, "phones_delay_changed", "delay_ms", next.Milliseconds(), "was_ms", delay.Milliseconds(),
 					"screen_ms", screen.Milliseconds(), "late_ms", late.Milliseconds())
 				delay = next
@@ -502,6 +579,14 @@ func (p *Phones) listen(dev Device) (string, bool) {
 	}
 	p.ramp(0) // off or stopping: down before cutting
 	return "", false
+}
+
+// targetOf names a target for the log.
+func targetOf(bt *btaudio.Device) string {
+	if bt == nil {
+		return "screen"
+	}
+	return "bluetooth:" + bt.Addr
 }
 
 // ramp goes from the current volume to target in Ramp (in this goroutine, 10 ms steps).

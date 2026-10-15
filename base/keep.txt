@@ -45,7 +45,7 @@ avahi-daemon
 libnss-mdns
 policykit-1           # Wi-Fi client: eirl-encoderd talks to NetworkManager over D-Bus with a .pkla
 modemmanager          # 4G modems for SRTLA (the custom board plan): disabled, but it stays
-bluez                 # undecided (disabled since 08 Oct 2026): not purged without the maintainers' OK
+bluez                 # Bluetooth audio (BLUETOOTH.md, Oct 15): bluetoothd, pulled in by eirl-bluealsa.service
 
 # System and access
 openssh-server

@@ -1,7 +1,7 @@
 // Settings cards of the dashboard that came with the device API (setup batch, 2026-10): source slots
 // (GET/PUT /sources/slots), updates (GET /update, POST /update/check|install) and the device (GET/PUT
-// /device: language, name, time zone and clock). Loaded after app.js: it uses its helpers (api, t,
-// toast, option, state, hooks).
+// /device: language, name, time zone and clock); later, Bluetooth audio (GET/PUT /bluetooth). Loaded after
+// app.js: it uses its helpers (api, t, toast, option, state, hooks, syncRows).
 'use strict';
 
 // --- Source slots (slots.json) ---------------------------------------------------------------
@@ -470,6 +470,290 @@ onLangChange(() => {
   cam.key = cam.pickKey = '';
   rerenderCamera();
 });
+
+// --- Bluetooth audio (BLUETOOTH.md §3.5) -----------------------------------------------------
+// Headphones or a speaker to listen to the program, a headset's microphone or a phone as an audio input. GET
+// /bluetooth while the dashboard is live: every 2 s with the card on screen, every 30 s off it, and every second
+// while something is going on (a search, the visible window, an order on a device, switching on or off). An order
+// on a device answers at once and runs on: the device shows it (pending), then why it failed (error). Only one
+// runs at a time, so meanwhile the other devices' buttons wait. The rows stay in place (an open select would
+// close under the finger) and their texts are redone with every state, so a language change only renders again.
+
+const bt = { data: null, timer: 0, gen: 0, onScreen: false, gone: false, busy: 0 };
+const BT_KINDS = ['headphones', 'headset', 'speaker', 'phone', 'computer', 'audio'];
+const BT_USES = ['listen', 'mic', 'input'];
+const BT_ACTS = ['pair', 'connect', 'disconnect', 'forget'];
+const BT_FAILS = ['rejected', 'timeout', 'not_reachable', 'gone', 'failed'];
+const BT_REASONS = ['no_stack', 'no_adapter', 'no_audio'];
+const btKind = (k) => t('bt.kind.' + (BT_KINDS.includes(k) ? k : 'audio'));
+const btUse = (u) => (BT_USES.includes(u) ? t('bt.use.' + u) : u);
+const btName = (d) => d.name || d.address;
+const btDevice = (addr) => ((bt.data && bt.data.devices) || []).find((d) => d.address === addr) || null;
+// The visible window's time left, m:ss
+const btLeft = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+// Signal of a device found, in words: the dBm mean nothing to most people
+const btSignal = (rssi) => t(rssi >= -60 ? 'bt.signal.strong' : rssi >= -75 ? 'bt.signal.medium' : 'bt.signal.weak');
+
+// Something is going on that the card should follow closely
+function btActive(s) {
+  // on ≠ powered is a switch on its way, unless the adapter refuses it (powerFailed: the app retries every minute)
+  const switching = s && s.on !== s.powered && !s.powerFailed;
+  return !!s && s.available === true && (s.scanning || s.visible || switching || (s.devices || []).some((d) => d.pending));
+}
+
+// gen: a newer call (an order's answer, the card coming on screen) takes over, so only one timer chain lives
+async function loadBluetooth() {
+  clearTimeout(bt.timer);
+  if (bt.gone) return;
+  const gen = ++bt.gen;
+  let s = null;
+  try {
+    s = await api('GET', '/bluetooth', undefined, { quiet: true });
+  } catch (e) {
+    // An older app without Bluetooth (404): no card, and it is not asked again
+    if (e.status === 404) { bt.gone = true; $('bt-card').hidden = true; return; }
+  }
+  if (gen !== bt.gen) return;
+  if (s) renderBluetooth(s);
+  if (state.live) bt.timer = setTimeout(loadBluetooth, btActive(bt.data) ? 1000 : bt.onScreen ? 2000 : 30000);
+}
+
+function renderBluetooth(s) {
+  bt.data = s;
+  $('bt-card').hidden = false;
+  const avail = s.available === true;
+  const up = avail && s.on && s.powered;
+  // Without Bluetooth, one line that says why (no software names: the reason, in the user's words). Off, the
+  // switch and one line; turning on or off, the switch says so. An adapter that refuses to switch on (powerFailed)
+  // is not «turning on» for ever: the switch shows what was asked and a warning says why nothing happens
+  $('bt-on-row').hidden = !avail;
+  const cb = $('bt-on');
+  if (!cb.disabled) cb.checked = s.on;
+  const settled = s.on === s.powered || s.powerFailed === true;
+  $('bt-on-txt').textContent = settled ? t(s.on ? 'bt.on' : 'bt.off') : t(s.on ? 'bt.turningOn' : 'bt.turningOff');
+  // Warnings above the controls, which still work: Bluetooth audio down (no_audio: devices can be managed, not
+  // heard) and an adapter that does not switch on
+  const warn = [];
+  if (avail && s.reason === 'no_audio') warn.push(t('bt.reason.no_audio'));
+  if (avail && s.on && s.powerFailed === true) warn.push(t('bt.powerFailed'));
+  $('bt-warn').textContent = warn.join(' ');
+  $('bt-warn').hidden = !warn.length;
+  const why = !avail ? t('bt.reason.' + (BT_REASONS.includes(s.reason) ? s.reason : 'no_stack')) : !s.on ? t('bt.offNote') : '';
+  $('bt-why').textContent = why;
+  $('bt-why').hidden = !why;
+  $('bt-body').hidden = !up;
+  if (!up) return;
+
+  const devs = s.devices || [];
+  const paired = devs.filter((d) => d.paired);
+  const found = devs.filter((d) => !d.paired);
+  // One order at a time (the app answers busy): while one runs, or is being sent, the others wait
+  const lock = bt.busy > 0 || devs.some((d) => d.pending);
+  syncRows($('bt-paired'), paired.map((d) => d.address), btPairedRow);
+  for (const li of $('bt-paired').children) updatePairedRow(li, paired.find((d) => d.address === li.dataset.id), lock);
+  $('bt-paired-none').hidden = paired.length > 0;
+  syncRows($('bt-found'), found.map((d) => d.address), btFoundRow);
+  for (const li of $('bt-found').children) updateFoundRow(li, found.find((d) => d.address === li.dataset.id), lock);
+  const none = $('bt-found-none');
+  none.textContent = s.scanning ? t('bt.searchingHint') : found.length ? '' : t('bt.foundNone');
+  none.hidden = !none.textContent;
+
+  const scan = $('bt-scan');
+  scan.textContent = t(s.scanning ? 'bt.searching' : 'bt.search');
+  scan.disabled = s.scanning || lock;
+  const vis = $('bt-visible');
+  if (!vis.disabled) vis.checked = s.visible;
+  const name = s.name || t('common.encoder');
+  $('bt-visible-txt').textContent = s.visible ? t('bt.visibleLeft', { left: btLeft(s.visibleLeft || 0) }) : t('bt.hidden');
+  $('bt-visible-hint').textContent = t(s.visible ? 'bt.visibleHintOn' : 'bt.visibleHint', { name });
+}
+
+// A device's row: its name and a line under it (kind, state), and its buttons on the right
+function btRow(addr) {
+  const li = document.createElement('li');
+  li.dataset.id = addr;
+  li.innerHTML = '<div class="bt-info"><span class="name"></span><span class="meta"></span></div><div class="acts"></div>';
+  return li;
+}
+
+function btButton(cls, fn) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'btn small' + (cls ? ' ' + cls : '');
+  b.addEventListener('click', () => fn(b));
+  return b;
+}
+
+// Paired: Connect or Disconnect, Forget, and what it is used for (a select only when it can do more than one thing)
+function btPairedRow(addr) {
+  const li = btRow(addr);
+  li.querySelector('.acts').append(btButton('', () => btToggle(addr)), btButton('ghost', () => btForget(addr)));
+  const use = document.createElement('div');
+  use.className = 'bt-use';
+  use.innerHTML = '<span class="bt-use-k"></span><select></select><span class="bt-use-one"></span>';
+  use.querySelector('select').addEventListener('change', (ev) => btSetUse(addr, ev.target));
+  li.append(use);
+  return li;
+}
+
+// Found nearby, not paired: Pair
+function btFoundRow(addr) {
+  const li = btRow(addr);
+  li.querySelector('.acts').append(btButton('primary', () => btOrder(addr, 'pair')));
+  return li;
+}
+
+// The state line: an order running, else how it is; a failed order adds why (until the next one)
+function btMeta(li, d, parts) {
+  if (d.pending) parts.push(t('bt.pending.' + (BT_ACTS.includes(d.pending) ? d.pending : 'connect')));
+  else if (d.error) parts.push(t('bt.fail.' + (BT_FAILS.includes(d.error) ? d.error : 'failed')));
+  li.querySelector('.name').textContent = btName(d);
+  const meta = li.querySelector('.meta');
+  meta.textContent = parts.filter(Boolean).join(' · ');
+  meta.className = 'meta' + (d.pending ? '' : d.error ? ' warn' : d.output || d.connected ? ' ok' : '');
+}
+
+function updatePairedRow(li, d, lock) {
+  // The monitor plays through it: «Playing the program», unless the headphones are switched off in Audio
+  const phones = state.mixer && state.mixer.audio && state.mixer.audio.phones;
+  const now = d.pending ? '' : d.output ? t(phones && phones.on === false ? 'bt.outputOff' : 'bt.output')
+    : t(d.connected ? 'bt.connected' : 'bt.notConnected');
+  btMeta(li, d, [btKind(d.kind), now]);
+  const [toggle, forget] = li.querySelector('.acts').children;
+  toggle.textContent = t(d.connected ? 'bt.disconnect' : 'bt.connect');
+  forget.textContent = t('bt.forget');
+  toggle.disabled = forget.disabled = lock;
+
+  const uses = d.uses || [];
+  const box = li.querySelector('.bt-use');
+  const sel = box.querySelector('select');
+  const many = uses.length > 1;
+  box.hidden = !many && !d.use && !uses.length;
+  box.querySelector('.bt-use-k').textContent = t('bt.useLabel');
+  sel.hidden = !many;
+  box.querySelector('.bt-use-one').textContent = many ? '' : btUse(d.use || uses[0] || '');
+  if (!many) return;
+  const key = uses.join(',') + '|' + getLang();
+  if (sel.dataset.key !== key) { // only if they change: redoing them closes the open dropdown
+    sel.dataset.key = key;
+    sel.replaceChildren(...uses.map((u) => option(u, btUse(u))));
+  }
+  sel.setAttribute('aria-label', t('bt.useAria', { name: btName(d) }));
+  if (!sel.dataset.busy) sel.value = d.use || uses[0];
+  sel.disabled = !!sel.dataset.busy || !!d.pending;
+}
+
+function updateFoundRow(li, d, lock) {
+  btMeta(li, d, [btKind(d.kind), typeof d.rssi === 'number' && !d.pending ? btSignal(d.rssi) : '']);
+  const [pair] = li.querySelector('.acts').children;
+  pair.textContent = t('bt.pair');
+  pair.disabled = lock;
+}
+
+// Its audio input plays in the program (alone or in the mix) while streaming: cutting it is heard on air
+function btOnAir(d) {
+  const a = state.mixer && state.mixer.audio;
+  if (!a || !emittingNow()) return false;
+  const id = 'bt:' + d.address.replace(/:/g, '');
+  return a.mode === 'mix' ? a.sources.some((x) => x.id === id && x.inMix) : a.main === id;
+}
+
+// An order on a device: the answer carries the state (the order running); then the fast polling follows it
+async function btOrder(addr, action) {
+  bt.busy++;
+  if (bt.data) renderBluetooth(bt.data);
+  try {
+    const r = await api('POST', `/bluetooth/devices/${encodeURIComponent(addr)}/${action}`);
+    if (r && r.bluetooth) bt.data = r.bluetooth;
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    bt.busy--;
+    if (bt.data) renderBluetooth(bt.data);
+    loadBluetooth();
+  }
+}
+
+function btToggle(addr) {
+  const d = btDevice(addr);
+  if (!d) return;
+  if (d.connected && btOnAir(d) && !confirm(t('bt.disconnectOnAir', { name: btName(d) }))) return;
+  btOrder(addr, d.connected ? 'disconnect' : 'connect');
+}
+
+function btForget(addr) {
+  const d = btDevice(addr);
+  if (!d) return;
+  if (confirm(t(d.connected && btOnAir(d) ? 'bt.forgetConfirmOnAir' : 'bt.forgetConfirm', { name: btName(d) }))) btOrder(addr, 'forget');
+}
+
+async function btSetUse(addr, sel) {
+  const use = sel.value;
+  sel.dataset.busy = '1';
+  sel.disabled = true;
+  try {
+    const r = await api('PUT', '/bluetooth/devices/' + encodeURIComponent(addr), { use });
+    if (r && r.bluetooth) bt.data = r.bluetooth;
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    delete sel.dataset.busy;
+    if (bt.data) renderBluetooth(bt.data); // if the app refused it, back to what it says
+  }
+}
+
+// The switch, the search and the visible window: the answer carries the new state
+async function btSend(method, path, body, el) {
+  if (el) el.disabled = true;
+  try {
+    const r = await api(method, '/bluetooth' + path, body);
+    if (r && r.bluetooth) bt.data = r.bluetooth;
+    return true;
+  } catch (e) {
+    toast(e.message, true);
+    return false;
+  } finally {
+    if (el) el.disabled = false;
+    if (bt.data) renderBluetooth(bt.data);
+    loadBluetooth();
+  }
+}
+
+$('bt-on').addEventListener('change', async (ev) => {
+  const cb = ev.target;
+  const on = cb.checked;
+  // Off disconnects every device (the pairings stay): say who, and above all what is on air
+  const conn = on ? [] : ((bt.data && bt.data.devices) || []).filter((d) => d.connected);
+  if (conn.length) {
+    const names = conn.map((d) => t('common.quoted', { s: btName(d) })).join(', ');
+    if (!confirm(t(conn.some(btOnAir) ? 'bt.offConfirmOnAir' : 'bt.offConfirm', { n: conn.length, names }))) { cb.checked = true; return; }
+  }
+  if (!(await btSend('PUT', '', { on }, cb))) cb.checked = !on;
+});
+
+$('bt-scan').addEventListener('click', (ev) => btSend('POST', '/scan', undefined, ev.currentTarget));
+
+$('bt-visible').addEventListener('change', async (ev) => {
+  const cb = ev.target;
+  const on = cb.checked;
+  if (!(await btSend('POST', '/visible', { on }, cb))) cb.checked = !on;
+});
+
+// Every 2 s only with the card on screen: further down the page, it waits (and is asked as soon as it shows)
+if (window.IntersectionObserver) {
+  new IntersectionObserver((entries) => {
+    const seen = entries.some((e) => e.isIntersecting);
+    const was = bt.onScreen;
+    bt.onScreen = seen;
+    if (seen && !was && state.live) loadBluetooth();
+  }).observe($('bt-card'));
+} else {
+  bt.onScreen = true;
+}
+
+hooks.live.push(loadBluetooth);
+hooks.stop.push(() => clearTimeout(bt.timer));
+onLangChange(() => { if (bt.data) renderBluetooth(bt.data); });
 
 // --- Updates (OTA) ---------------------------------------------------------------------------
 // The app checks by itself (every ~6 h) and downloads; installing is only on a button press, never while

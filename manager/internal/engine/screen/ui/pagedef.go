@@ -17,6 +17,9 @@ type pageDef struct {
 	keys func(u *UI, app *AppSnapshot) []string
 	// touch is a tap on one of them; false if it was not the page's
 	touch func(u *UI, what string) bool
+	// pickAt is the item a row's button shows when the finger goes down on it (ok false: none): a list that
+	// reorders itself before the finger is lifted still acts on what was seen. touch reads it in u.tapPick
+	pickAt func(u *UI, key string) (string, bool)
 	// watch says what the page needs from the app while it is on the screen
 	watch func(u *UI, w *AppWatch)
 	// leave runs when the page stops being on view (another page, Settings closed, the screen locked): its drafts

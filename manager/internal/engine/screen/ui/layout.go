@@ -109,6 +109,7 @@ type Layout struct {
 	SettingsQR     Rect
 	SettingsCams   Rect
 	settingsClient int // -1 unset, 0 no client row, 1 with it
+	btWarn         int // the Bluetooth page's warning band: -1 unset, 0 none, 1 on top of its controls
 	ListRows       int // network list rows per page
 	// The Date & time page: the clock's block; the zone picker: its grid
 	TimeClock          Rect

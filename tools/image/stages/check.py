@@ -176,6 +176,9 @@ def main():
        ", ".join(sorted(u for u in w if u.endswith(".timer"))))
     ok("ModemManager installed, not enabled", "modemmanager" in installed and "ModemManager.service" not in w
        and not os.path.lexists(os.path.join(R, "etc/systemd/system/dbus-org.freedesktop.ModemManager1.service")))
+    # Bluetooth audio (BLUETOOTH.md §3.7): bluetoothd installed, started only by eirl-bluealsa.service (Wants=)
+    ok("bluez installed, bluetooth.service not enabled", "bluez" in installed and "bluetooth.service" not in w
+       and not os.path.lexists(os.path.join(R, "etc/systemd/system/dbus-org.bluez.service")))
 
     # --- per-device values and nothing of the test board
     mid = open(os.path.join(R, "etc/machine-id"), encoding="utf-8").read()
@@ -248,6 +251,8 @@ def main():
     missing = [p for p in files_txt if p not in gone and not os.path.lexists(os.path.join(R, p.lstrip("/")))]
     if "eirl-fan" in names:  # the fan control (FAN.md), in the bundles after 0.5.0
         ok("enabled eirl-fan.service", "eirl-fan.service" in w)
+    if "bluealsa/bluealsa" in names:  # Bluetooth audio (BLUETOOTH.md), in the bundles after 0.6.1
+        ok("enabled eirl-bluealsa.service", "eirl-bluealsa.service" in w)
     ok("every path of files.txt installed (%d, %d retired ones not expected)" % (len(files_txt), len(gone & set(files_txt))),
        not missing, ", ".join(missing[:10]))
     # Every file of the bundle at the path install.sh gives it (manager/deploy/install.sh), with the bundle's bytes
@@ -255,7 +260,10 @@ def main():
                   "90-eirl-uplinks": "etc/NetworkManager/dispatcher.d/90-eirl-uplinks",
                   "eirl-engine-eirl-encoder.conf": "etc/systemd/system/eirl-engine.service.d/eirl-encoder.conf",
                   "sudoers": "etc/sudoers.d/eirl-encoder", "tmpfiles.conf": "etc/tmpfiles.d/eirl-encoder.conf",
-                  "eirl-engine.default": "etc/default/eirl-engine"}
+                  "eirl-engine.default": "etc/default/eirl-engine",
+                  # Bluetooth audio (BLUETOOTH.md §3.7): the D-Bus policy and bluetoothd's drop-in
+                  "eirl-encoder-bluetooth.conf": "etc/dbus-1/system.d/eirl-encoder-bluetooth.conf",
+                  "nv-bluetooth-service.conf": "etc/systemd/system/bluetooth.service.d/nv-bluetooth-service.conf"}
     def dest(n):
         top, _, rest = n.partition("/")
         if not rest:
@@ -285,6 +293,13 @@ def main():
                 return ""
         if top == "doc":
             return "usr/share/doc/eirl-encoder/" + rest
+        if top == "bluealsa":  # BlueALSA (build/bluealsa.sh): the daemon, its ALSA plugins and their configuration
+            if rest == "bluealsa":
+                return "usr/local/bin/bluealsa"
+            if rest.startswith("libasound_module_") and rest.endswith(".so"):
+                return "usr/lib/aarch64-linux-gnu/alsa-lib/" + rest
+            if rest == "20-bluealsa.conf":
+                return "usr/share/alsa/alsa.conf.d/20-bluealsa.conf"
         if top == "deploy":
             if rest == "install.sh":
                 return ""
@@ -329,6 +344,11 @@ def main():
     for m in ("qmi_wwan", "cdc_mbim", "huawei_cdc_ncm", "option"):
         ok("modem module %s from updates/eirl-modems/ (MODEMS.md §4)" % m,
            deps.get(m + ".ko") == "updates/eirl-modems/%s.ko" % m, deps.get(m + ".ko", "missing"))
+    for m in ("btusb", "btrtl"):
+        ok("Bluetooth module %s from updates/eirl-bluetooth/ (BLUETOOTH.md §3.8)" % m,
+           deps.get(m + ".ko") == "updates/eirl-bluetooth/%s.ko" % m, deps.get(m + ".ko", "missing"))
+    for f in ("rtl8761bu_fw.bin", "rtl8761bu_config.bin", "LICENCE.rtlwifi_firmware.txt"):
+        ok("Realtek Bluetooth firmware %s" % f, os.path.exists(os.path.join(R, "lib/firmware/rtl_bt", f)))
     dtb = "tegra210-p3448-0000-p3449-0000-b00-tc358743.dtb"
     ok("our DTB in /boot", os.path.exists(os.path.join(R, "boot", dtb)))
     ext = open(os.path.join(R, "boot/extlinux/extlinux.conf")).read()

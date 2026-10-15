@@ -44,12 +44,15 @@ type AppWatch struct {
 	Dest    bool // the Destination page: GET /destinations (an older app: GET /destination) every ~2 s
 	Status  bool // the Uplinks and Input pages: GET /status every ~2 s
 	Sources bool // the Input page: GET /sources every ~10 s (a camera just plugged in shows up)
+	// Bluetooth: the Bluetooth page (BLUETOOTH.md §3.6): GET /bluetooth every ~2 s, every second while it searches,
+	// is visible or an order on a device runs
+	Bluetooth bool
 }
 
 // AppAction is a change asked of the app.
 type AppAction struct {
 	What  string // language | name | timezone | ntp | time | setup_step | setup_complete | setup_restart | update_check | update_install | slots | cloud_pair, and MIXER.md §21's (AppActions)
-	Value string // language, name, timezone; setup_step: the step id
+	Value string // language, name, timezone; setup_step: the step id; bt_device: the order (pair | connect | disconnect | forget)
 	State string // setup_step: done | skipped
 	On    bool   // ntp
 	Time  time.Time
@@ -90,10 +93,17 @@ type AppAction struct {
 //	ap_channel    PUT /network/ap  Body: channel (auto | 1-11)
 //	ap_rotate     PUT /network/ap  (rotatePassword)
 //	lan_enabled   PUT /network/lan  Body: enabled (the cameras by cable)
+//	Bluetooth (BLUETOOTH.md §3.4); each answers the state → AppSnapshot.Bluetooth:
+//	bt_power      PUT /bluetooth  Body: on
+//	bt_scan       POST /bluetooth/scan (30 s)
+//	bt_visible    POST /bluetooth/visible  Body: on (the 2-minute window, D4)
+//	bt_device     POST /bluetooth/devices/{ID}/{Value}  ID: the address; Value: pair | connect | disconnect | forget
+//	bt_use        PUT /bluetooth/devices/{ID}  Body: use (listen | mic | input)
 var AppActions = []string{"dest_save", "dest_reveal", "dest_create", "dest_update", "dest_delete", "dest_activate",
 	"dest_secrets", "restart", "uplink", "input_save", "sources_scan",
 	"cloud_unlink", "password", "cam_add", "cam_rename", "cam_rotate", "cam_remove", "cam_creds", "ap_enabled",
-	"ap_channel", "ap_rotate", "lan_enabled", "modem_save", "modem_pin", "modem_reset", "modem_subnet"}
+	"ap_channel", "ap_rotate", "lan_enabled", "modem_save", "modem_pin", "modem_reset", "modem_subnet",
+	"bt_power", "bt_scan", "bt_visible", "bt_device", "bt_use"}
 
 // SecretsDropper is an App that can forget the secrets it read for the screen (DestSecrets, CamCreds): the page
 // that showed them calls it when it goes.
@@ -137,6 +147,9 @@ type AppSnapshot struct {
 	// The secrets an eye asked for (nil: not asked, or dropped): the stream key and passphrase, the cameras' URLs
 	DestSecrets *DestSecrets
 	CamCreds    []CamConnect
+	// The board's Bluetooth (BLUETOOTH.md §3.4): BluetoothAPI No is an app without it
+	Bluetooth    *BTState
+	BluetoothAPI Tri
 	// Local facts the engine knows itself (About): the build's commit and the board's IP addresses
 	Commit string
 	IPs    []string
@@ -488,6 +501,64 @@ type CamConnect struct {
 type CamURLs struct {
 	SRT, RTMP, RTMPServer, RTMPKey string
 	SRTQR                          []string
+}
+
+// BTState is GET /bluetooth (BLUETOOTH.md §3.4), validated by the client: whether there is Bluetooth (else why
+// not), whether it is on, the visible window (D4), the search, and the audio devices (paired first, then the ones a
+// search found).
+type BTState struct {
+	Available   bool
+	Reason      string // why not: no_stack | no_adapter; with Available, no_audio (devices managed, not heard) or ""
+	On          bool   // what was asked (saved)
+	Powered     bool   // how the adapter is
+	PowerFailed bool   // the adapter does not follow On (blocked, or its firmware fails): the app retries every minute
+	Name        string // how the encoder shows to other devices
+	Visible     bool
+	VisibleLeft int // seconds of the visible window left
+	Scanning    bool
+	Devices     []BTDevice
+}
+
+// BTDevice is one Bluetooth audio device.
+type BTDevice struct {
+	Address   string // AA:BB:CC:DD:EE:FF
+	Name      string
+	Kind      string // headphones | headset | speaker | phone | computer | audio
+	Paired    bool
+	Connected bool
+	Ready     bool     // its audio for its use is up
+	Use       string   // listen | mic | input ("" not paired)
+	Uses      []string // what it can be used for, in the order offered
+	RSSI      *int
+	Pending   string // an order running: pair | connect | disconnect | forget
+	Error     string // why the last order failed: rejected | timeout | not_reachable | gone | failed
+	Output    bool   // the monitor plays through it now
+}
+
+// Device is a device by its address (nil: not listed).
+func (b *BTState) Device(addr string) *BTDevice {
+	if b == nil || addr == "" {
+		return nil
+	}
+	for i := range b.Devices {
+		if b.Devices[i].Address == addr {
+			return &b.Devices[i]
+		}
+	}
+	return nil
+}
+
+// Busy: an order on a device runs (the app takes one at a time).
+func (b *BTState) Busy() bool {
+	if b == nil {
+		return false
+	}
+	for _, d := range b.Devices {
+		if d.Pending != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // AppResult is how an action went: OK, or the HTTP code with the app's error, message (in the device language)

@@ -139,10 +139,10 @@ func TestPureFindHDMI(t *testing.T) {
 			t.Errorf("FindHDMI = %+v, %v; want %+v, %v", d, ok, want, wantOK)
 		}
 	}
-	check(pcm, cards, Device{"hw:tegrahda,3", 0}, true)
+	check(pcm, cards, Device{Name: "hw:tegrahda,3", Card: 0}, true)
 	// If the HDMI card is not number 0 (another boot order), it still opens by name
-	check(strings.Replace(pcm, "00-03", "04-03", 1), strings.Replace(cards, " 0 [tegrahda", " 4 [tegrahda", 1), Device{"hw:tegrahda,3", 4}, true)
-	check(strings.Replace(pcm, "00-03", "07-03", 1), cards, Device{"hw:7,3", 7}, true) // no name: number
+	check(strings.Replace(pcm, "00-03", "04-03", 1), strings.Replace(cards, " 0 [tegrahda", " 4 [tegrahda", 1), Device{Name: "hw:tegrahda,3", Card: 4}, true)
+	check(strings.Replace(pcm, "00-03", "07-03", 1), cards, Device{Name: "hw:7,3", Card: 7}, true) // no name: number
 	check("02-00: USB Audio : USB Audio : capture 1\n", cards, Device{}, false)
 	check("00-03: HDMI 0 : HDMI 0 : capture 1\n", cards, Device{}, false) // no playback
 	check("", "", Device{}, false)
@@ -305,6 +305,7 @@ type rig struct {
 	mu      sync.Mutex
 	changes int
 	scr     ScreenView
+	bt      string // the app's Bluetooth file (BLUETOOTH.md): absent = the screen
 }
 
 func (r *rig) count() int { r.mu.Lock(); defer r.mu.Unlock(); return r.changes }
@@ -324,7 +325,7 @@ func makePhones(t *testing.T, saved string, names ...string) (*Phones, *rig, err
 		names = []string{"phtap", "phvalve"}
 	}
 	m := fake.New()
-	r := &rig{media: m, pgm: pipelineWith(m, names...), tap: &fakeTap{}}
+	r := &rig{media: m, pgm: pipelineWith(m, names...), tap: &fakeTap{}, bt: filepath.Join(t.TempDir(), "bluetooth.json")}
 	var raw json.RawMessage
 	if saved != "" {
 		raw = json.RawMessage(saved)
@@ -337,8 +338,9 @@ func makePhones(t *testing.T, saved string, names ...string) (*Phones, *rig, err
 			defer r.mu.Unlock()
 			return r.scr
 		},
-		Run:    func(time.Duration, string, ...string) sysx.Result { return sysx.Result{} },
-		NewTap: func(gst.Media, gst.Pipeline, gst.Element) Tap { return r.tap },
+		Run:       func(time.Duration, string, ...string) sysx.Result { return sysx.Result{} },
+		NewTap:    func(gst.Media, gst.Pipeline, gst.Element) Tap { return r.tap },
+		Bluetooth: r.bt,
 	})
 	if p != nil {
 		p.asound = t.TempDir()
@@ -357,10 +359,10 @@ func TestPhonesDefaultsAndSaved(t *testing.T) {
 	if s := p.Settings(); s != (Settings{On: true, GainDb: -12}) { // D1: on at -12 dB
 		t.Error(s)
 	}
-	if i := p.Info(); !reflect.DeepEqual(i, mixer.Phones{On: true, GainDb: -12, State: "off"}) {
+	if i := p.Info(); !reflect.DeepEqual(i, mixer.Phones{On: true, GainDb: -12, State: "off", Target: "screen"}) {
 		t.Error(i)
 	}
-	if b, _ := json.Marshal(p.Info()); string(b) != `{"on":true,"gainDb":-12,"state":"off"}` {
+	if b, _ := json.Marshal(p.Info()); string(b) != `{"on":true,"gainDb":-12,"state":"off","target":"screen"}` {
 		t.Error(string(b))
 	}
 	p, _, _ = makePhones(t, `{"on": false, "gainDb": -20}`)
@@ -477,7 +479,7 @@ func TestPhonesNoDeviceThenStop(t *testing.T) {
 func TestPhonesRetriesAfterError(t *testing.T) {
 	logs := quiet(t)
 	p, _, _ := makePhones(t, "")
-	p.find = func() (Device, bool) { return Device{"hw:tegrahda,3", 0}, true }
+	p.find = func() (Device, bool) { return Device{Name: "hw:tegrahda,3", Card: 0}, true }
 	var mu sync.Mutex
 	var calls []string
 	p.session = func(d Device) (string, bool) {
@@ -699,7 +701,7 @@ func TestListenBusError(t *testing.T) {
 		}
 		r.media.Find("headphones").Post(&gst.Message{Type: gst.MessageError, Src: "phsink", Text: "Could not write", Debug: "a\nb last"})
 	}()
-	e, failed := p.listen(Device{"hw:tegrahda,3", 0})
+	e, failed := p.listen(Device{Name: "hw:tegrahda,3", Card: 0})
 	if !failed || e != "Could not write" {
 		t.Error(e, failed)
 	}

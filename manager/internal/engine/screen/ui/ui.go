@@ -100,6 +100,9 @@ type UI struct {
 	pnote  pageNote // a page's own notice (pageNoteText)
 	// tapHeld is how long the finger was down on the tap being handled: a page's long press (pageDef.touch)
 	tapHeld time.Duration
+	// tapPick is what the page's pickAt said was under the finger when it went down, for the tap being handled
+	tapPick    string
+	tapHasPick bool
 	// The state of each area's pages (their own files)
 	inp  inputState
 	camp camsState
@@ -111,6 +114,7 @@ type UI struct {
 	// the uplink being switched (its row's switch halfway meanwhile) and to what
 	uplinkPend    string
 	uplinkPendOff bool
+	btp           btPage // the Bluetooth page (btpage.go)
 
 	lastAppLang string    // the device language the app last said (a change there is applied once)
 	lastResult  time.Time // the last action result handled (a failed language change goes back)
@@ -490,6 +494,11 @@ func (u *UI) settingsTouch(ev string, h Hit, x, y int, now time.Time) {
 				u.pick, u.hasPick = u.chooser.shown[i], true
 			}
 		}
+		if p := pageDefs[u.settingsPage]; p != nil && p.pickAt != nil && u.settingsView == "main" && !u.wizardOn() {
+			if id, ok := p.pickAt(u, h.Key); ok {
+				u.pick, u.hasPick = id, true
+			}
+		}
 		return
 	}
 	p := u.press
@@ -533,6 +542,8 @@ func (u *UI) pageTouch(what, pick string, hasPick bool) {
 		return
 	}
 	if p := pageDefs[u.settingsPage]; p != nil && p.touch != nil && !u.wizardOn() {
+		u.tapPick, u.tapHasPick = pick, hasPick
+		defer func() { u.tapPick, u.tapHasPick = "", false }() // only for this tap
 		if p.touch(u, what) {
 			u.Dirty = true
 			return

@@ -29,6 +29,10 @@ EnvironmentFile=-/etc/default/eirl-engine
 Environment=PULSE_SERVER=unix:/nonexistent
 # Without a user session there is no session D-Bus: GIO must not try to load gvfs (BASE.md §4.3)
 Environment=GIO_USE_VFS=local
+# alsa-lib 1.1.2-1.1.3 (the board's is 1.1.3) can deadlock a software plugin such as BlueALSA's (Bluetooth audio,
+# BLUETOOTH.md §3.7) with its thread-safe API: off, as alsa-lib was before 1.1.2. GStreamer's ALSA elements lock on
+# their own
+Environment=LIBASOUND_THREAD_SAFE=0
 # The GStreamer registry (and fontconfig's cache) in /var/cache/eirl-engine, not in a home
 CacheDirectory=eirl-engine
 Environment=XDG_CACHE_HOME=/var/cache/eirl-engine

@@ -141,9 +141,10 @@ type Entry struct {
 	Audio string
 }
 
-// AudioEntry is one audio input of the catalogue (used by the audio phase).
+// AudioEntry is one audio input of the catalogue (used by the audio phase). Profile: a Bluetooth input's
+// (a2dp | sco; checked where the device is built).
 type AudioEntry struct {
-	ID, Kind, Name string
+	ID, Kind, Name, Profile string
 }
 
 // Catalogue is `probe -list`. OK=false when the answer is not a catalogue: then nothing is removed or
@@ -223,8 +224,9 @@ func ParseList(out string, test bool, netValid NetworkValid, netName NetworkName
 		id, _ := str(a, "id")
 		kind, _ := str(a, "kind")
 		name, _ := str(a, "name")
+		profile, _ := str(a, "profile")
 		if id != "" {
-			c.Audio = append(c.Audio, AudioEntry{ID: id, Kind: kind, Name: name})
+			c.Audio = append(c.Audio, AudioEntry{ID: id, Kind: kind, Name: name, Profile: profile})
 		}
 	}
 	return c

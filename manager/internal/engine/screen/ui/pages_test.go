@@ -39,8 +39,13 @@ func TestSettingsPagesList(t *testing.T) {
 			t.Errorf("%s: watch %+v", p, w)
 		}
 	}
-	// The network list closes when another page is chosen (its scan stops)
+	// The network list closes when another page is chosen (its scan stops). The Wireless entry goes back to its tab
+	// last seen (Bluetooth, after the loop): the Wi-Fi tab
 	h.press("s_page_wifi", 0.1)
+	if h.u.settingsPage != "bluetooth" {
+		t.Fatalf("the Wireless entry opened %q, not its last tab", h.u.settingsPage)
+	}
+	h.press("s_tab_wifi", 0.1)
 	h.wifiState()
 	h.press("s_networks", 0.1)
 	if h.u.settingsView != "networks" {

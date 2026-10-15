@@ -1,0 +1,3 @@
+- Bluetooth : si l'encodeur dispose d'un adaptateur Bluetooth (par exemple un adaptateur USB comme le TP-Link UB500), dans Réglages › Sans fil › Bluetooth sur l'écran tactile ou sur la page web, vous pouvez connecter un casque ou une enceinte pour écouter le programme (l'écoute passe d'elle-même sur eux et revient à l'écran quand ils se déconnectent), et utiliser le micro d'un casque (qualité téléphone) ou un téléphone comme entrée audio supplémentaire.
+- Il est désactivé par défaut, et un téléphone ne peut trouver l'encodeur que pendant les 2 minutes où vous le rendez visible.
+- C'est une première version : si quelque chose ne fonctionne pas, dites-le-nous.

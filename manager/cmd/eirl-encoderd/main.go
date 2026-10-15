@@ -28,6 +28,8 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/api"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/audiolevel"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/auth"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/bluetooth"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/btaudio"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/cloud"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/config"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/device"
@@ -246,6 +248,21 @@ func main() {
 	go mods.Run(ctx)
 	go srv.Links.Run(ctx)
 	go inet.Run(ctx, func() []uplinks.Addr { return links.Targets(srv.Links.Current()) })
+	// Bluetooth audio (BLUETOOTH.md): always followed; without BlueZ (an image without it) or without an adapter,
+	// GET /bluetooth says so. It writes the engine's file (btaudio.Path) with the devices ready for audio
+	bt := bluetooth.New(bluetooth.Options{
+		ConfigPath: filepath.Join(*confDir, "bluetooth.json"), EnginePath: btaudio.Path,
+		Name: func() string {
+			if srv.Device == nil {
+				return ""
+			}
+			return srv.Device.Get().Name
+		},
+		Log:   log.With("component", "bluetooth"),
+		Read:  func(p string) ([]byte, error) { return safefile.ReadOwned(p, 16<<10) },
+		Write: config.WriteAtomic})
+	srv.Bluetooth = bt
+	go bt.Run(ctx)
 	if *cloudAPI != "" {
 		cl, err := newCloud(ctx, srv, *cloudAPI, *cloudApp, *confDir, *thumb, *defEnv, *listen, *unit, log)
 		if err != nil {

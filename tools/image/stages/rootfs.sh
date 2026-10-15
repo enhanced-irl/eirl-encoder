@@ -71,6 +71,14 @@ install -D -m 0644 /in/kernel/tc358743.ko "$R/lib/modules/$KERNEL_RELEASE/extra/
 for m in /in/kernel/modules/*.ko; do
   install -D -m 0644 "$m" "$R/lib/modules/$KERNEL_RELEASE/updates/eirl-modems/$(basename "$m")"
 done
+# Bluetooth (BLUETOOTH.md §3.8): btusb and btrtl with the Realtek RTL8761B(U) (TP-Link UB500 and most current dongles),
+# also from updates/, and its firmware, which Ubuntu 18.04's linux-firmware lacks (with its licence)
+for m in /in/kernel/modules-bt/*.ko; do
+  install -D -m 0644 "$m" "$R/lib/modules/$KERNEL_RELEASE/updates/eirl-bluetooth/$(basename "$m")"
+done
+for f in /in/kernel/firmware/rtl_bt/*; do
+  install -D -m 0644 "$f" "$R/lib/firmware/rtl_bt/$(basename "$f")"
+done
 in_root depmod -a "$KERNEL_RELEASE"
 install -m 0644 "/in/kernel/$DTB" "$R/boot/$DTB"
 # Our FDT in "primary" too: the nvidia-l4t-kernel postinst forces DEFAULT primary (IMAGE.md §3.3).
@@ -162,6 +170,10 @@ done
 # install. Whether it runs at boot is decided with the modems' work
 find "$R/etc/systemd/system" -name ModemManager.service -path '*.wants/*' -delete
 rm -f "$R/etc/systemd/system/dbus-org.freedesktop.ModemManager1.service"
+# bluetoothd (Bluetooth audio, BLUETOOTH.md §3.7) is installed but not enabled: its postinst enables it, and it only has
+# to run when the release's eirl-bluealsa.service (enabled by install.sh) pulls it in. One switch, ours
+find "$R/etc/systemd/system" -name bluetooth.service -path '*.wants/*' -delete
+rm -f "$R/etc/systemd/system/dbus-org.bluez.service"
 if [ "$DEBUG" = 1 ]; then
   step "DEBUG image: key-only eirl-debug user, ssh on"
   in_root useradd --create-home --shell /bin/bash --groups sudo,video,audio,systemd-journal eirl-debug

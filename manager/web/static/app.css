@@ -744,3 +744,26 @@ select.invalid { border-color: var(--error); box-shadow: 0 0 0 3px var(--error-a
 #dd-form .form-actions .dd-del { margin-right: auto; }
 .linkbtn { padding: 0; border: 0; background: none; font: inherit; color: var(--brand-300); text-decoration: underline; cursor: pointer; }
 .linkbtn:hover { color: var(--gray-50); }
+
+/* Bluetooth audio (BLUETOOTH.md §3.5): paired devices on top, the visible window, then what a search finds. A row is
+   the name and its state on the left and the buttons on the right, wrapping under it on a phone; what a paired device
+   is used for goes on its own line */
+.bt-devs { list-style: none; margin: 0 0 6px; padding: 0; }
+.bt-devs li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; padding: 10px 0; border-top: 1px solid var(--gray-800); }
+.bt-devs li:first-child { border-top: 0; padding-top: 0; }
+.bt-info { flex: 1 1 120px; min-width: 0; }
+.bt-devs .name { display: block; font-weight: 600; color: var(--gray-50); overflow-wrap: anywhere; }
+.bt-devs .meta { display: block; font-size: .78rem; color: var(--gray-400); }
+.bt-devs .meta.ok { color: var(--success-300); }
+.bt-devs .meta.warn { color: var(--warning-300) !important; }
+.bt-devs .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.bt-use { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: .82rem; color: var(--gray-400); }
+.bt-use select { flex: 1 1 180px; max-width: 320px; min-width: 0; }
+.bt-use select:disabled { opacity: .6; cursor: progress; }
+.bt-use-one { color: var(--gray-200); }
+.bt-none { margin: 0 0 10px; }
+.bt-via { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--gray-800); }
+.bt-found-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 14px 0 8px; padding-top: 12px; border-top: 1px solid var(--gray-800); }
+#bt-why { margin: 0; }
+#bt-on:disabled, #bt-visible:disabled { opacity: .6; cursor: progress; }
+.bt-sub { margin: 0 0 8px; }

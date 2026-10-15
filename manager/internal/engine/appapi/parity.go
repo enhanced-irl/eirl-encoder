@@ -47,6 +47,10 @@ func init() {
 		// Cellular modems (MODEMS.md §7); modem_pin's PIN goes as a secret field
 		"modem_save": {"PUT", "/modems/{id}"}, "modem_pin": {"POST", "/modems/{id}/pin"},
 		"modem_reset": {"POST", "/modems/{id}/reset"}, "modem_subnet": {"POST", "/modems/{id}/subnet"},
+		// Bluetooth (BLUETOOTH.md §3.4): checked and built by btRequest; bt_device's {action} is its Value
+		"bt_power": {"PUT", "/bluetooth"}, "bt_scan": {"POST", "/bluetooth/scan"},
+		"bt_visible": {"POST", "/bluetooth/visible"}, "bt_device": {"POST", "/bluetooth/devices/{id}/{action}"},
+		"bt_use": {"PUT", "/bluetooth/devices/{id}"},
 	}
 	for _, w := range ui.AppActions {
 		r, ok := routes[w]
@@ -112,6 +116,17 @@ func (d *DeviceState) runParity(q queued, route [2]string) {
 	a := q.a
 	path := route[1]
 	res := &ui.AppResult{What: a.What}
+	var body []byte
+	if isBT(a.What) { // only its route's fields, each of the right shape (btRequest), or it is not sent
+		b, ok := btRequest(a)
+		if !ok || len(q.secrets) > 0 {
+			res.Status, res.Code, res.At = 400, "bad_request", time.Now()
+			d.finish(res)
+			return
+		}
+		body = b
+		path = strings.Replace(path, "{action}", a.Value, 1) // one of btOrders
+	}
 	if strings.Contains(path, "{id}") {
 		if a.ID == "" || len(a.ID) > 200 {
 			res.Status, res.Code, res.At = 400, "bad_request", time.Now()
@@ -120,7 +135,9 @@ func (d *DeviceState) runParity(q queued, route [2]string) {
 		}
 		path = strings.Replace(path, "{id}", url.PathEscape(a.ID), 1)
 	}
-	body := parityBody(a, route[0], q.secrets)
+	if body == nil {
+		body = parityBody(a, route[0], q.secrets)
+	}
 	_, v, e := d.call("", route[0], path, body, d.actTimeout)
 	res.OK, res.At = e == nil, time.Now()
 	if e != nil {
@@ -181,6 +198,10 @@ func (d *DeviceState) runParity(q queued, route [2]string) {
 	case "cloud_unlink":
 		if c := cloudInfo(v); c != nil {
 			d.snap.Cloud, d.snap.CloudAPI = c, ui.Yes
+		}
+	case "bt_power", "bt_scan", "bt_visible", "bt_device", "bt_use": // {"ok": true, "bluetooth": the state now}
+		if b := btState(obj(v)["bluetooth"]); b != nil {
+			d.snap.Bluetooth, d.snap.BluetoothAPI = b, ui.Yes
 		}
 	}
 	d.mu.Unlock()
@@ -301,7 +322,7 @@ var (
 	audioKinds    = set("i2s", "usb", "network")
 	reMode        = regexp.MustCompile(`^(auto|[0-9]{2,5}x[0-9]{2,5}@[0-9]{1,6}(/[0-9]{1,6})?)$`)
 	reFormat      = regexp.MustCompile(`^(auto|[A-Z0-9]{2,8})$`)
-	reAudioID     = regexp.MustCompile(`^(auto|none|i2s|silence|test|alsa:[A-Za-z0-9_.-]{1,64}|net:cam[1-8])$`)
+	reAudioID     = regexp.MustCompile(`^(auto|none|i2s|silence|test|alsa:[A-Za-z0-9_.-]{1,64}|net:cam[1-8]|bt:[0-9A-F]{12})$`)
 	reEDID        = regexp.MustCompile(`^[A-Za-z0-9_.@-]{1,32}$`)
 	reUplink      = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,32}$`)
 	reModemID     = regexp.MustCompile(`^[mh]-[0-9a-f]{12}$`)

@@ -6,7 +6,8 @@
 #
 #   JETSON=jetson ./build/build.sh        → artefactos en build/out/
 #
-# It also builds the cellular modem modules into build/out/modules/ (MODEMS.md §4).
+# It also builds the cellular modem modules into build/out/modules/ (MODEMS.md §4) and the Bluetooth ones (btusb
+# and btrtl with the Realtek RTL8761B) into build/out/modules-bt/ (BLUETOOTH.md §3.8).
 #
 # Variables: JETSON (host ssh, para leer /proc/config.gz la primera vez), CACHE (descargas),
 # OUT (salida). El volumen Docker "l4t-src" guarda fuentes y kernel compilado (~3 GB).
@@ -22,6 +23,19 @@ L4T_URL=https://developer.download.nvidia.com/embedded/L4T/r32_Release_v7.6/sour
 L4T_SHA256=8e2d10fb5a582ab9802d4014740a54140bc204fcdcc29794bfa020a856d807c7
 
 mkdir -p "$CACHE" "$OUT"
+# The Realtek RTL8761B(U) Bluetooth firmware the patched btrtl loads (BLUETOOTH.md §3.8): linux-firmware 1.173 of
+# Ubuntu 18.04 does not have it. Pinned to a linux-firmware tag and verified; redistributable (its licence goes with it)
+RTLBT_TAG=20240909
+mkdir -p "$OUT/firmware/rtl_bt"
+for f in "rtl_bt/rtl8761bu_fw.bin 1d7a9597349ad89344fa16c1913d3e39e9a12e966e417ca16871bc79bbe59edb" \
+         "rtl_bt/rtl8761bu_config.bin 6c28a3f07c6a30ed208c4b64862a23f02b7d93543ea980edd24df16bab45095f" \
+         "LICENCE.rtlwifi_firmware.txt a61351665b4f264f6c631364f85b907d8f8f41f8b369533ef4021765f9f3b62e"; do
+  set -- $f
+  c="$CACHE/linux-firmware-$RTLBT_TAG-$(basename "$1")"
+  [ -f "$c" ] || { curl -fsSL -o "$c.part" "https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain/$1?h=$RTLBT_TAG" && mv "$c.part" "$c"; }
+  echo "$2  $c" | shasum -a 256 -c - >/dev/null || { echo "sha256 mismatch: $c" >&2; exit 1; }
+  cp "$c" "$OUT/firmware/rtl_bt/$(basename "$1")"
+done
 docker build -q -t "$IMAGE" "$HERE/build" >/dev/null
 docker volume inspect "$VOLUME" >/dev/null 2>&1 || docker volume create "$VOLUME" >/dev/null
 
@@ -71,6 +85,23 @@ for m in qmi_wwan cdc_mbim huawei_cdc_ncm option; do
   cp /tmp/modem/$m.ko /out/modules/
 done
 for m in /out/modules/*.ko; do printf "%s: " "$(basename $m)"; modinfo -F vermagic $m; done
+
+echo "== Bluetooth modules (BLUETOOTH.md §3.8)"
+# btusb and btrtl with the Realtek RTL8761B(U) (TP-Link UB500 and most current dongles): its project id, its
+# rtl8761bu firmware and the USB ids of its vendors, from upstream. Installed under /lib/modules/<release>/updates/
+# like the modem modules, so they take precedence over the stock btusb/btrtl
+rm -rf /tmp/bt && mkdir /tmp/bt
+cp $K/drivers/bluetooth/btusb.c $K/drivers/bluetooth/btrtl.c $K/drivers/bluetooth/btrtl.h \
+   $K/drivers/bluetooth/btintel.h $K/drivers/bluetooth/btbcm.h /proj/driver/bluetooth/Makefile /tmp/bt/
+(cd /tmp/bt && patch -s btrtl.c < /proj/driver/bluetooth/btrtl-8761b.patch \
+  && patch -s btusb.c < /proj/driver/bluetooth/btusb-8761bu-ids.patch)
+mk M=/tmp/bt modules 2>&1 | grep -vi "clock skew\|modification time" || true
+rm -rf /out/modules-bt && mkdir -p /out/modules-bt
+for m in btusb btrtl; do
+  [ -f /tmp/bt/$m.ko ] || { echo "Bluetooth module $m.ko was not built"; exit 1; }
+  cp /tmp/bt/$m.ko /out/modules-bt/
+done
+for m in /out/modules-bt/*.ko; do printf "%s: " "$(basename $m)"; modinfo -F vermagic $m; done
 
 echo "== DTB b00 + TC358743 en CAM1"
 P=/src/hardware/nvidia/platform/t210/porg/kernel-dts

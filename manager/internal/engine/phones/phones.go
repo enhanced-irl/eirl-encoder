@@ -27,6 +27,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/btaudio"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/detail"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/mixer"
 )
@@ -50,7 +51,13 @@ const (
 	// SinkBuffer is alsasink's buffer-time: what ALSA reads ahead. Whatever is written closer to its time
 	// falls into a chunk already read and is silently lost (HEADPHONES.md §1.3).
 	SinkBuffer = 40 * time.Millisecond
-	LateMargin = 30 * time.Millisecond // cushion for hiccups, on top of ALSA's buffer
+	// BTSinkBuffer is alsasink's buffer-time on Bluetooth headphones (BLUETOOTH.md §3.3). The same as the HDMI's:
+	// what cut the sound on the board was the clock slaving, not the buffer (BlueALSA's plugin keeps its pipe to a
+	// page), and every ms here is a ms more behind the screen
+	BTSinkBuffer = 40 * time.Millisecond
+	LateMargin   = 30 * time.Millisecond // cushion for hiccups, on top of ALSA's buffer
+	// TargetPoll: how often the monitor looks at where it should play (the app's Bluetooth file)
+	TargetPoll = time.Second
 	// MaxLates is how many arrival samples a Tap keeps between two takes (the Python list's cap).
 	MaxLates = 400
 	// MVMargin is what the screen adds to the program's marks (Python MV_MARGIN): keep it equal to the
@@ -185,11 +192,21 @@ func ParseCommand(msg map[string]any) (Change, string) {
 	return c, ""
 }
 
-// Device is the HDMI audio output: the ALSA device (by the card's name when it has one: its number
-// changes with the USB cards) and the card's number (for its ELD and its mixer).
+// Device is where the monitor plays: the HDMI audio output (the ALSA device, by the card's name when it has one:
+// its number changes with the USB cards, and the card's number, for its ELD and its mixer), or Bluetooth headphones
+// (BT: the device of the app's file, and Name its BlueALSA device; no card).
 type Device struct {
-	Name string // hw:tegrahda,3
+	Name string // hw:tegrahda,3 | bluealsa:DEV=…,PROFILE=…
 	Card int
+	BT   *btaudio.Device
+}
+
+// sameBT: the same Bluetooth target (nil: the HDMI).
+func sameBT(a, b *btaudio.Device) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Addr == b.Addr && a.Profile == b.Profile
 }
 
 var (
@@ -299,10 +316,17 @@ func P90(values []time.Duration) time.Duration {
 // written closer to its time falls into a chunk already read and does not sound, HEADPHONES.md §1.3)
 // and a cushion. late 0 = not measured.
 func TargetDelay(screen, late time.Duration) time.Duration {
+	return TargetDelayFor(screen, late, SinkBuffer)
+}
+
+// TargetDelayFor is TargetDelay with the sink's buffer (SinkBuffer on the HDMI, BTSinkBuffer on Bluetooth). On
+// Bluetooth, screen comes minus what the headphones add after the ALSA device (BLUETOOTH.md §3.3), so it can go
+// below zero: the arrival rules then.
+func TargetDelayFor(screen, late, buffer time.Duration) time.Duration {
 	if late == 0 {
 		return max(screen, 0)
 	}
-	return max(screen, late+SinkBuffer+LateMargin)
+	return max(screen, late+buffer+LateMargin)
 }
 
 // DelayMoved: whether the listening must change its latency (the screen was rebuilt with another one:

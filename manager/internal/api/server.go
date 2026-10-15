@@ -85,6 +85,9 @@ type Server struct {
 	// Network: network cameras and their access point (F7; nil = no eirl-netsetup: /network answers 503)
 	Network *network.Manager
 
+	// Bluetooth: the board's Bluetooth audio (BLUETOOTH.md); nil = none (GET answers no_stack)
+	Bluetooth BluetoothControl
+
 	// Cloud: link with an EnhancedIRL account (nil = off: /cloud answers 503)
 	Cloud CloudControl
 	// Mixer: the eirl-engine mixer (MIXER=1; nil = /mixer answers 503)
@@ -173,6 +176,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/network/wifi/scan", s.getNetworkWiFiScan)
 	mux.HandleFunc("POST /api/v1/network/wifi/connect", s.postNetworkWiFiConnect)
 	mux.HandleFunc("POST /api/v1/network/wifi/forget", s.postNetworkWiFiForget)
+	mux.HandleFunc("GET /api/v1/bluetooth", s.getBluetooth)
+	mux.HandleFunc("PUT /api/v1/bluetooth", s.putBluetooth)
+	mux.HandleFunc("POST /api/v1/bluetooth/scan", s.postBluetoothScan)
+	mux.HandleFunc("POST /api/v1/bluetooth/visible", s.postBluetoothVisible)
+	mux.HandleFunc("POST /api/v1/bluetooth/devices/{address}/{action}", s.postBluetoothDevice)
+	mux.HandleFunc("PUT /api/v1/bluetooth/devices/{address}", s.putBluetoothDevice)
 	mux.HandleFunc("PUT /api/v1/network/lan", s.putNetworkLAN)
 	mux.HandleFunc("POST /api/v1/cameras", s.postCamera)
 	mux.HandleFunc("PATCH /api/v1/cameras/{id}", s.patchCamera)

@@ -14,7 +14,7 @@ type SettingsGroup struct {
 var SettingsGroups = []SettingsGroup{
 	{"stream", []string{"dest", "uplinks", "pause"}},
 	{"sources", []string{"sources", "input", "camera"}},
-	{"wifi", []string{"wifi"}},
+	{"wifi", []string{"wifi", "bluetooth"}}, // Wireless (BLUETOOTH.md D6: a tab, so the list keeps seven entries)
 	{"cams", []string{"cams"}},
 	{"cloud", []string{"cloud"}},
 	{"device", []string{"language", "time", "account"}},

@@ -214,6 +214,9 @@ func (u *UI) linkName(id string) (name string, gone bool) {
 // it («disconnected») is always seen.
 func goneName(id string) string {
 	name := strings.TrimPrefix(id, "alsa:")
+	if isBTInput(id) && len(id) > 7 { // a Bluetooth device: its address's end
+		name = "Bluetooth …" + id[len(id)-4:]
+	}
 	if r := []rune(name); len(r) > goneNameMax {
 		name = string(r[:goneNameMax-1]) + "…"
 	}

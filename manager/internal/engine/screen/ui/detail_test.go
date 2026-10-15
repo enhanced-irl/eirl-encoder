@@ -21,8 +21,8 @@ var detailArgs = map[string][]string{"hdmi_mode_changed": {"from", "to"}, "hdmi_
 // arguments.
 func TestDetailsMatchEngine(t *testing.T) {
 	codes := detail.Codes()
-	if len(codes) != 39 {
-		t.Fatalf("the engine has %d codes: ENGINE_GO.md §13 says 39", len(codes))
+	if len(codes) != 40 {
+		t.Fatalf("the engine has %d codes: ENGINE_GO.md §13 says 40", len(codes))
 	}
 	for _, lang := range Languages {
 		tx := Lang(lang)

@@ -115,6 +115,10 @@ type PhonesStatus struct {
 	Detail     string            `json:"detail,omitempty"`
 	DetailCode string            `json:"detailCode,omitempty"`
 	DetailArgs map[string]string `json:"detailArgs,omitempty"`
+	// Target is where the monitor plays (BLUETOOTH.md §3.3): screen (its jack) or bluetooth, then Device is the
+	// Bluetooth device's name. Absent from an older engine: the screen's
+	Target string `json:"target,omitempty"`
+	Device string `json:"device,omitempty"`
 }
 
 // ParseStatus decodes the engine's state JSON.

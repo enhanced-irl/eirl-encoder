@@ -7,6 +7,9 @@
 
 # Headphones on the screen: program audio over HDMI
 
+> Since Oct 15 the same monitor can play through **Bluetooth headphones** instead: [`BLUETOOTH.md`](BLUETOOTH.md) §3.3
+> (`audio.phones.target`).
+
 The request (Oct 13): send the **program audio** over the board's HDMI to the touch screen, to listen to it
 with headphones plugged into the **jack the screen already has**.
 

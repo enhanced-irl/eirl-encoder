@@ -243,10 +243,11 @@ sudo systemctl restart eirl-encoderd</pre>
           <p id="mixer-follow-note" class="hint" hidden data-i18n="mixer.followNote"></p>
           <p id="mixer-audio-hint" class="hint" data-i18n="mixer.audioHint"></p>
           <p id="mixer-mix-note" class="hint" hidden></p>
-          <!-- Screen headphones: the program audio through the HDMI (an older engine does not send it) -->
+          <!-- Screen headphones: the program audio through the HDMI, or through Bluetooth headphones when some are
+               connected (an older engine does not send it) -->
           <div id="mixer-phones" class="mx-phones" hidden>
             <div class="mx-arow mx-gain">
-              <label class="mx-follow"><input id="mixer-phones-on" type="checkbox" role="switch"> <span data-i18n="mixer.phones"></span></label>
+              <label class="mx-follow"><input id="mixer-phones-on" type="checkbox" role="switch"> <span id="mixer-phones-label" data-i18n="mixer.phones"></span></label>
               <output id="mixer-phones-val" aria-hidden="true"></output>
               <input id="mixer-phones-gain" type="range" min="-40" max="0" step="2" data-i18n-attr="aria-label:mixer.phonesGainAria">
             </div>
@@ -644,6 +645,32 @@ sudo systemctl restart eirl-encoderd</pre>
           <summary><span data-i18n="wifi.apNetwork"></span> <span id="cams-ssid" class="sub"></span></summary>
           <div id="cams-wifi-body"></div>
         </details>
+      </section>
+
+      <!-- Bluetooth audio (BLUETOOTH.md §3.5): headphones or a speaker to listen to the program, a headset's microphone
+           or a phone as inputs. settings.js, from GET /bluetooth; an older app answers 404 and the card stays hidden -->
+      <section id="bt-card" class="card" aria-labelledby="bt-title" hidden>
+        <div class="card-head">
+          <h3 id="bt-title" class="card-title" data-i18n="bt.title"></h3>
+          <label id="bt-on-row" class="mx-follow cams-master" hidden><span id="bt-on-txt" class="sub"></span><input id="bt-on" type="checkbox" role="switch" data-i18n-attr="aria-label:bt.switchAria"></label>
+        </div>
+        <p id="bt-warn" class="uplinks-warn" role="status" hidden></p>
+        <p id="bt-why" class="hint" hidden></p>
+        <div id="bt-body" hidden>
+          <h4 class="sub-title bt-sub" data-i18n="bt.paired"></h4>
+          <ul id="bt-paired" class="bt-devs"></ul>
+          <p id="bt-paired-none" class="hint bt-none" data-i18n="bt.noPaired" hidden></p>
+          <div class="cams-via bt-via">
+            <label class="mx-follow"><input id="bt-visible" type="checkbox" role="switch"><span><span data-i18n="bt.visible"></span> <span id="bt-visible-txt" class="sub"></span></span></label>
+          </div>
+          <p id="bt-visible-hint" class="hint"></p>
+          <div class="bt-found-head">
+            <h4 class="sub-title" data-i18n="bt.found"></h4>
+            <button id="bt-scan" class="btn small" type="button"></button>
+          </div>
+          <ul id="bt-found" class="bt-devs"></ul>
+          <p id="bt-found-none" class="hint bt-none" aria-live="polite"></p>
+        </div>
       </section>
 
       <section id="cams-card" class="card" aria-labelledby="cams-title" hidden>

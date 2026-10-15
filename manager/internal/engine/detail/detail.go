@@ -92,7 +92,9 @@ var texts = map[string]func(map[string]string) string{
 	"net_no_video": func(a map[string]string) string { // tracks: what it sends, comma separated
 		return clip("la cámara no manda H.264 ni H.265 ("+a["tracks"]+")", 120)
 	},
-	"net_no_audio":     fixed("la cámara no manda audio"),
+	"net_no_audio": fixed("la cámara no manda audio"),
+	// Bluetooth (BLUETOOTH.md): a device used as an input that is connected but sends nothing (a phone not playing)
+	"bt_no_audio":      fixed("el dispositivo Bluetooth no manda audio"),
 	"net_disconnected": fixed("la cámara se ha desconectado"),
 	"net_behind":       func(a map[string]string) string { return "va " + a["seconds"] + " s atrasada" }, // seconds: "2.4"
 

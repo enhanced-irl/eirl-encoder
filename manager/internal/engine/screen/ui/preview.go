@@ -133,3 +133,9 @@ func (p Preview) Confirming(what string) { p.u.confirmTap(what) }
 
 // Touch is a tap on a page's button (Settings open on its page).
 func (p Preview) Touch(key string) { p.u.pageTouch(key, "", false) }
+
+// OpenBTDevice shows a Bluetooth device's view (Settings › Wireless › Bluetooth).
+func (p Preview) OpenBTDevice(addr string) { p.u.btp.view = addr }
+
+// BTListPage shows a page of the Bluetooth page's list.
+func (p Preview) BTListPage(n int) { p.u.btp.page = n }

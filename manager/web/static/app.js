@@ -338,6 +338,7 @@ const DETAIL_ARGS = {
   gone: [], no_bus: [], no_format: [], unsupported: ['error'], probe_failed: ['rc', 'error'], hung_given_up: [],
   hung_on_air_unknown: [], hung_on_air: [], port_reset: [],
   net_receiver_down: [], net_waiting: [], net_no_video: ['tracks'], net_no_audio: [], net_disconnected: [], net_behind: ['seconds'],
+  bt_no_audio: [],
   phones_waiting_screen: [], phones_screen_no_audio: [], phones_no_device: [], phones_not_opening: [],
   no_image: [], frames_stopped: ['seconds'], no_samples: ['seconds'], stream_ended: [], audio_ended: [], stream_error: ['error'],
   start_failed: [], build_failed: ['error'], no_sink: [], prepare_failed: [], internal_error: ['error'],
@@ -2812,8 +2813,11 @@ $('mixer-pause-form').addEventListener('submit', async (ev) => {
 });
 
 // An audio input's name with its camera's number (the same as in «Sources»), if it belongs to one
+// An audio input's name: a camera's carries its slot; a Bluetooth device (a headset's microphone, a phone) says so
+// after its name, like the kind of a slot's candidate (settings.js, slotLabel)
 function audioName(x) {
-  const name = fixedName(x.id, x.name);
+  const fixed = fixedName(x.id, x.name);
+  const name = x.kind === 'bluetooth' ? `${fixed} · ${t('kind.bluetooth')}` : fixed;
   return x.videoSlot ? `${x.videoSlot} · ${name}` : name;
 }
 
@@ -3114,6 +3118,14 @@ const rerenderPhones = () => renderPhones(state.mixer && state.mixer.audio && st
 function renderPhones(p) {
   $('mixer-phones').hidden = !p;
   if (!p) return;
+  // Where they play (BLUETOOTH.md §3.3): through Bluetooth headphones or a speaker while one is connected, else the
+  // screen's jack. An older engine does not say (no target): the screen's, as always. The label keeps its key in
+  // data-i18n, so a language change redoes it right
+  const viaBt = p.target === 'bluetooth';
+  const device = p.device || t('kind.bluetooth');
+  const label = $('mixer-phones-label');
+  label.dataset.i18n = viaBt ? 'mixer.phonesBt' : 'mixer.phones';
+  setI18nText(label, label.dataset.i18n);
   const cb = $('mixer-phones-on');
   if (!cb.dataset.busy) cb.checked = p.on;
   const inp = $('mixer-phones-gain');
@@ -3125,10 +3137,10 @@ function renderPhones(p) {
   const note = $('mixer-phones-note');
   const err = p.on && p.state === 'error';
   note.classList.toggle('err', err);
-  note.textContent = !p.on ? t('phones.off')
+  note.textContent = !p.on ? (viaBt ? t('phones.offBt', { device }) : t('phones.off'))
     : err ? t('phones.error', { detail: inSentence(detailText(p)) || t('phones.errorDefault') })
     : p.state === 'waiting' ? t('phones.waiting', { detail: detailText(p) || t('phones.waitingDefault') })
-    : t('phones.on');
+    : viaBt ? t('phones.onBt', { device }) : t('phones.on');
 }
 
 function showPhonesGain(g) {

@@ -1,0 +1,45 @@
+# BlueALSA: the Bluetooth audio of the encoder (BLUETOOTH.md §3.7). It registers with BlueZ the profiles the encoder
+# plays (A2DP source: headphones and speakers; hands-free and headset gateway: a headset's microphone and earpiece)
+# and receives (A2DP sink: a phone or a player), and gives each connected device its PCMs, which the engine opens
+# through the ALSA plugin (bluealsa:DEV=…,PROFILE=…). Only on a system with BlueZ: without it, the condition skips it.
+[Unit]
+Description=EnhancedIRL encoder Bluetooth audio (BlueALSA)
+ConditionPathExists=/usr/lib/bluetooth/bluetoothd
+# Wants pulls bluetoothd in even where its unit is not enabled (the base system disabled it until Oct 15)
+Wants=bluetooth.service
+After=bluetooth.service dbus.service
+Requires=dbus.service
+
+[Service]
+Type=dbus
+BusName=org.bluealsa
+# -S: syslog. SBC and CVSD only (build/bluealsa.sh). Its own system user, not root (security review): it decodes what a
+# paired device sends (SBC, the hands-free AT commands), and as root a flaw there would be the whole board, even
+# sandboxed (root can ask systemd over the bus). Its name and BlueZ, through eirl-encoder-bluetooth.conf
+User=bluealsa
+Group=bluealsa
+ExecStart=/usr/local/bin/bluealsa -S -p a2dp-source -p a2dp-sink -p hfp-ag -p hsp-ag
+Restart=on-failure
+RestartSec=2
+# What it keeps per device (volumes): /var/lib/bluealsa
+StateDirectory=bluealsa
+StateDirectoryMode=0700
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_BLUETOOTH
+RestrictNamespaces=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+LockPersonality=yes
+# The SCO links of the hands-free profile and the adapter's voice setting go through HCI
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+
+[Install]
+WantedBy=multi-user.target
