@@ -1,5 +1,5 @@
 > **Status:** IN PROGRESS — v1 complete and deployed (phases 0-4, Oct 8); phase 5 (WebRTC preview with audio) deployed on Oct 8; in `main` (MR !1); pending: testing it on a real phone and the items in §12
-> **Updated:** 2026-10-15 (saved destinations and output protocols, §3 and §10: [`OUTPUTS.md`](OUTPUTS.md), not deployed)
+> **Updated:** 2026-10-15 (saved destinations and output protocols, §3 and §10: [`OUTPUTS.md`](OUTPUTS.md), released in v0.5.0)
 >
 > SRTLA and adaptive bitrate (branch `feat/srtla`, not deployed): design in [`SRTLA.md`](SRTLA.md); here, what changes in the API.
 >

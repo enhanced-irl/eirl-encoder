@@ -1,4 +1,4 @@
-> **Status:** IN PROGRESS — **in `main` (MR !5)**, phase 0 measured (1080p60 over USB fits), installed and tested on the board on Oct 12 (hot unplugging too). Still missing: per-source A/V sync and a long test. Camera image settings (§7): in a branch, Oct 14. Plugging and unplugging while running, and the audio following the video slots (§8): in a branch, Oct 15
+> **Status:** IN PROGRESS — **in `main` (MR !5)**, phase 0 measured (1080p60 over USB fits), installed and tested on the board on Oct 12 (hot unplugging too). Still missing: per-source A/V sync and a long test. Camera image settings (§7): released in v0.4.0. Plugging and unplugging while running, and the audio following the video slots (§8): released in v0.6.0
 > **Updated:** 2026-10-15
 
 # Encoder video sources (board HDMI, capture cards and USB cameras)

@@ -1,38 +1,130 @@
-> **Status:** IN PROGRESS — video + audio from the board's HDMI or from a USB capture card/camera → SRT/SRTLA as a systemd service, stable; latency ~1.06 s (HDMI)
-> **Updated:** 2026-10-14
+> **Status:** IN PROGRESS — released and updating itself over the air (latest: v0.6.1, Oct 15); see [Status](#status)
+> **Updated:** 2026-10-15
 
-# eirl-encoder — EnhancedIRL's HDMI → SRT encoder (Jetson Nano + TC358743)
+# eirl-encoder
 
-**eirl-encoder** is an open hardware and software encoder and live mixer for IRL ("in real life")
-streaming. It is built on an NVIDIA **Jetson Nano** with a **Toshiba TC358743** HDMI-to-CSI-2 bridge:
-it takes the HDMI input, USB capture cards and cameras, and network cameras or phones, mixes them
-from a **touch screen**, and streams the program as H.264/AAC over **SRT** or **SRTLA** (several
-internet uplinks bonded together). A **local web app** runs it from a phone or a laptop, and the
-encoder can optionally be linked to an [EnhancedIRL](https://enhancedirl.com) account to control it
-from the cloud.
+**eirl-encoder** is an open-source hardware encoder and live mixer for IRL ("in real life") streaming,
+built on an NVIDIA **Jetson Nano**. It takes the board's HDMI input (through a **Toshiba TC358743**
+HDMI-to-CSI-2 bridge), USB capture cards and cameras, and phones or cameras over the network, mixes
+them from a **touch screen**, and streams the program in **H.264 or H.265** with AAC audio over **SRT,
+SRTLA, RTMP, RTMPS, RIST or UDP/RTP**. With SRTLA or RIST the stream is shared across several internet
+links at once (Ethernet, Wi-Fi, 4G/5G modems, phones). A **web app** runs it from a phone or a laptop,
+and the encoder can optionally be linked to an [EnhancedIRL](https://enhancedirl.com) account to control
+it from the cloud.
+
+<p align="center">
+  <img src="docs/screenshots/screen-mixer.png" width="820" alt="The encoder's touch screen: the program with a picture-in-picture, four sources below, the layout and transition buttons, and the connections and output in the header">
+</p>
+
+## Screenshots
+
+| The web app (desktop) | The web app (phone) |
+|---|---|
+| <img src="docs/screenshots/web-dashboard.jpg" width="520" alt="The web app: the program preview, the status of the signal, audio, connection and board, the internet links and the sources"> | <img src="docs/screenshots/web-phone.png" width="240" alt="The web app on a phone: the program preview, the audio meters, Stop streaming and the sources"> |
+
+| Saved destinations | Video settings per destination |
+|---|---|
+| ![Settings › Stream › Destination on the touch screen: EnhancedIRL over SRTLA, Twitch over RTMP in use, and a RIST destination](docs/screenshots/screen-destinations.png) | ![A destination's video settings on the touch screen: H.265, 720p output, adaptive bitrate between 1 and 8 Mbps, half the frame rate](docs/screenshots/screen-destination-video.png) |
+
+| Connections (bonding) | Audio mixer |
+|---|---|
+| ![Settings › Stream › Connections on the touch screen: Ethernet, Wi-Fi and three modems, each with its health dot and its share of the stream](docs/screenshots/screen-connections.png) | ![The audio view on the touch screen: one strip per source with its level, gain and on-air state, and the program strip with the headphones](docs/screenshots/screen-audio.png) |
+
+| A USB camera's image settings | |
+|---|---|
+| ![Settings › Sources › Image on the touch screen: brightness, contrast, saturation and sharpness of a USB camera](docs/screenshots/screen-camera-image.png) | |
+
+*The screenshots are synthetic: the touch screen is drawn by `eirl-ui-render` and the web page is served by the
+simulated encoder (`eirl-encoder-sim`), with illustrations in place of the cameras. `tools/screenshots/shots.sh`
+draws them again.*
 
 ## Features
 
-- **Inputs**: the board's HDMI through the TC358743 over CSI (up to 1080p50 or 720p60, with HDMI
-  audio over I2S); USB capture cards (Elgato Cam Link 4K up to 1080p60, MS2130, MS2109) and UVC
-  cameras; network cameras and phones over RTMP or SRT, through the encoder's own Wi-Fi access point
-  or by cable; a test source.
+- **Inputs**: the board's HDMI through the TC358743 over CSI (up to 1080p50 or 720p60, with HDMI audio
+  over I2S); USB capture cards (Elgato Cam Link 4K up to 1080p60, MS2130, MS2109) and UVC cameras, plugged
+  in and unplugged while running; phones and cameras over RTMP or SRT (H.264 or H.265, e.g. Moblin or
+  Larix), through the encoder's own Wi-Fi access point or by cable; a test pattern. Four mixer slots with
+  your own names, and more cameras connected than slots if you want.
+- **Camera image settings** for USB cameras that have them (brightness, contrast, saturation, sharpness,
+  exposure, gain, white balance, focus, zoom, framing, anti-flicker), applied live and remembered per
+  camera.
 - **Live mixer** (the mixer is the encoder): cut and fade, picture-in-picture (4 corners, 2 sizes),
   side by side, a full-screen pause slate with text, letterboxing for sources that are not 16:9.
   Multiview on a 1024×600 touch screen on the board's HDMI output: put a source on air with a touch,
-  hold to go live, lock the screen.
+  hold to go live, lock the screen. The web and the screen are two views of the same state.
 - **Audio independent from video**: one input or a mix, with per-input gain and delay, "audio follows
   video", and headphones on the screen's jack (the program audio over HDMI).
-- **Output**: hardware H.264 (NVENC) and AAC over SRT (caller or listener) or SRTLA bonding across
-  Ethernet, USB modems and Wi-Fi, with adaptive bitrate; going live or stopping is done hot, without
-  interrupting the preview.
-- **Local web app** (`eirl-encoderd`, a static Go binary): low-latency WebRTC preview with audio,
-  level meters, destination, sources, network and Wi-Fi settings, logs. LAN only, password
-  protected, strict input validation, least privilege (no root, exact sudo rules).
-- **Networking**: the board's own Wi-Fi access point for cameras, Wi-Fi client, cameras by cable.
+- **Encoding**: hardware **H.264** (High) or **H.265** (Main) with the Jetson's NVENC, and AAC. Per
+  destination: codec, video and audio bitrate, adaptive bitrate, output size (the program's, 720p or
+  540p) and frame rate (full or half).
+- **Output protocols**:
+
+  | Protocol | Notes |
+  |---|---|
+  | SRT | Caller or listener |
+  | SRTLA | SRT bonded across all the enabled links, to an SRTLA receiver such as EnhancedIRL's relays |
+  | RTMP / RTMPS | Straight to the platforms; H.265 over Enhanced RTMP where the platform takes it. A single connection, over the healthiest link |
+  | RIST | Simple or main profile, optionally encrypted, bonded across the links |
+  | UDP / RTP | MPEG-TS to the local network, unicast or multicast |
+
+- **Saved destinations**: several destinations (templates for EnhancedIRL, Twitch, YouTube, Kick, Facebook,
+  or your own), one active; switching destination while live brings the stream back within a second,
+  without restarting the encoder.
+- **Connections**: Ethernet, Wi-Fi client, USB 4G/5G modems (HiLink and ModemManager: PIN, APN, roaming,
+  network type) and phones; a health dot per link (good, weak, no internet), and a link with no internet
+  stops carrying the stream until it recovers.
+- **Web app** (`eirl-encoderd`, a static Go binary): low-latency WebRTC preview with audio, level
+  meters, sources, destinations, connections, Wi-Fi, network cameras, updates and logs. LAN only,
+  password protected, strict input validation, least privilege (no root, exact sudo rules).
+- **The board's Wi-Fi**: its own access point for cameras and phones, and a Wi-Fi client as one more
+  uplink.
+- **In English, Spanish and French** (the touch screen and the web), with a **first-boot setup wizard**
+  (language, time zone, network, web password, the device's name, optional EnhancedIRL link).
+- **Signed over-the-air updates** from GitHub Releases (ed25519): the encoder offers them, never installs
+  while streaming, and goes back to the previous version by itself if the new one does not start.
+- Boot splash, its own fan control, and a slimmed-down base OS; a ready-to-flash microSD image is on its way
+  ([`IMAGE.md`](IMAGE.md)).
 - **Optional link to EnhancedIRL**: status, thumbnails and remote control from the EnhancedIRL app.
-- Boot splash, a slimmed-down base OS and, in progress, interface translations (English, Spanish and
-  French), signed over-the-air updates and a first-boot setup wizard.
+
+## Getting started
+
+Hardware: a **Jetson Nano Developer Kit 4 GB (carrier B01)** on **L4T R32.7.6**, a TC358743 HDMI-to-CSI
+board on CAM1 (with its I2S lines for HDMI audio), a **5 V 4 A** power supply and, optionally, a 1024×600
+HDMI touch screen. See [Hardware](#hardware).
+
+1. Build and install the TC358743 module and the device tree ([Building](#building),
+   [Installing on the Jetson](#installing-on-the-jetson)).
+2. Download the latest release from [GitHub Releases](https://github.com/enhanced-irl/eirl-encoder/releases)
+   and run `sudo ./install.sh` in the extracted bundle: it installs the app, the engine, the senders and the
+   units, with the output off and no destination. It relies on what L4T itself provides (GStreamer with
+   NVIDIA's plugins, among others: see [Installing on the Jetson](#installing-on-the-jetson)).
+3. Open the touch screen, or `http://<device>.local` from a phone or a laptop on the same network, and follow
+   the setup wizard. From then on, new versions arrive over the air ([`UPDATES.md`](UPDATES.md)).
+
+The microSD image ([`IMAGE.md`](IMAGE.md)) will turn this into "flash the card and power on".
+
+## How it works
+
+```
+HDMI ─▶ TC358743 ─CSI─┐
+USB capture / UVC ────┼─▶ mixer (nvcompositor) ─▶ program ─┬─▶ NVENC H.264/H.265 + AAC ─▶ MPEG-TS ─▶ sender ─▶ SRT · SRTLA · RTMP(S) · RIST · UDP
+phones / cameras ─────┘   (network sources: RTMP/SRT       ├─▶ multiview on the touch screen (the board's HDMI output)
+  (RTMP/SRT, NVDEC)        received by MediaMTX)           └─▶ small H.264 + Opus ─▶ WebRTC preview in the web
+```
+
+The engine (`eirl-engine`, Go on GStreamer 1.14) captures every source, composes the program and encodes it.
+GStreamer 1.14, the one in L4T 32.7, has no `srtsink`, `rtmp2sink` or `ristsink`, so SRT, SRTLA, RTMP(S) and
+RIST each have a sender process fed with the MPEG-TS: `srt-live-transmit` (Haivision SRT 1.5.7, built by
+`build/srt.sh`, through a named FIFO), `srtla_send` behind it for SRTLA, our own `eirl-send` (Go, RTMP and
+RTMPS) and librist's `ristsender` ([`OUTPUTS.md`](OUTPUTS.md) §4); UDP/RTP leaves straight from GStreamer. All
+of them are built and shipped in the release bundle. The senders report
+their state and statistics back, which drives the retries, the reasons shown to the user and the adaptive
+bitrate. Changing destination only restarts the output, never the engine.
+
+The management app (`eirl-encoderd`) serves the web and the local API, keeps the settings and the saved
+destinations, manages the network (access point, Wi-Fi client, modems, link health) and the cloud link, and
+talks to the engine over a local socket. Details in [`MIXER.md`](MIXER.md), [`ENGINE_GO.md`](ENGINE_GO.md)
+and [`MANAGER.md`](MANAGER.md).
 
 ## Repository layout
 
@@ -41,65 +133,41 @@ from the cloud.
 | `driver/` | Patch for L4T R32.7.6's TC358743 driver, built as an out-of-tree module | This README: "Building", "Bugs found and fixed" |
 | `dt/` | Device-tree fragments: the TC358743 on the CSI port and I2S4 audio | This README: "Installing on the Jetson" |
 | `edid/` | EDID generator (modes up to 1080p50, LPCM stereo 48 kHz only) | This README: "HDMI signal and EDID" |
-| `build/` | Docker build (arm64) of the module, the DTB, the EDIDs, `srtla_send` and MediaMTX | This README: "Building" |
-| `manager/cmd/eirl-engine`, `manager/internal/engine/` | The engine (Go, `eirl-engine-go`): capture, mixer, screen, audio, output. It replaced the original bash + Python engine, retired on Oct 14 | [`MIXER.md`](MIXER.md), [`ENGINE_GO.md`](ENGINE_GO.md), [`SOURCES.md`](SOURCES.md), [`HEADPHONES.md`](HEADPHONES.md), this README: "Operating" |
+| `build/` | Docker build (arm64) of the module, the DTB, the EDIDs, the engine, `srt-live-transmit`, `srtla_send`, `ristsender` and MediaMTX | This README: "Building" |
+| `manager/cmd/eirl-engine`, `manager/internal/engine/` | The engine (Go): capture, mixer, touch screen, audio, output and senders | [`MIXER.md`](MIXER.md), [`ENGINE_GO.md`](ENGINE_GO.md), [`SOURCES.md`](SOURCES.md), [`HEADPHONES.md`](HEADPHONES.md), [`OUTPUTS.md`](OUTPUTS.md) |
+| `manager/cmd/eirl-send`, `manager/internal/rtmpsend` | The RTMP/RTMPS sender | [`OUTPUTS.md`](OUTPUTS.md) |
 | `scripts/`, `systemd/` | The engine's launcher (`eirl-engine-start`), its socket client (`eirl-enginectl`), the boot HDMI init and the systemd units | This README: "Operating" |
-| `manager/` | The management app `eirl-encoderd` (Go: local web and API, cloud link), the network helper `eirl-netsetup`, the boot splash `eirl-splash`, a simulated encoder and the deploy files | [`MANAGER.md`](MANAGER.md), [`NETWORK_SOURCES.md`](NETWORK_SOURCES.md), [`WIFI.md`](WIFI.md), [`SRTLA.md`](SRTLA.md), [`SPLASH.md`](SPLASH.md), [`SETUP.md`](SETUP.md) |
-| `release/`, `manager/internal/update/`, `manager/cmd/eirl-update/` | Signed releases and over-the-air updates | [`UPDATES.md`](UPDATES.md) |
-| `base/` | Recipe to slim down the Jetson's base OS | [`BASE.md`](BASE.md) |
-| `tools/`, `mixer/`, `network/`, `latency/`, `monitor/` | Deployment, test and measurement tools | The doc of each piece |
+| `manager/` | The management app `eirl-encoderd` (Go: local web and API, destinations, network, modems, cloud link), the network helper `eirl-netsetup`, the fan daemon `eirl-fan`, the boot splash `eirl-splash`, a simulated encoder (`eirl-encoder-sim`), a screen renderer (`eirl-ui-render`) and the deploy files | [`MANAGER.md`](MANAGER.md), [`NETWORK_SOURCES.md`](NETWORK_SOURCES.md), [`WIFI.md`](WIFI.md), [`MODEMS.md`](MODEMS.md), [`SRTLA.md`](SRTLA.md), [`SPLASH.md`](SPLASH.md), [`SETUP.md`](SETUP.md), [`FAN.md`](FAN.md) |
+| `release/`, `manager/internal/update/`, `manager/cmd/eirl-update/`, `manager/cmd/eirl-release/` | Signed releases and over-the-air updates | [`UPDATES.md`](UPDATES.md) |
+| `base/`, `tools/image/` | The slimmed-down base OS and the microSD image | [`BASE.md`](BASE.md), [`IMAGE.md`](IMAGE.md) |
+| `tools/`, `latency/`, `monitor/` | Deployment, release, test and measurement tools | The doc of each piece |
+| `docs/screenshots/` | The pictures of this README | — |
 
-The rest of this README is the operating manual: hardware, building, installing, operating, the bugs
-found and the state of the test board.
+The rest of this README is the manual of the HDMI capture and the board: hardware, building, installing,
+operating, the bugs found and the history of the test board.
 
-## About this encoder
+## Status
 
-EnhancedIRL's own hardware encoder. Until 2026-10-07 it lived in the `devops` repo
-(`encoders/jetson-nano-tc358743/`, MRs !336 and !343); it was moved here keeping its history.
+| Area | State | Doc |
+|---|---|---|
+| HDMI capture (TC358743) | ✅ 1080p30 and 1080p50 in real streams, HDMI audio, A/V in sync to the frame, ~1.06 s end-to-end latency. Open: the audio PLL that sometimes does not lock again, a DSLR that does not decode | This README |
+| USB sources | ✅ Released: Cam Link 4K at 1080p60, UVC webcams; plugging and unplugging while running (0.6.0); image settings (0.4.0). Missing: per-source A/V sync and a long test | [`SOURCES.md`](SOURCES.md) |
+| Mixer, touch screen and audio | ✅ Released: 4 slots, layouts, fades, audio mixer, headphones; Settings on the screen with everything the web has | [`MIXER.md`](MIXER.md), [`HEADPHONES.md`](HEADPHONES.md) |
+| Network cameras | ✅ Released: RTMP/SRT over the encoder's Wi-Fi or by cable; for now, one network camera at a time | [`NETWORK_SOURCES.md`](NETWORK_SOURCES.md) |
+| Output protocols and codecs | ✅ Released in 0.5.0 (SRT, SRTLA, RTMP, RTMPS, RIST, UDP; H.264/H.265; saved destinations). First version: tests with real platform keys still to come | [`OUTPUTS.md`](OUTPUTS.md) |
+| SRTLA and adaptive bitrate | ✅ Released; tested over loopback and with a real link to EnhancedIRL. Tests with several real links are next | [`SRTLA.md`](SRTLA.md) |
+| 4G/5G modems and link health | 🟡 Released in 0.3.0 as a first version (HiLink modems), tested against fakes and the simulator; real-modem tests are next | [`MODEMS.md`](MODEMS.md) |
+| Wi-Fi (access point and client) | ✅ Released; measurements and the cloud's side are next | [`WIFI.md`](WIFI.md) |
+| Web app | ✅ Released, reviewed (code and security) | [`MANAGER.md`](MANAGER.md) |
+| Setup wizard, translations | ✅ Released in 0.1.0 | [`SETUP.md`](SETUP.md) |
+| Over-the-air updates | ✅ Released in 0.1.0; the test board updates itself from GitHub Releases like any device | [`UPDATES.md`](UPDATES.md) |
+| Fan control | ✅ Released in 0.6.0 (one curve); profiles next | [`FAN.md`](FAN.md) |
+| Boot splash | ✅ Released | [`SPLASH.md`](SPLASH.md) |
+| microSD image | 🟡 Built and running on the test board; publishing it is next | [`IMAGE.md`](IMAGE.md) |
 
-A **Jetson Nano** captures HDMI (video and audio) with a
-**Toshiba TC358743** bridge connected to the CSI camera port. It encodes **H.264 with the Jetson's
-NVENC** and **AAC**, and streams over **SRT**. The destination can be any SRT ingest, including
-EnhancedIRL's (MediaMTX). It is useful, for example, to bring a camera or a console into the Cloud OBS.
+### HDMI capture: how it was brought up
 
-```
-HDMI source ─▶ TC358743 ─CSI-2 (2 lanes, 972 Mbps/lane, UYVY)─▶ Jetson VI/NVCSI ─▶ /dev/video0
-                  │ I2S (phase 2b)                                                        │
-                  ▼                                                                       ▼
-            I2S4 (pins 12/35/38, Jetson as slave)    v4l2src ─▶ nvvidconv ─▶ nvv4l2h264enc ─▶ h264parse ─┐
-                  │                                                                                      │
-                  ▼  ADMAIF2 (hw:tegrasndt210ref,1)                                                      │
-            alsasrc ─┐                                                                                   │
-  audiotestsrc ──────┴▶ audiomixer (background silence) ─▶ voaacenc ─▶ aacparse ────────────────────────┤
-                                                                                                         ▼
-                              srt-live-transmit file://con ◀─ FIFO /var/lib/eirl-engine.*.ts ◀─ mpegtsmux (1316 B)
-                                            │
-                                            ▼  SRT (caller or listener)
-```
-
-GStreamer 1.14, the one in L4T 32.7, **has no `srtsink`**. That is why the jump to SRT is made by
-`srt-live-transmit` (Haivision SRT 1.5.7, built by `build/srt.sh` and shipped in the app package and the release
-bundle; its `libsrt` in `/usr/lib/eirl-encoder/lib`, found through the binary's RUNPATH), which reads the MPEG-TS from a **named
-FIFO** on its standard input. At first it was a local UDP socket, and the kernel dropped
-datagrams in the bursts of each IDR, which produced artefacts (see [Bugs](#bugs-found-and-fixed)).
-
-With an **`srtla://`** destination the stream is split across several internet uplinks (Ethernet, USB
-modems, phones) and the EnhancedIRL relay puts it back together; with **`ABR=1`** the video bitrate
-adapts to the network. Design, pieces and tests in [`SRTLA.md`](SRTLA.md).
-
-Besides the board's HDMI, the stream can come from a **USB capture card** (Elgato Cam Link 4K,
-MS2130, MS2109) or from a **UVC camera**, chosen from the app. With the Cam Link over USB 3 it reaches
-**1080p60**, which does not fit over CSI. See [`SOURCES.md`](SOURCES.md).
-
-With **several sources at once**, the encoder composes the program (cut, PiP, side by side,
-fades), which is what always goes out. Its HDMI output shows a multiview with a touch screen to
-put a source on air live, and the web does the same on the same state. It is the default
-mode (`MIXER=0`, a single source). See
-[`MIXER.md`](MIXER.md).
-
-## Status by phase
-
-| Phase | What | Status |
+| Phase | What | Result |
 |---|---|---|
 | 0 | Board inventory (read-only) | ✅ |
 | 1 | Encoding chain + SRT with `videotestsrc`/`audiotestsrc` | ✅ NVENC verified (`tegrastats` → `NVENC 716`) |
@@ -107,10 +175,11 @@ mode (`MIXER=0`, a single source). See
 | 2b | HDMI audio over I2S4 | ✅ `arecord` 10 s, 48 kHz stereo, no errors; listened to and correct |
 | 2c | Modes up to 1080p50 with autonegotiation (EDID with a mode list selectable from the app, FIFO per mode, rejecting what does not fit) | ✅ **1080p50 in a real stream** (Oct 9): 50 fps, complete frames, SRT without losses, ~55 % of a core. 720p60/50 untested. See [Video modes](#video-modes-and-autonegotiation) |
 | 3 | Integration (`v4l2src` + `alsasrc`), A/V sync, latency, systemd | ✅ **sync −31 ms ±33 ms** (to the frame), **latency ~1.06 s** (500 ms are the SRT buffer), `eirl-engine` service with automatic restart and an audio watchdog |
-| 4 | Management app (`eirl-encoderd`, see [`MANAGER.md`](MANAGER.md)) | ✅ v1 on the board (`http://jetson.local`), reviewed (code and security) and without passwordless sudo. WebRTC preview with audio (phase 5) deployed on Oct 8; still to be tested on a real phone |
-| 5 | SRTLA + adaptive bitrate ([`SRTLA.md`](SRTLA.md)) | 🟡 Tested over loopback on the board (bonding of 2 "uplinks", adding and removing them live, ABR) and **streaming over SRTLA to the eu1 relay with one uplink** (Oct 9). The tests with several real uplinks are missing; they need the 4 A supply |
-| 6 | USB sources: capture cards and UVC cameras ([`SOURCES.md`](SOURCES.md)) | ✅ In `main` (MR !5) and installed on the board (Oct 12). **Cam Link 4K at 1080p60 streaming: 60.9 fps and 91 % of a core**; MJPEG webcam 1080p60, 63 %. The board's HDMI unchanged, hot unplug with automatic recovery. Per-source A/V sync and a long test are missing |
-| 7 | Multicamera: composition and multiview with a touch screen ([`MIXER.md`](MIXER.md)) | 🟡 F0 and G0 (Oct 12): 3 cameras at 60 fps, 2 h without freezes, `nvcompositor` on the Nano. **F1 and F2 on the board (Oct 12):** eirl-engine is the mixer (isolated sources, the output is the program, stable MJPEG) and the web and the touch screen are a single control. **F3 on the board (Oct 12):** no rehearsal mode, the preview always on and Go live attaches the output hot, with retries. **F4a on the board (Oct 12):** the audio, independent from the video (one input plays: the HDMI's I2S, capture card, webcam or USB microphone). **Composition and screen (Oct 12):** PiP in 4 corners and 2 sizes, Pause with text, bars for sources that are not 16:9, fades in all compositions; on the screen, Go live by holding and lock. Next: more audio, F5 (robustness) and a street test |
+
+The first engine was a single-source chain (`v4l2src → nvv4l2h264enc → mpegtsmux → FIFO → srt-live-transmit`);
+at first the jump to SRT went through a local UDP socket, and the kernel dropped datagrams in the bursts of each
+IDR, which produced artefacts (see [Bugs](#bugs-found-and-fixed)). It was a bash + Python engine until Oct 14,
+when the Go engine replaced it.
 
 **Open: the TC358743's audio PLL** sometimes does not lock after an HDMI renegotiation and stops
 outputting audio. See [Audio that does not come back](#audio-that-does-not-come-back-tc358743-audio-pll).
@@ -131,35 +200,28 @@ decode the video. See [DSLR diagnosis](#dslr-diagnosis).
 | I2S level | The chip has it in the VDDIO2 domain (1.65–3.6 V), so the board decides it. On boards for the RPi it is 3.3 V. This module works with the Nano's 3.3 V I2C pull-ups, which is the same domain → 3.3 V (inferred, not measured) |
 | Bandwidth limit | 2 lanes × 972 Mbps in UYVY → **up to 1080p50** (the CSI takes 89 % of each line) **or 720p60**. 1080p60 does not fit (107 %), and the devkit's 15-pin connector has no more lanes (verified Oct 9). The Nano's VI **does not capture interlaced** |
 
-| Power | 5 V jack with jumper **J48**. With today's **5 V 2 A** supply, the input drops to 4.68–4.76 V while streaming (4.86 V stopped; `POM_5V_IN` of the ina3221 6-0040) and `soctherm OC ALARM` warnings appear. **Use 5 V 4 A** |
+| Power | 5 V jack with jumper **J48**. **Use 5 V 4 A with a short cable** (5.3 V at idle, 5.27 V minimum while streaming). With a 5 V 2 A supply the input dropped to 4.68–4.76 V while streaming (4.86 V stopped; `POM_5V_IN` of the ina3221 6-0040) with `soctherm OC ALARM` warnings, and with a long cable it fell to 4.3 V and the board rebooted when waking the capture cards up |
 | Reset pin | **RST** pad of the TC358743 board (3.3 V, the board's pull-up). **Not connected**: see [Hardware reset](#hardware-reset-of-the-tc358743-rst-pin) |
 
-Access: over SSH with a key (`ssh <board>`). The commands in this README use `jetson` as the SSH host
-for the board (for example `Host jetson` in `~/.ssh/config` pointing at `<board-ip>`); use your own
-alias or `<user>@<board-ip>`.
+Access: on a development board, over SSH with a key (`ssh <board>`); a device installed from the microSD image
+has no SSH ([`IMAGE.md`](IMAGE.md)). The commands in this README use `jetson` as the SSH host for the board
+(for example `Host jetson` in `~/.ssh/config` pointing at `<board-ip>`); use your own alias or
+`<user>@<board-ip>`.
 
 ## Repository structure
 
+The docs (`*.md`) are in [Repository layout](#repository-layout). These are the files this manual refers to:
+
 ```
 eirl-encoder/
-├─ README.md                 ← this document
-├─ MANAGER.md                ← management app (`eirl-encoderd`): design, local API, preview, privileges, installation
-├─ SRTLA.md                  ← SRTLA streaming (uplink bonding) and adaptive bitrate: design, pieces, tests
-├─ SOURCES.md                ← USB sources (capture cards and UVC cameras): how it works, configuration, tests
-├─ SPLASH.md                 ← boot splash with the EnhancedIRL logo on the HDMI (boot, shutdown, rescue)
-├─ MIXER.md                  ← multicamera: composition, multiview and touch screen (measurements, traps, engine, socket contract)
-├─ NETWORK_SOURCES.md        ← cameras and phones over the encoder's Wi-Fi (F7): spike, contract, access point, MediaMTX
-├─ mixer/f0/                 ← measurement harness (scenes, isolated source, long engine test, VIC, MJPEG, EDID, touch, F0 demo)
-├─ network/spike/            ← F7 spike harness (RTSP → NVDEC probe, meters, publishers, the spike's MediaMTX)
-├─ manager/                  ← code of `eirl-encoderd` (Go, static binary) + deploy/ (unit, drop-in, sudoers,
-│                               uplinks dispatcher 90-eirl-uplinks, install.sh) + `eirl-splash` and deploy/splash/ +
-│                               `eirl-netsetup` (the cameras' network: AP, DHCP, firewall, MediaMTX) and its units
 ├─ build/
 │  ├─ Dockerfile             ← ubuntu:18.04 arm64 + toolchain (native gcc 7.5)
 │  ├─ build.sh               ← R32.7.6 sources → module + DTB + EDID in build/out/ (ignored by git)
 │  ├─ edid.sh                ← edid/*.hex → build/out/edid-*.bin (checked against make_edid.py)
-│  ├─ srtla.sh               ← srtla_send (BELABOX, pinned commit) → build/out/srtla_send
+│  ├─ engine.sh              ← engine tests (Mac + linux/arm64 image) and build → build/out/eirl-engine
 │  ├─ srt.sh                 ← srt-live-transmit + libsrt (Haivision SRT, pinned tag) → build/out/
+│  ├─ srtla.sh               ← srtla_send (BELABOX, pinned commit) → build/out/srtla_send
+│  ├─ rist.sh                ← ristsender from librist (pinned release, sha256) → build/out/
 │  └─ mediamtx.sh            ← official MediaMTX arm64 (pinned version and sha256) → build/out/mediamtx
 ├─ driver/
 │  ├─ tc358743-jetson.patch  ← patch on drivers/media/i2c/tc358743.c from L4T 32.7.6
@@ -169,19 +231,26 @@ eirl-encoder/
 │                                             (build.sh also generates …-gpio.dtsi: the B01's gpio-input without J4-J7; not enough, see eirl-hdmi-init)
 ├─ edid/make_edid.py         ← EDID generator: modes up to 1080p50, LPCM stereo 48 kHz only
 ├─ edid/edid-<mode>-lpcm48k.hex ← the EDIDs' source of truth (1080p30, 1080p50 and 720p60 preferred), from make_edid.py
-├─ manager/cmd/eirl-engine     ← the engine (Go, eirl-engine-go; ENGINE_GO.md); its packages in manager/internal/engine/:
-│                               the core actor (sources, scene), output (NVENC + SRT/SRTLA, ABR), audio, phones
-│                               (headphones), usbhub (hung USB card recovery), netcam (F7), screen (touch screen),
-│                               tcaudio (TC358743 audio watchdog), hdmi, server (control socket)
-├─ build/engine.sh             ← engine tests (Mac + linux/arm64 image) and build → build/out/eirl-engine
-├─ scripts/eirl-engine-start   ← the service's ExecStart: runs eirl-engine-go (MALLOC_ARENA_MAX=2, GOGC=50)
-├─ scripts/eirl-enginectl ← client of the mixer's socket (state, commands, automatic changes)
+├─ manager/cmd/eirl-engine   ← the engine (Go; ENGINE_GO.md); its packages in manager/internal/engine/: the core actor
+│                               (sources, scene, slots, hot plug), pipeline, output (NVENC H.264/H.265, the senders, ABR),
+│                               audio, phones (headphones), camera (UVC image settings), usbhub (hung USB card recovery),
+│                               netcam (network cameras), screen (touch screen), tcaudio (TC358743 audio watchdog), hdmi,
+│                               server (control socket), appapi (the app's local API, for the screen's Settings)
+├─ manager/cmd/eirl-send     ← the RTMP/RTMPS sender (Go, on MediaMTX's RTMP library)
+├─ manager/                  ← `eirl-encoderd` (Go, static binary: web, API, destinations, network, modems, cloud link)
+│                               + deploy/ (units, drop-ins, sudoers, uplinks dispatcher 90-eirl-uplinks, install.sh)
+│                               + `eirl-netsetup` (the cameras' network: AP, DHCP, firewall, MediaMTX) + `eirl-fan`
+│                               + `eirl-splash` + `eirl-update` / `eirl-release` (OTA) + `eirl-encoder-sim` + `eirl-ui-render`
+├─ manager/deploy/eirl-engine.default ← the board settings → /etc/default/eirl-engine (install.sh creates it if missing)
+├─ scripts/eirl-engine-start ← the service's ExecStart: runs eirl-engine-go (MALLOC_ARENA_MAX=2, GOGC=50)
+├─ scripts/eirl-enginectl    ← client of the engine's socket (state, commands, output on/off)
 ├─ scripts/avsync_ball.py    ← measures the A/V offset with YouTube's "Audio Signal Suite" test (ball + beep)
 ├─ scripts/eirl-hdmi-init.sh      ← at boot: DAP4 pins out of GPIO mode + loading the EDID
 ├─ systemd/eirl-hdmi-init.service ← oneshot that runs eirl-hdmi-init.sh
-├─ systemd/eirl-engine.service  ← the stream as a service (Restart=always)
-├─ manager/deploy/eirl-engine.default ← the board settings → /etc/default/eirl-engine (install.sh creates it if missing)
-├─ tools/                    ← deploy-engine.sh (installs the engine without cutting a live stream),
+├─ systemd/eirl-engine.service    ← the stream as a service (Restart=always)
+├─ release/                  ← the public key that verifies releases, and the release notes (es/en/fr)
+├─ tools/                    ← deploy-engine.sh (installs the engine without cutting a live stream), release.sh,
+│                               public-export.sh / public-sync.sh / public-check.sh, image/ (the microSD image),
 │                               tap.py (touches on the touch panel), webproxy.py (the web with a session, for tests),
 │                               engine-cpu.sh + thrcpu.py and engine-watch.py (engine CPU and RAM, MIXER.md §17)
 ├─ latency/                  ← end-to-end latency measurement (on-screen clock, see Measurements)
@@ -209,7 +278,7 @@ ls build/out/                       # tc358743.ko · tegra210-p3448-0000-p3449-0
 
 ## Installing on the Jetson
 
-> Rules: **never** flash the QSPI or the SD card, never `apt dist-upgrade`, never touch the bootloader. Before
+> Rules on a board that is already set up: **never** flash the QSPI or reflash its SD card, never `apt dist-upgrade`, never touch the bootloader. Before
 > touching `/boot`, make a copy. Every new boot configuration goes in a **new** entry of
 > `extlinux.conf`, with the original as the alternative, and an OK is requested before rebooting.
 
@@ -231,7 +300,8 @@ Both come with the engine (`tools/deploy-engine.sh --unit`, or a release bundle,
 ```
 
 **A new device from a release bundle**: `sudo ./install.sh` in the extracted bundle installs the app, the engine
-with its EDIDs, the SRT output and the units, and leaves the output off with no destination (an SD card image
+with its EDIDs, the senders (`srt-live-transmit` with its `libsrt`, `srtla_send`, `eirl-send`, `ristsender`) and the
+units, and leaves the output off with no destination (an SD card image
 runs it with `--image`, UPDATES.md §9). The bundle does not carry the TC358743 module, the DTB and its extlinux
 entry (above), nor what L4T itself provides: GStreamer with NVIDIA's plugins, `v4l-utils`, `i2c-tools`, `python3`
 and OpenSSL 1.1 (`libsrt` links it).
@@ -266,8 +336,9 @@ Check after booting:
 ## Operating
 
 The stream runs as a **systemd service** (`eirl-engine.service`, enabled): it starts with the board,
-waits for an HDMI signal with no time limit and, if the pipeline fails (signal lost, mode
-change, video watchdog, SRT), it exits and systemd relaunches it after 2 s. The board settings are in
+waits for an HDMI signal with no time limit and, if the capture fails (signal lost, mode
+change, video watchdog), it exits and systemd relaunches it after 2 s. An output that fails is retried on its
+own, without stopping the engine. The board settings are in
 `/etc/default/eirl-engine` (root only; `install.sh` creates a commented default on a new device and never
 overwrites it); what the app manages (destination, bitrates, output, input) is in `/etc/eirl-encoder/engine.env`.
 
@@ -312,7 +383,7 @@ below, in `/etc/default/eirl-engine` and `/etc/eirl-encoder/engine.env`. Stream 
 | `ABITRATE=kbps AENC=voaacenc\|avenc_aac` | Audio |
 | `SRT_URL=srt://… SRT_MODE=caller\|listener SRT_LATENCY=ms SRT_PASSPHRASE SRT_STREAMID` | SRT destination |
 | `AUDIO=test\|silence\|i2s` | Audio. By default `test` with the `test` source and `i2s` (real HDMI) with `hdmi` |
-| `OUTPUT=on\|off` | `off` = **rehearsal mode**: capture with preview and level meter, without the main encoder or SRT (`SRT_URL` is not needed) |
+| `OUTPUT=on\|off` | `off` = not streaming: capture, preview and meters keep running, without the main encoder or a sender (no destination needed). `eirl-enginectl output on\|off` switches it live |
 | `LIVE=1 LIVE_SIZE=640x360 LIVE_VBITRATE=800 LIVE_ABITRATE=96 LIVE_VPORT=5006 LIVE_APORT=5008` | Live preview for the management app (WebRTC): a second, small H.264 encode + Opus, over RTP to localhost (branches of the `tee`, see [`MANAGER.md`](MANAGER.md) §4). `0` = without them |
 | `LEVELS=1 LEVELS_PORT=5005` | Level meter: the mixer's PCM over UDP to `127.0.0.1:LEVELS_PORT` (if nobody listens, it is lost) |
 | `RUN_DIR=/run/eirl-engine` | tmpfs for the state and the SRT statistics; created by the service (`RuntimeDirectory`). By hand, if it cannot be written, the statistics are disabled |
@@ -322,6 +393,10 @@ below, in `/etc/default/eirl-engine` and `/etc/eirl-encoder/engine.env`. Stream 
 | `WATCHDOG=ms` | No video frames for that long → the pipeline fails (3000; `0` = disabled) |
 | `AUDIO_LOCK_TIMEOUT=s` | HDMI audio without the PLL locking for that long → recovery (10; `0` = never) |
 | `HW_RESET_INTERVAL=s` | Minimum between two hardware resets (300) |
+
+The other protocols and the encoding settings have their own keys (`OUTPUT_PROTOCOL`, `OUTPUT_URL`, `OUTPUT_KEY`,
+`OUTPUT_VCODEC`, `OUTPUT_SIZE`, `OUTPUT_FPS`…): [`OUTPUTS.md`](OUTPUTS.md) §3. The app writes all of them from
+the active destination.
 
 With the `hdmi` source the engine does four things before capturing:
 1. **Loads the EDID only if it has changed.** Writing it drops the hotplug and the source renegotiates.
@@ -667,6 +742,13 @@ steps:
 
 ## Board state: applied changes and how to undo them
 
+The log of the first test board, set up by hand from Oct 4 to Oct 14. Since Oct 15 that board runs the microSD
+image ([`IMAGE.md`](IMAGE.md)), so none of this applies to it any more, nor to a device installed from a release
+or the image: it is kept as the history of how each piece reached the board and how it was undone.
+
+<details>
+<summary>The changes, one row per step</summary>
+
 | Where | Change | Undo |
 |---|---|---|
 | Jetson engine names (Oct 13, `refactor/eirl-engine`) | `hdmi2srt` becomes `eirl-engine`: `eirl-engine.service` and `eirl-hdmi-init.service` (enabled), code in `/usr/lib/eirl-encoder/engine/` (with the EDIDs) and `/usr/local/bin/eirl-enginectl`, `/etc/default/eirl-engine`, `/etc/eirl-encoder/engine.env`, `/run/eirl-engine/` and `/var/lib/eirl-engine/`. The old ones stay: `hdmi2srt.service` and `hdmi-init.service` (disabled), `~/hdmi2srt/`, `/etc/default/hdmi2srt`, `/etc/eirl-encoder/hdmi2srt.env`. The rows below from before Oct 13 already use the new names | No longer supported: the migration script was removed with the Python engine on Oct 14 |
@@ -685,7 +767,7 @@ steps:
 | Jetson SRTLA (Oct 9) | `/usr/lib/eirl-encoder/engine/engine-run.py` (copy of the previous script: `/usr/lib/eirl-encoder/engine/eirl-engine.sh.bak-20261009-presrtla`); `install.sh` puts `/usr/local/bin/srtla_send`, `/etc/NetworkManager/dispatcher.d/90-eirl-uplinks` (tables 10000+ifindex, rules 999 and 1000+ifindex, `rp_filter=2` on the uplinks) and `/run/eirl-uplinks` (tmpfiles) | See [`SRTLA.md` §8](SRTLA.md#8-install-and-undo) |
 | Jetson boot splash (Oct 12) | `/usr/local/bin/eirl-splash`, 5 `eirl-splash*.service` units (enabled), `LABEL eirl-splash` as `DEFAULT` and `TIMEOUT 10` in extlinux (copy `extlinux.conf.bak-20261012-042546-splash`; previous DEFAULT and TIMEOUT in `/var/lib/eirl-splash/extlinux.prev`). The `tc358743` entry is not touched | `sudo ~/eirl-splash-20261012/install.sh --undo` (or the `splash/install.sh` of any package); see [`SPLASH.md` §4](SPLASH.md#4-build-install-and-undo) |
 | Jetson `~/srtla-spike/` (Oct 9) | SRTLA tests over loopback: srtla built, harness and a test app on :8088 (stopped) | `rm -rf ~/srtla-spike` |
-| Jetson USB sources (Oct 12) | `/usr/lib/eirl-encoder/engine/eirl-engine.sh` and `engine-run.py` from MR !5 (copies `…bak-20261012-sources`; the one from before cloud-link, `eirl-engine.sh.bak-20261012-cloud`); app `eirl-encoderd` with sources and cloud-link; `/etc/udev/rules.d/70-eirl-capture.rules` (no autosuspend and `PULSE_IGNORE` on the capture cards' audio); keys `SOURCE`, `VIDEO_*` and `AUDIO_SOURCE` in `/etc/eirl-encoder/engine.env` | HDMI source from the app; `sudo rm /etc/udev/rules.d/70-eirl-capture.rules && sudo udevadm control --reload`; restore the copies with `mv` |
+| Jetson USB sources (Oct 12) | `/usr/lib/eirl-encoder/engine/eirl-engine.sh` and `engine-run.py` from `main` (copies `…bak-20261012-sources`; the one from before cloud-link, `eirl-engine.sh.bak-20261012-cloud`); app `eirl-encoderd` with sources and cloud-link; `/etc/udev/rules.d/70-eirl-capture.rules` (no autosuspend and `PULSE_IGNORE` on the capture cards' audio); keys `SOURCE`, `VIDEO_*` and `AUDIO_SOURCE` in `/etc/eirl-encoder/engine.env` | HDMI source from the app; `sudo rm /etc/udev/rules.d/70-eirl-capture.rules && sudo udevadm control --reload`; restore the copies with `mv` |
 | Jetson mixer (Oct 12) | **eirl-engine is the mixer** (the script's default mode; `/etc/default/eirl-engine` without `MIXER`, copy `…bak-20261012-mixer`); `/usr/lib/eirl-encoder/engine/` with `engine_mixer.py` and `eirl-enginectl` (copies of `eirl-engine.sh` and `engine-run.py` in `…bak-20261012-mixer`); `eirl-engine.service` **enabled** again and with the `input` group (touch; copy of the unit in `…bak-20261012-mixer`); `eirl-hdmi-init.service` without `systemd-udev-settle` (a hung USB device delayed the whole boot: 42 s → 9.9 s; copy `…bak-20261012-mixer`); `eirl-encoderd` from the mixer branch (API `/mixer`). The F0 demo (`eirl-mixer-demo`) is removed. **F3 (Oct 12):** `/usr/lib/eirl-encoder/engine/engine_output.py` and the hot-output scripts (F2 copies in `…bak-20261012-f3`), and `eirl-encoderd` with `ready`/`outputState` | `MIXER=0` in `/etc/default/eirl-engine` and `sudo systemctl restart eirl-engine` (a single source); the units, by restoring their copies and `daemon-reload` (see [`MIXER.md` §6](MIXER.md#6-install-and-undo)) |
 | Jetson journal (Oct 12) | Persistent: `/var/log/journal` and `/etc/systemd/journald.conf.d/90-eirl-persistent.conf` (`SystemMaxUse=200M`, applied when journald or the board restarts). Before, it was volatile and after the Oct 12 hang no trace was left | `sudo rm /etc/systemd/journald.conf.d/90-eirl-persistent.conf && sudo rm -rf /var/log/journal` and reboot |
 | Jetson USB hub (Oct 13, F5) | The rule `/etc/udev/rules.d/70-eirl-capture.rules` gives the board's hub (Realtek RTS5411, `0bda:5411` and `0bda:0411`) the `eirl-usbhub` group and mode 0664. `install.sh` creates the group and applies it to the already enumerated nodes, and the `eirl-engine` drop-in gives it only to the engine, with `NoNewPrivileges=yes`. It is used to cut the power of a hung capture card's port, which switches the whole hub off for a few seconds (MIXER.md §16) | Remove the last rule from the file, `sudo udevadm control --reload` and `sudo chgrp root` on the hub's two nodes in `/dev/bus/usb` |
@@ -698,7 +780,7 @@ steps:
 | Jetson apt (Oct 13, B3) | **All `nvidia-l4t-*` on hold** and `base/keep.txt` marked as manual (`purge.sh` sets them when simulating). Previous copy of the package selection, manual, hold and `/etc` in `/var/lib/eirl-base/backup/` | `sudo apt-mark unhold $(apt-mark showhold)`; the ones marked manual, with `apt-mark auto` according to `backup/manual.txt` |
 | Jetson `/usr/lib/eirl-encoder/engine/VERSION` (Oct 12) | Which engine is installed (written by `tools/deploy-engine.sh`) | — |
 | Jetson `~/mixer-spike/` (Oct 12) | F0 harness as a flat copy and its logs (long test in `logs/soak-20261012-0508/`) | `rm -rf ~/mixer-spike` |
-| Jetson network cameras and the board's Wi-Fi (F7 and [`NETWORK_SOURCES.md`](NETWORK_SOURCES.md), Oct 13; [`WIFI.md`](WIFI.md), phases W-A and W-B, Oct 13; updated at 19:50) | App `eirl-encoderd` from `main` with W-B (MR !37; installed at 19:15 from the branch, same code: `version=5e3de5f-dirty`) and engine from `main` 895f90d (`/usr/lib/eirl-encoder/engine/VERSION`; the previous ones, in `/usr/lib/eirl-encoder/engine/*.bak-20261013-*`). **Network cameras (F7)**: `/usr/local/sbin/eirl-netsetup` (with the fix for the `ap0: CTRL-EVENT-SCAN-FAILED` loop, trap 17 of NETWORK_SOURCES.md §3; the previous one, in `eirl-netsetup.bak-20261013-1822`), `/usr/local/bin/mediamtx` (v1.21.1), units `eirl-ap` (enabled: applies the network at boot), `eirl-ap-dhcp` and `eirl-media`; user `eirl-media`; `/etc/eirl-encoder/media-api.key` (0640); sudoers with `systemctl start eirl-ap.service`; `90-eirl-uplinks` excluding the AP; tmpfiles for `/run/eirl-ap`; `iptables` chains `EIRL-AP`, `EIRL-AP-X` and `EIRL-MEDIA`, and no IPv6 on `ap0`. Camera "Test phone" registered (`cam1`); the AP's password in `/etc/eirl-encoder/ap.psk` (0600; a copy in the maintainers' secret store). **The screen's socket**: `/run/eirl-encoder/api.sock` (MANAGER.md §3, "Local socket"). **Wi-Fi client (W-B)**: `/etc/polkit-1/localauthority/50-local.d/eirl-encoder-nm.pkla` (risk accepted on Oct 13, WIFI.md §11) and the NetworkManager profile `eirl-wifi-1` (a test iPhone's hotspot; its password, only in NM's root keyfile). **`network.json` at 19:50** (changed by the web and the screen): reception on, "Create my Wi-Fi" `always` (AP `EnhancedIRL-XXXX` up, channel 1), "Connect to a Wi-Fi" off (`wlan0` disconnected), "over Wi-Fi" on and "by cable" off. `~/f7-test/` was deleted when F7 was closed | Wi-Fi client: switch off "Connect to a Wi-Fi" and forget the network from the web (or `sudo nmcli connection delete eirl-wifi-1`); `sudo rm /etc/polkit-1/localauthority/50-local.d/eirl-encoder-nm.pkla`. AP: switch off "Create my Wi-Fi" from the web or the screen. Only the loop fix: `sudo mv /usr/local/sbin/eirl-netsetup.bak-20261013-1822 /usr/local/sbin/eirl-netsetup`. Everything from F7: remove the camera and switch off "Create my Wi-Fi" (with no cameras and no AP, everything goes down, `EIRL-MEDIA` included) or `sudo systemctl disable --now eirl-ap eirl-media eirl-ap-dhcp` and `sudo iptables -D INPUT -j EIRL-MEDIA; sudo iptables -F EIRL-MEDIA; sudo iptables -X EIRL-MEDIA`; `sudo rm /usr/local/sbin/eirl-netsetup /usr/local/bin/mediamtx /etc/systemd/system/eirl-{ap,ap-dhcp,media}.service && sudo systemctl daemon-reload`; reinstall the app from `main` (`build.sh`) for the sudoers, the dispatcher and tmpfiles; `sudo userdel eirl-media`. Engine: `tools/deploy-engine.sh` from `main` (restarts eirl-engine: needs an agreed slot) |
+| Jetson network cameras and the board's Wi-Fi (F7 and [`NETWORK_SOURCES.md`](NETWORK_SOURCES.md), Oct 13; [`WIFI.md`](WIFI.md), phases W-A and W-B, Oct 13; updated at 19:50) | App `eirl-encoderd` from `main` with W-B (installed at 19:15 from the branch, same code: `version=5e3de5f-dirty`) and engine from `main` 895f90d (`/usr/lib/eirl-encoder/engine/VERSION`; the previous ones, in `/usr/lib/eirl-encoder/engine/*.bak-20261013-*`). **Network cameras (F7)**: `/usr/local/sbin/eirl-netsetup` (with the fix for the `ap0: CTRL-EVENT-SCAN-FAILED` loop, trap 17 of NETWORK_SOURCES.md §3; the previous one, in `eirl-netsetup.bak-20261013-1822`), `/usr/local/bin/mediamtx` (v1.21.1), units `eirl-ap` (enabled: applies the network at boot), `eirl-ap-dhcp` and `eirl-media`; user `eirl-media`; `/etc/eirl-encoder/media-api.key` (0640); sudoers with `systemctl start eirl-ap.service`; `90-eirl-uplinks` excluding the AP; tmpfiles for `/run/eirl-ap`; `iptables` chains `EIRL-AP`, `EIRL-AP-X` and `EIRL-MEDIA`, and no IPv6 on `ap0`. Camera "Test phone" registered (`cam1`); the AP's password in `/etc/eirl-encoder/ap.psk` (0600; a copy in the maintainers' secret store). **The screen's socket**: `/run/eirl-encoder/api.sock` (MANAGER.md §3, "Local socket"). **Wi-Fi client (W-B)**: `/etc/polkit-1/localauthority/50-local.d/eirl-encoder-nm.pkla` (risk accepted on Oct 13, WIFI.md §11) and the NetworkManager profile `eirl-wifi-1` (a test iPhone's hotspot; its password, only in NM's root keyfile). **`network.json` at 19:50** (changed by the web and the screen): reception on, "Create my Wi-Fi" `always` (AP `EnhancedIRL-XXXX` up, channel 1), "Connect to a Wi-Fi" off (`wlan0` disconnected), "over Wi-Fi" on and "by cable" off. `~/f7-test/` was deleted when F7 was closed | Wi-Fi client: switch off "Connect to a Wi-Fi" and forget the network from the web (or `sudo nmcli connection delete eirl-wifi-1`); `sudo rm /etc/polkit-1/localauthority/50-local.d/eirl-encoder-nm.pkla`. AP: switch off "Create my Wi-Fi" from the web or the screen. Only the loop fix: `sudo mv /usr/local/sbin/eirl-netsetup.bak-20261013-1822 /usr/local/sbin/eirl-netsetup`. Everything from F7: remove the camera and switch off "Create my Wi-Fi" (with no cameras and no AP, everything goes down, `EIRL-MEDIA` included) or `sudo systemctl disable --now eirl-ap eirl-media eirl-ap-dhcp` and `sudo iptables -D INPUT -j EIRL-MEDIA; sudo iptables -F EIRL-MEDIA; sudo iptables -X EIRL-MEDIA`; `sudo rm /usr/local/sbin/eirl-netsetup /usr/local/bin/mediamtx /etc/systemd/system/eirl-{ap,ap-dhcp,media}.service && sudo systemctl daemon-reload`; reinstall the app from `main` (`build.sh`) for the sudoers, the dispatcher and tmpfiles; `sudo userdel eirl-media`. Engine: `tools/deploy-engine.sh` from `main` (restarts eirl-engine: needs an agreed slot) |
 | Jetson `~/f7-spike/` (Oct 13, F7) | Network sources spike ([`NETWORK_SOURCES.md`](NETWORK_SOURCES.md)): MediaMTX v1.21.1, probe and meters, test clips (~900 MB), logs and the spike AP's password (`ap.psk`; a copy in the maintainers' secret store). The AP (NM profile `eirl-f7-spike`), its `dnsmasq` and MediaMTX were removed when it finished (00:32): nothing is left running or in `/etc` | `rm -rf ~/f7-spike` |
 | Jetson power supply (Oct 12) | 5 V 4 A supply with a short cable: 5.3 V at idle and 5.27 V minimum while streaming. With the long cable it dropped to 4.3 V and the board rebooted when waking the capture cards up | — (hardware) |
 | Mac | `brew install mediamtx`, Docker image `l4t-r32.7.6-build`, volume `l4t-src` (~3 GB), `~/.cache/l4t-r32.7.6` | `brew uninstall mediamtx; docker rmi l4t-r32.7.6-build; docker volume rm l4t-src; rm -rf ~/.cache/l4t-r32.7.6` |
@@ -706,27 +788,30 @@ steps:
 Already done before the project and not touched by it: on October 4 an `apt upgrade` from 32.7.1 to 32.7.6 was done that **rewrote the QSPI**
 (`/opt/ota_package/bl_update_payload.log`: "Update successful"). The board boots fine with it.
 
+</details>
+
 ## Pending
 
 1. **Audio that does not come back**: wait for it to happen again and see in the journal whether any software
    recovery is enough. If not, fit the hardware reset with a transistor.
-2. **Management app** (`eirl-encoderd`, [`MANAGER.md`](MANAGER.md)): v1 done; pending items in its §12
-   (real phone, real audio, latency, a dedicated user for the stream, TLS, pairing).
-3. Break down the ~550 ms of latency that are not SRT; try a lower `SRT_LATENCY` on the LAN.
-4. **DSLR**: see the diagnosis above.
-5. ~~5 V 4 A supply~~: fitted on Oct 12 with a short cable (5.3 V at idle). Unblocks the SRTLA tests with modems.
-8. **SRTLA** ([`SRTLA.md`](SRTLA.md)): deploy and test with real uplinks.
-6. When closing: decide whether `DEFAULT` stays on `tc358743`. Already done: `tc358743-rst` entry removed and
-   passwordless sudo removed (Oct 8).
-7. **Reboot without a clean shutdown on Oct 8 at 14:56** (a power cut?): without a persistent journal
-   the cause is unknown. That afternoon the app showed low supply voltage (4.65 V under load):
-   prime suspect, see item 5. Keep an eye on it; if it happens again, enable `Storage=persistent` in journald.
-9. **USB sources** ([`SOURCES.md`](SOURCES.md) §5): per-source A/V sync (`avsync_ball.py`) and a
-   long test (2 h).
-10. **Boot splash** ([`SPLASH.md`](SPLASH.md)): on the board and validated (Oct 12). Two
-    minor tests remain (§6): plugging the screen in with the splash running and a real failed boot.
-8. **Modes**: 1080p50 tested in a real stream (Oct 9). 720p60/50 are missing (their FIFO goes down from 374 to 249)
-   and, for 1080p50, raising the bitrate to ~9-10 Mbps.
+2. **Output protocols** ([`OUTPUTS.md`](OUTPUTS.md)): tests with real platform keys (Twitch, YouTube, Kick,
+   Facebook), the cloud reading H.265 end to end, RIST bonding over real links, the firewall of the SRT listener,
+   and the cloud's side of the saved destinations.
+3. **SRTLA** ([`SRTLA.md`](SRTLA.md)) and **modems** ([`MODEMS.md`](MODEMS.md)): tests with several real links
+   and real 4G/5G modems.
+4. **USB sources** ([`SOURCES.md`](SOURCES.md) §5): per-source A/V sync (`avsync_ball.py`) and a long test (2 h).
+5. **Video modes**: 1080p50 tested in a real stream (Oct 9). 720p60/50 are missing (their FIFO goes down from 374
+   to 249) and, for 1080p50, raising the bitrate to ~9-10 Mbps.
+6. Break down the ~550 ms of latency that are not SRT; try a lower `SRT_LATENCY` on the LAN.
+7. **DSLR**: see the diagnosis above.
+8. **Web app** ([`MANAGER.md`](MANAGER.md) §12): a test on a real phone (the WebRTC preview in iPhone Safari),
+   TLS and a per-device password.
+9. **Updates** ([`UPDATES.md`](UPDATES.md) §11): key rotation with a list of trusted keys, a free-space check
+   before the backup, a "Wi-Fi/Ethernet only" download option.
+10. **microSD image** ([`IMAGE.md`](IMAGE.md)): a second boot from scratch, then publishing it (I4).
+11. **Fan** ([`FAN.md`](FAN.md)): profiles in Settings and a "camera" mode.
+12. **Boot splash** ([`SPLASH.md`](SPLASH.md) §6): plugging the screen in with the splash running and a real
+    failed boot.
 
 ## License
 

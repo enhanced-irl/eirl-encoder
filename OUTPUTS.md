@@ -1,4 +1,4 @@
-> **Status:** IN PROGRESS — P1-P5 implemented and tested on the board (a test SD card, §12); in a branch, not merged yet. Pending: platforms with real keys, a Cloud OBS reading H.265, the SRT listener's firewall, the cloud's side (P6)
+> **Status:** IN PROGRESS — P1-P5 released in v0.5.0 (Oct 15) and tested on the board (a test SD card, §12). Pending: platforms with real keys, a Cloud OBS reading H.265, the SRT listener's firewall, the cloud's side (P6)
 > **Updated:** 2026-10-15
 
 # Output protocols and encoding settings

@@ -423,7 +423,7 @@ input[type=range]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 4px rgba(7
    baldosas de 2 o 4 */
 .stats { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .stat {
-  display: grid; grid-template-columns: 82px minmax(0, 1fr); column-gap: 12px; align-items: start;
+  display: grid; grid-template-columns: 108px minmax(0, 1fr); column-gap: 12px; align-items: start;
   padding: 12px 14px; transition: border-color .2s, background-color .2s;
 }
 .stat-label { grid-row: 1 / span 2; padding-top: 4px; }

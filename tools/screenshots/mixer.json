@@ -1,0 +1,185 @@
+{
+ "v": 1,
+ "program": {
+  "main": "hdmi",
+  "secondary": "/dev/v4l/by-id/usb-046d_Logi_4K_Stream_Edition_0000ABCD-video-index0",
+  "layout": "full",
+  "transition": "fade",
+  "hidden": [],
+  "pip": {
+   "corner": "br",
+   "size": 33
+  },
+  "pause": {
+   "on": false,
+   "text": "Be right back",
+   "mute": true
+  },
+  "width": 1920,
+  "height": 1080,
+  "fps": 60,
+  "measuredFps": 60,
+  "newFps": 60
+ },
+ "slots": 4,
+ "sources": [
+  {
+   "id": "hdmi",
+   "slot": 1,
+   "kind": "hdmi-csi",
+   "name": "Board HDMI",
+   "state": "live",
+   "detail": "",
+   "format": "UYVY",
+   "mode": "1920x1080@50",
+   "fps": 50,
+   "alias": "Main camera"
+  },
+  {
+   "id": "/dev/v4l/by-id/usb-046d_Logi_4K_Stream_Edition_0000ABCD-video-index0",
+   "slot": 2,
+   "kind": "usb",
+   "name": "Logi 4K Stream Edition",
+   "state": "live",
+   "detail": "",
+   "format": "MJPG",
+   "mode": "1920x1080@60",
+   "fps": 60,
+   "alias": "Wide shot"
+  },
+  {
+   "id": "net:phone",
+   "slot": 3,
+   "kind": "network",
+   "name": "Phone",
+   "state": "live",
+   "detail": "",
+   "format": "H265",
+   "mode": "1080x1920@30",
+   "fps": 30,
+   "alias": "Phone"
+  },
+  {
+   "id": "/dev/v4l/by-id/usb-Elgato_Cam_Link_4K_0000EFGH-video-index0",
+   "slot": 4,
+   "kind": "usb",
+   "name": "Cam Link 4K",
+   "state": "live",
+   "detail": "",
+   "format": "NV12",
+   "mode": "1920x1080@60",
+   "fps": 60,
+   "alias": "Seafront"
+  }
+ ],
+ "screen": {
+  "state": "off",
+  "width": null,
+  "height": null,
+  "touch": false,
+  "locked": false
+ },
+ "output": {
+  "mode": "on",
+  "state": "on",
+  "kbps": 5800,
+  "sentKbps": 5800,
+  "rttMs": 57
+ },
+ "preview": {
+  "on": false
+ },
+ "audio": {
+  "main": "i2s",
+  "mode": "single",
+  "follow": true,
+  "sources": [
+   {
+    "id": "i2s",
+    "slot": 1,
+    "kind": "i2s",
+    "name": "Board HDMI",
+    "state": "live",
+    "detail": ""
+   },
+   {
+    "id": "alsa:Logi",
+    "slot": 2,
+    "kind": "usb",
+    "name": "Logi 4K Stream Edition",
+    "state": "live",
+    "detail": ""
+   },
+   {
+    "id": "net:phone",
+    "slot": 3,
+    "kind": "network",
+    "name": "Phone",
+    "state": "live",
+    "detail": ""
+   },
+   {
+    "id": "alsa:CamLink",
+    "slot": 4,
+    "kind": "usb",
+    "name": "Cam Link 4K",
+    "state": "live",
+    "detail": ""
+   }
+  ],
+  "links": {
+   "hdmi": "i2s",
+   "/dev/v4l/by-id/usb-046d_Logi_4K_Stream_Edition_0000ABCD-video-index0": "alsa:Logi",
+   "net:phone": "net:phone",
+   "/dev/v4l/by-id/usb-Elgato_Cam_Link_4K_0000EFGH-video-index0": "alsa:CamLink"
+  }
+ },
+ "slotConfig": [
+  {
+   "slot": 1,
+   "assign": "auto",
+   "alias": "Main camera",
+   "present": true
+  },
+  {
+   "slot": 2,
+   "assign": "auto",
+   "alias": "Wide shot",
+   "present": true
+  },
+  {
+   "slot": 3,
+   "assign": "auto",
+   "alias": "Phone",
+   "present": true
+  },
+  {
+   "slot": 4,
+   "assign": "auto",
+   "alias": "Seafront",
+   "present": true
+  }
+ ],
+ "catalog": [
+  {
+   "id": "hdmi",
+   "name": "Board HDMI",
+   "kind": "hdmi-csi"
+  },
+  {
+   "id": "/dev/v4l/by-id/usb-046d_Logi_4K_Stream_Edition_0000ABCD-video-index0",
+   "name": "Logi 4K Stream Edition",
+   "kind": "usb"
+  },
+  {
+   "id": "net:phone",
+   "name": "Phone",
+   "kind": "network"
+  },
+  {
+   "id": "/dev/v4l/by-id/usb-Elgato_Cam_Link_4K_0000EFGH-video-index0",
+   "name": "Cam Link 4K",
+   "kind": "usb"
+  }
+ ]
+}

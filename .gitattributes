@@ -5,4 +5,5 @@
 *.dtsi   text eol=lf
 # Binary assets: no diffs, no line-ending conversion
 *.png    binary
+*.jpg    binary
 *.ttf    binary

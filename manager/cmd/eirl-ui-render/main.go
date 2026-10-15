@@ -4,10 +4,12 @@
 // video is painted grey; the VU meters, with fixed values; the app's network state and the wifi are FAKE
 // (neither the board's network nor its password).
 //
-//	eirl-ui-render [-state /run/eirl-engine/mixer.json] [-out .] [-fonts dir] [-lang es,en,fr] [-bench N] variant[+mod…]…
+//	eirl-ui-render [-state /run/eirl-engine/mixer.json] [-out .] [-fonts dir] [-lang es,en,fr] [-frames dir] [-bench N] variant[+mod…]…
 //
 // Without -lang the screen is Spanish and the files are ui-<variant>.png (the Python comparison); with it, one
 // file per language: <variant>-<lang>.png. testdata/mixer.json is a state to render from without a board.
+// -frames paints pictures where the video goes instead of grey (the README's screenshots): program.png in the
+// program and tile-1.png … tile-4.png in the tiles, each scaled to its box; a missing one stays grey.
 //
 // Variants: idle · live · connecting · error · pip · audio · audiomix · menu · locked · off · wifi · wifilive ·
 // settings · settingsoff · settingscable · settingsnone · settingsbusy · settingsonair · settingsold · settingsload ·
@@ -15,7 +17,7 @@
 // settingsnetswrong · settingsnetsforget · settingskb · settingskbupper · settingskbsym · settingskbsym2 ·
 // settingskbwrong · settingsapoffname · settingsssidkb · settingsssidkbbad · settingsrenaming · settingsrenameonair ·
 // settingsrenamed · audioset (the audio view's settings) · audiosetpick (a camera's audio being chosen) · audioseterr (the
-// engine refused a delay). Modifiers: +wifi +srtla (2 uplinks) +srtla1 +rtmps +rist (the header's protocol) +h265 (the
+// engine refused a delay). Modifiers: +wifi +srtla (2 uplinks) +srtla1 +rtmp +rtmps +rist (the header's protocol) +h265 (the
 // output's codec) +tls +clock (the output's reason: tls_failed, clock_not_synced) +dots +dots6 (the connections' dots) +press +presstile +noclient +camstab +noalias +details +phoff +phwait
 // +pherr +phmute
 // +gone (audioset: a camera linked to an input that is unplugged) +nophones +ant3 +ant1 +antnoinet +antsearch +anterror (the former tools/ui_render.py's header explained each) +apoff
@@ -27,12 +29,15 @@ import (
 	"flag"
 	"fmt"
 	"image"
+	_ "image/jpeg" // -frames may be JPEG
 	"image/png"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
+
+	xdraw "golang.org/x/image/draw"
 
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/screen/ui"
 )
@@ -109,6 +114,7 @@ func main() {
 	fontDir := flag.String("fonts", "", "a directory with the DejaVu fonts (else "+ui.BoardFontDir+")")
 	bench := flag.Int("bench", 0, "also time N full drawings of each variant")
 	langs := flag.String("lang", "", "languages to draw, comma separated (es,en,fr); empty: Spanish, ui-<variant>.png")
+	frames := flag.String("frames", "", "a directory with program.png and tile-N.png to paint where the video goes (else grey)")
 	flag.Parse()
 	variants := flag.Args()
 	if len(variants) == 0 {
@@ -134,7 +140,7 @@ func main() {
 				fmt.Fprintln(os.Stderr, "unknown language:", code)
 				os.Exit(2)
 			}
-			name, dur, err := render(raw, v, code, fonts, *out, *bench)
+			name, dur, err := render(raw, v, code, fonts, *out, *frames, *bench)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, v+":", err)
 				os.Exit(1)
@@ -148,7 +154,7 @@ func main() {
 	}
 }
 
-func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir string, bench int) (string, string, error) {
+func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir, frames string, bench int) (string, string, error) {
 	var st map[string]any
 	if err := json.Unmarshal(raw, &st); err != nil {
 		return "", "", err
@@ -448,6 +454,8 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir string, bench 
 		transport, links = "srtla", 1
 	case has("rtmps"): // the other protocols (OUTPUTS.md §8): the header words them
 		transport = "rtmps"
+	case has("rtmp"):
+		transport = "rtmp"
 	case has("rist"):
 		transport = "rist"
 	}
@@ -657,7 +665,10 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir string, bench 
 		name += "-" + lang
 		file = name + ".png"
 	}
-	img := composite(u.Image(), lay)
+	img, err := composite(u.Image(), lay, frames)
+	if err != nil {
+		return "", "", err
+	}
 	f, err := os.Create(filepath.Join(outDir, file))
 	if err != nil {
 		return "", "", err
@@ -669,15 +680,47 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir string, bench 
 	return name, dur, nil
 }
 
-// composite is the preview: black, grey where the video goes, and the UI layer on top.
-func composite(ui0 *image.RGBA, lay *ui.Layout) *image.RGBA {
+// composite is the preview: black, grey (or the -frames pictures) where the video goes, and the UI layer on top.
+func composite(ui0 *image.RGBA, lay *ui.Layout, frames string) (*image.RGBA, error) {
 	out := image.NewRGBA(ui0.Rect)
 	c := ui.NewCanvas(out, nil)
 	c.Paint(ui.Color{R: 0, G: 0, B: 0, A: 1})
 	grey := ui.Color{R: 0.22, G: 0.24, B: 0.27, A: 1}
-	for _, r := range append([]ui.Rect{lay.PGM}, lay.Tiles...) {
-		c.FillRect(float64(r.X), float64(r.Y), float64(r.W), float64(r.H), grey)
+	for i, r := range append([]ui.Rect{lay.PGM}, lay.Tiles...) {
+		name := "program.png"
+		if i > 0 {
+			name = fmt.Sprintf("tile-%d.png", i)
+		}
+		pic, err := loadFrame(frames, name)
+		if err != nil {
+			return nil, err
+		}
+		if pic == nil {
+			c.FillRect(float64(r.X), float64(r.Y), float64(r.W), float64(r.H), grey)
+			continue
+		}
+		xdraw.CatmullRom.Scale(out, image.Rect(r.X, r.Y, r.X+r.W, r.Y+r.H), pic, pic.Bounds(), xdraw.Src, nil)
 	}
 	c.DrawImage(ui0, 0, 0)
-	return out
+	return out, nil
+}
+
+// loadFrame reads one -frames picture; nil without -frames or when the file is not there.
+func loadFrame(dir, name string) (image.Image, error) {
+	if dir == "" {
+		return nil, nil
+	}
+	f, err := os.Open(filepath.Join(dir, name))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	pic, _, err := image.Decode(f)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	return pic, nil
 }

@@ -84,7 +84,7 @@ func fakeDests(variant string) *ui.DestList {
 	eirl.Managed, eirl.StreamIDSet, eirl.StreamIDMasked, eirl.VideoCodec = true, set, "publish:a1b2…", "h265"
 	twitch := d("d-3f9a1c2b", "Twitch", "twitch", "rtmp", "rtmp://live.twitch.tv/app")
 	twitch.Active, twitch.KeySet, twitch.KeyMasked = true, set, "live…wXyZ"
-	rist := d("d-7c21e0a4", "Plató RIST", "custom", "rist", "rist://203.0.113.40:8200")
+	rist := d("d-7c21e0a4", "Studio RIST", "custom", "rist", "rist://203.0.113.40:8200")
 	rist.LatencyMs, rist.RistProfile, rist.Username, rist.PassphraseSet, rist.PasswordSet = 1000, "main", "estudio", set, set
 	rist.VideoCodec, rist.VideoKbps, rist.OutputSize, rist.OutputFps = "h265", 8000, "1280x720", "half"
 	list := []ui.DestInfo{eirl, twitch, rist}
