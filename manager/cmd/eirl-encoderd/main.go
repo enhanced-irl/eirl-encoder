@@ -252,7 +252,8 @@ func main() {
 			log.Error("linking with EnhancedIRL off", "err", err)
 		} else {
 			srv.Cloud = cl
-			srv.Config.ManagedBy = cl.ManagedBy
+			// The first time, a destination the cloud set becomes its saved one (eirl; OUTPUTS.md §9.1)
+			srv.Config.CloudOwned = cl.CloudDestination
 			go cl.Run(ctx)
 		}
 	}
@@ -381,6 +382,13 @@ func newCloud(ctx context.Context, srv *api.Server, apiBase, appBase, confDir, t
 			caps = append(caps, cloud.CapWiFi) // the Wi-Fi client (WIFI.md §4)
 		}
 	}
+	// Output protocols, H.265 and the saved destinations (OUTPUTS.md §10): RTMP(S) is the engine's own sender
+	// (eirl-send) and UDP needs none; RIST, ristsender. After the ones the cloud knows: it keeps only the first
+	// 16 before filtering
+	caps = append(caps, cloud.CapRTMP, cloud.CapRTMPS, cloud.CapUDP, cloud.CapH265, cloud.CapDestinations)
+	if _, err := os.Stat("/usr/local/bin/ristsender"); err == nil {
+		caps = append(caps, cloud.CapRIST)
+	}
 	// Thumbnail (the engine: THUMB, THUMB_EVERY in /etc/default/eirl-engine; the app's configuration does
 	// not carry them). CloudDevice announces the thumbnail capability only if there really are thumbnails.
 	thumbOn, thumbEvery := true, 5
@@ -413,6 +421,7 @@ func newCloud(ctx context.Context, srv *api.Server, apiBase, appBase, confDir, t
 	if err := cl.Init(ctx); err != nil {
 		return nil, err
 	}
+	dev.Linked = cl.Linked
 	dev.ThumbActive() // if there is a thumbnail at start, it is announced from the first hello
 	return cl, nil
 }

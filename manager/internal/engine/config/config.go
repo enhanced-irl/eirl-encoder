@@ -40,6 +40,17 @@ const (
 var Whitelist = []string{
 	"SRT_URL", "SRT_MODE", "SRT_LATENCY", "SRT_STREAMID", "SRT_PASSPHRASE", "VBITRATE", "ABITRATE", "OUTPUT",
 	"ABR", "VBITRATE_MIN", "EDID_PREFERRED", "SOURCE", "VIDEO_DEVICE", "VIDEO_FORMAT", "VIDEO_MODE", "AUDIO_SOURCE",
+	// The output protocols and encoding settings (OUTPUTS.md §3)
+	"OUTPUT_PROTOCOL", "OUTPUT_URL", "OUTPUT_KEY", "OUTPUT_PASSPHRASE", "OUTPUT_USER", "OUTPUT_PASSWORD",
+	"RIST_PROFILE", "OUTPUT_LATENCY", "OUTPUT_VCODEC", "OUTPUT_SIZE", "OUTPUT_FPS",
+}
+
+// verbatimKeys are read without the launcher's «A=b=» quirk (ParseConfFile): they never went through
+// it, and a stream key may end in «=».
+var verbatimKeys = map[string]bool{
+	"OUTPUT_PROTOCOL": true, "OUTPUT_URL": true, "OUTPUT_KEY": true, "OUTPUT_PASSPHRASE": true, "OUTPUT_USER": true,
+	"OUTPUT_PASSWORD": true, "RIST_PROFILE": true, "OUTPUT_LATENCY": true, "OUTPUT_VCODEC": true, "OUTPUT_SIZE": true,
+	"OUTPUT_FPS": true,
 }
 
 // InvalidError is a configuration the launcher would refuse with exit 64. It never carries the
@@ -150,8 +161,25 @@ type Config struct {
 	SRTLatencyMs  int    // SRT_LATENCY (200)
 	SRTPassphrase Secret // SRT_PASSPHRASE ("")
 	SRTStreamID   Secret // SRT_STREAMID ("")
-	// Transport is srt or srtla (SRT_URL=srtla://…).
-	Transport         string
+	// Transport is the output protocol (OUTPUTS.md §3): OUTPUT_PROTOCOL, or srt / srtla from SRT_URL when it
+	// is empty (the legacy configuration).
+	Transport string
+	// The destination of every protocol but srt and srtla, which keep SRT_URL (OUTPUTS.md §3)
+	OutputURL        string // OUTPUT_URL: rtmp(s)://host[:port]/path · rist://host:port · udp|rtp://host:port
+	OutputKey        Secret // OUTPUT_KEY: the RTMP stream key
+	OutputPassphrase Secret // OUTPUT_PASSPHRASE: RIST's pre-shared key
+	OutputUser       string // OUTPUT_USER: RIST main profile (SRP)
+	OutputPassword   Secret // OUTPUT_PASSWORD
+	RISTProfile      string // RIST_PROFILE: simple | main (main)
+	OutputLatencyMs  int    // OUTPUT_LATENCY: RIST's buffer (1000)
+	// Encoding (OUTPUTS.md §7)
+	VCodec            string // OUTPUT_VCODEC: h264 | h265 (h264)
+	OutputSize        string // OUTPUT_SIZE: "" (the program's) | 1280x720 | 960x540
+	OutputHalf        bool   // OUTPUT_FPS=half: half the program's frame rate
+	SendBin           string // SEND_BIN (/usr/local/bin/eirl-send), the RTMP sender
+	RISTBin           string // RIST_BIN (/usr/local/bin/ristsender)
+	RISTLocalPort     int    // RIST_LOCAL_PORT (6100): where the output pipeline hands the TS to ristsender
+	LinksFile         string // LINKS_FILE (/run/eirl-encoder/links.json with EIRL_CONF): the links' health, to pick RTMP's
 	SRTLABin          string // SRTLA_BIN (/usr/local/bin/srtla_send)
 	SRTLALocalPort    int    // SRTLA_LOCAL_PORT (6000)
 	UplinksFile       string // UPLINKS_FILE (/run/eirl-uplinks/available)
@@ -206,6 +234,20 @@ var (
 	reSRTLAURL    = regexp.MustCompile(`^srtla://[A-Za-z0-9.-]{1,253}:[0-9]{1,5}$`)
 	reSRTURL      = regexp.MustCompile(`^srt://(\[[0-9A-Fa-f:.]{2,45}\]|[A-Za-z0-9.-]{1,253})?:[0-9]{1,5}$`)
 	reThumbSize   = regexp.MustCompile(`^[0-9]{2,4}x[0-9]{2,4}$`)
+
+	// OUTPUTS.md §3. Hosts: a DNS name, IPv4 or [IPv6]; the app checks the same.
+	reProtocol   = regexp.MustCompile(`^(srt|srtla|rtmp|rtmps|rist|udp)?$`)
+	reRTMPURL    = regexp.MustCompile(`^(rtmps?)://(\[[0-9A-Fa-f:.]{2,45}\]|[A-Za-z0-9.-]{1,253})(:[0-9]{1,5})?/[A-Za-z0-9._~!$'()*+,;=:@%/-]{1,400}$`)
+	reRISTURL    = regexp.MustCompile(`^rist://(\[[0-9A-Fa-f:.]{2,45}\]|[A-Za-z0-9.-]{1,253}):[0-9]{1,5}$`)
+	reUDPURL     = regexp.MustCompile(`^(udp|rtp)://(\[[0-9A-Fa-f:.]{2,45}\]|[A-Za-z0-9.-]{1,253}):[0-9]{1,5}$`)
+	reOutputKey  = regexp.MustCompile(`^([A-Za-z0-9._~!$()*+,;=:@%/?&-]{1,512})?$`)
+	reRISTUser   = regexp.MustCompile(`^([A-Za-z0-9_.-]{1,64})?$`)
+	reRISTPass   = regexp.MustCompile(`^([A-Za-z0-9_.~-]{1,128})?$`)
+	reRISTProf   = regexp.MustCompile(`^(simple|main)?$`)
+	reOptUint5   = regexp.MustCompile(`^([0-9]{1,5})?$`)
+	reVCodec     = regexp.MustCompile(`^(h264|h265)?$`)
+	reOutputSize = regexp.MustCompile(`^(1280x720|960x540)?$`)
+	reOutputFPS  = regexp.MustCompile(`^(full|half)?$`)
 )
 
 // Integer keys checked with ^[0-9]{1,6}$, in the launcher's order (sh:175-177).
@@ -258,7 +300,7 @@ func ParseConfFile(content []byte) map[string]string {
 		if !isWhitelisted(k) {
 			continue
 		}
-		if strings.Count(v, "=") == 1 && strings.HasSuffix(v, "=") {
+		if !verbatimKeys[k] && strings.Count(v, "=") == 1 && strings.HasSuffix(v, "=") {
 			v = strings.TrimSuffix(v, "=")
 		}
 		out[k] = v
@@ -365,6 +407,20 @@ func Load(o Options) (*Config, error) {
 		"THUMB":              e.or("THUMB", "1"),
 		"THUMB_SIZE":         e.or("THUMB_SIZE", "320x180"),
 		"THUMB_EVERY":        e.or("THUMB_EVERY", "5"),
+		"OUTPUT_PROTOCOL":    e.or("OUTPUT_PROTOCOL", ""),
+		"OUTPUT_URL":         e.or("OUTPUT_URL", ""),
+		"OUTPUT_KEY":         e.or("OUTPUT_KEY", ""),
+		"OUTPUT_PASSPHRASE":  e.or("OUTPUT_PASSPHRASE", ""),
+		"OUTPUT_USER":        e.or("OUTPUT_USER", ""),
+		"OUTPUT_PASSWORD":    e.or("OUTPUT_PASSWORD", ""),
+		"RIST_PROFILE":       e.or("RIST_PROFILE", "main"),
+		"OUTPUT_LATENCY":     e.or("OUTPUT_LATENCY", "1000"),
+		"OUTPUT_VCODEC":      e.or("OUTPUT_VCODEC", "h264"),
+		"OUTPUT_SIZE":        e.or("OUTPUT_SIZE", ""),
+		"OUTPUT_FPS":         e.or("OUTPUT_FPS", "full"),
+		"SEND_BIN":           e.or("SEND_BIN", "/usr/local/bin/eirl-send"),
+		"RIST_BIN":           e.or("RIST_BIN", "/usr/local/bin/ristsender"),
+		"RIST_LOCAL_PORT":    e.or("RIST_LOCAL_PORT", "6100"),
 	}
 	raw["DEVICE_TIMEOUT"] = e.or("DEVICE_TIMEOUT", raw["SIGNAL_TIMEOUT"])
 	uplinksDisabled, uplinksNoInternet := "", ""
@@ -374,6 +430,11 @@ func Load(o Options) (*Config, error) {
 	}
 	raw["UPLINKS_DISABLED"] = e.unsetOr("UPLINKS_DISABLED", uplinksDisabled)
 	raw["UPLINKS_NOINTERNET"] = e.unsetOr("UPLINKS_NOINTERNET", uplinksNoInternet)
+	linksFile := ""
+	if c.ConfPath != "" {
+		linksFile = "/run/eirl-encoder/links.json"
+	}
+	raw["LINKS_FILE"] = e.unsetOr("LINKS_FILE", linksFile)
 	raw["SRT_STATS"] = e.unsetOr("SRT_STATS", raw["RUN_DIR"]+"/srt-stats.json")
 	raw["THUMB_FILE"] = e.unsetOr("THUMB_FILE", raw["RUN_DIR"]+"/thumb.jpg")
 	if raw["VDEV"] == "" {
@@ -431,7 +492,7 @@ func validate(raw map[string]string, o Options) error {
 	re("VIDEO_FORMAT", reVideoFormat)
 	re("VIDEO_MODE", reVideoMode)
 	re("AUDIO_SOURCE", reAudioSource)
-	for _, k := range []string{"RECORD", "SRT_STATS", "UPLINKS_DISABLED", "UPLINKS_NOINTERNET"} {
+	for _, k := range []string{"RECORD", "SRT_STATS", "UPLINKS_DISABLED", "UPLINKS_NOINTERNET", "LINKS_FILE"} {
 		re(k, reOptPath)
 	}
 	for _, k := range []string{"OVERLAY", "LEVELS", "LIVE", "ABR", "MIXER", "MIXER_SCREEN"} {
@@ -471,6 +532,9 @@ func validate(raw map[string]string, o Options) error {
 		}
 	} else if u != "" {
 		re("SRT_URL", reSRTURL)
+	}
+	if err == nil {
+		err = validateOutput(raw)
 	}
 	if err == nil && raw["AENC"] != "voaacenc" && raw["AENC"] != "avenc_aac" {
 		err = invalid("AENC", "voaacenc or avenc_aac")
@@ -545,10 +609,27 @@ func (c *Config) fill(raw map[string]string) {
 	c.SRTLatencyMs = num("SRT_LATENCY")
 	c.SRTPassphrase = NewSecret(raw["SRT_PASSPHRASE"])
 	c.SRTStreamID = NewSecret(raw["SRT_STREAMID"])
-	c.Transport = "srt"
-	if strings.HasPrefix(c.SRTURL, "srtla://") {
-		c.Transport = "srtla"
+	c.Transport = raw["OUTPUT_PROTOCOL"]
+	if c.Transport == "" {
+		c.Transport = "srt"
+		if strings.HasPrefix(c.SRTURL, "srtla://") {
+			c.Transport = "srtla"
+		}
 	}
+	c.OutputURL = raw["OUTPUT_URL"]
+	c.OutputKey = NewSecret(raw["OUTPUT_KEY"])
+	c.OutputPassphrase = NewSecret(raw["OUTPUT_PASSPHRASE"])
+	c.OutputUser = raw["OUTPUT_USER"]
+	c.OutputPassword = NewSecret(raw["OUTPUT_PASSWORD"])
+	c.RISTProfile = raw["RIST_PROFILE"]
+	c.OutputLatencyMs = num("OUTPUT_LATENCY")
+	c.VCodec = raw["OUTPUT_VCODEC"]
+	c.OutputSize = raw["OUTPUT_SIZE"]
+	c.OutputHalf = raw["OUTPUT_FPS"] == "half"
+	c.SendBin = raw["SEND_BIN"]
+	c.RISTBin = raw["RIST_BIN"]
+	c.RISTLocalPort = num("RIST_LOCAL_PORT")
+	c.LinksFile = raw["LINKS_FILE"]
 	c.SRTLABin = raw["SRTLA_BIN"]
 	c.SRTLALocalPort = num("SRTLA_LOCAL_PORT")
 	c.UplinksFile = raw["UPLINKS_FILE"]

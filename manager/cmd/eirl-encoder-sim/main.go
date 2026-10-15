@@ -96,7 +96,8 @@ func main() {
 	dev := newSimDevice(log, *signalFlap, *links, *legacy)
 	dev.info = cloud.DeviceInfo{
 		HardwareID: *hwID, Model: *model, FirmwareVersion: "sim-" + version, Name: *name,
-		Capabilities: []string{cloud.CapSRTLA, cloud.CapABR, cloud.CapEDID, cloud.CapThumbnail},
+		Capabilities: []string{cloud.CapSRTLA, cloud.CapABR, cloud.CapEDID, cloud.CapThumbnail, cloud.CapRTMP, cloud.CapRTMPS,
+			cloud.CapRIST, cloud.CapUDP, cloud.CapH265, cloud.CapDestinations},
 	}
 	cl := &cloud.Client{
 		APIBase: *apiBase, AppBase: *appBase, State: &cloud.StateFile{Path: *statePath, AllowHTTP: true},

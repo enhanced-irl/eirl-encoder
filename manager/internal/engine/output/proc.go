@@ -33,11 +33,11 @@ type child struct {
 
 // startChild starts bin with args. stdin may be nil (/dev/null); out receives stdout and stderr when
 // withStdout, stderr only otherwise (the read end is returned, for a reader goroutine); extra are the
-// child's fds 3, 4…
+// child's fds 3, 4…; env is added to the inherited environment (a secret for the child: eirl-send's key).
 //
 // The arguments may hold the SRT target (srt-live-transmit has no other way to take it, as with the
 // Python engine): they never go to a log or an error. Errors name the program only.
-func startChild(name, bin string, args []string, stdin *os.File, withStdout bool, extra []*os.File) (*child, *os.File, error) {
+func startChild(name, bin string, args []string, stdin *os.File, withStdout bool, extra []*os.File, env []string) (*child, *os.File, error) {
 	r, w, err := os.Pipe()
 	if err != nil {
 		return nil, nil, err
@@ -49,7 +49,7 @@ func startChild(name, bin string, args []string, stdin *os.File, withStdout bool
 		cmd.Stdout = w
 	}
 	cmd.ExtraFiles = extra
-	cmd.Env = childEnv(os.Environ())
+	cmd.Env = append(childEnv(os.Environ()), env...)
 	// Python's subprocess closes every other descriptor (close_fds): Go only spares those it opened
 	// itself, so GStreamer's (a capture device, a socket) would leak into the child
 	cloexecAll()

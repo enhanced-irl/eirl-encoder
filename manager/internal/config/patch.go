@@ -3,13 +3,11 @@ package config
 import (
 	"bytes"
 	"encoding/json"
-	"strings"
-
-	"github.com/enhanced-irl/eirl-encoder/manager/internal/i18n"
 )
 
 // Optional tells apart, in JSON, a missing field (leave it), null (clear it) and a value (change it).
-// Used for streamId and passphrase: the key does not have to be typed again to change the latency.
+// Used for the secrets (streamId, passphrase, key, password): they do not have to be typed again to change the
+// latency.
 type Optional struct {
 	Set   bool
 	Null  bool
@@ -25,124 +23,31 @@ func (o *Optional) UnmarshalJSON(b []byte) error {
 	return json.Unmarshal(b, &o.Value)
 }
 
-// Patch is the body of PUT /api/v1/destination.
-type Patch struct {
-	URL        *string  `json:"url"`
-	Mode       *string  `json:"mode"`
-	LatencyMs  *int     `json:"latencyMs"`
-	StreamID   Optional `json:"streamId"`
-	Passphrase Optional `json:"passphrase"`
-	VideoKbps  *int     `json:"videoBitrateKbps"`
-	AudioKbps  *int     `json:"audioBitrateKbps"`
-	ABR        *bool    `json:"adaptiveBitrate"`
-	VideoMin   *int     `json:"videoMinBitrateKbps"`
-	Apply      bool     `json:"apply"`
-}
-
-// ApplyTo applies the patch on the current configuration and validates the result. What the query of
-// a pasted URL brings (streamid, passphrase, latency, mode) wins over the separate fields.
-func (p Patch) ApplyTo(cur Settings) (Settings, error) {
-	s := cur
-	if p.Mode != nil {
-		s.Mode = *p.Mode
-	}
-	if p.LatencyMs != nil {
-		s.LatencyMs = *p.LatencyMs
-	}
-	opt := func(o Optional, dst *string) {
-		if o.Null {
-			*dst = ""
-		} else if o.Set {
-			*dst = o.Value
-		}
-	}
-	opt(p.StreamID, &s.StreamID)
-	opt(p.Passphrase, &s.Passphrase)
-	if p.VideoKbps != nil {
-		s.VideoKbps = *p.VideoKbps
-	}
-	if p.AudioKbps != nil {
-		s.AudioKbps = *p.AudioKbps
-	}
-	if p.ABR != nil {
-		s.ABR = *p.ABR
-	}
-	if p.VideoMin != nil {
-		s.VideoMinKbps = *p.VideoMin
-	}
-	if p.URL != nil {
-		if *p.URL == "" {
-			s.URL = ""
-		} else {
-			u, err := ParseURL(*p.URL)
-			if err != nil {
-				return cur, FieldErrors{"url": i18n.RefOf(err)}
-			}
-			s.URL = u.URL
-			// The mode comes from the URL (with a host: caller to the relay; without: listener) unless
-			// the query says otherwise. So pasting a key's URL while in listener mode does not fail.
-			switch {
-			case u.Mode != "":
-				s.Mode = u.Mode
-			case strings.HasPrefix(u.URL, "srt://:"):
-				s.Mode = "listener"
-			default:
-				s.Mode = "caller"
-			}
-			switch {
-			case u.LatencyMs != 0:
-				s.LatencyMs = u.LatencyMs
-			// Switching to SRTLA (the panel's URL has no latency), the LAN SRT latency falls short:
-			// it goes up to 2000 ms unless this same request set another one.
-			case Transport(u.URL) == "srtla" && Transport(cur.URL) != "srtla" &&
-				(p.LatencyMs == nil || *p.LatencyMs == cur.LatencyMs) && s.LatencyMs < SRTLALatencyMs:
-				s.LatencyMs = SRTLALatencyMs
-			}
-			if u.StreamID != "" {
-				s.StreamID = u.StreamID
-			}
-			if u.Passphrase != "" {
-				s.Passphrase = u.Passphrase
-			}
-		}
-	}
-	// Changing the server requires giving the secrets again (or removing them): otherwise a stolen
-	// session could send the saved key to its own server by changing only the URL. Switching to
-	// listener does not expose it (the caller sets the streamid).
-	if newHost := HostOf(s.URL); newHost != "" && newHost != HostOf(cur.URL) {
-		errs := FieldErrors{}
-		if cur.StreamID != "" && s.StreamID == cur.StreamID && !p.StreamID.Set {
-			errs["streamId"] = i18n.Ref("config.new_server_streamid")
-		}
-		if cur.Passphrase != "" && s.Passphrase == cur.Passphrase && !p.Passphrase.Set {
-			errs["passphrase"] = i18n.Ref("config.new_server_passphrase")
-		}
-		if len(errs) > 0 {
-			return cur, errs
-		}
-	}
-	if err := s.Validate(); err != nil {
-		return cur, err
-	}
-	return s, nil
-}
-
-// Public is the API view: the secrets only as "set" and masked.
+// Public is the API view of engine.env's destination (GET /destination): the secrets only as "set" and masked.
 type Public struct {
 	ManagedBy  string `json:"managedBy"`
 	URL        string `json:"url"`
 	URLInvalid bool   `json:"urlInvalid,omitempty"` // saved by hand in a format not allowed: not shown
 	Mode       string `json:"mode"`
-	LatencyMs  int    `json:"latencyMs"`
+	LatencyMs  int    `json:"latencyMs"` // SRT's latency, or RIST's buffer
 	StreamID   Secret `json:"streamId"`
-	Passphrase Secret `json:"passphrase"`
+	Passphrase Secret `json:"passphrase"` // SRT's passphrase, or RIST's pre-shared key
 	VideoKbps  int    `json:"videoBitrateKbps"`
 	AudioKbps  int    `json:"audioBitrateKbps"`
 	Output     string `json:"output"`
-	Transport  string `json:"transport"` // srt | srtla (the SAVED one)
+	Transport  string `json:"transport"` // the SAVED protocol (srt when there is no destination)
 	ABR        bool   `json:"adaptiveBitrate"`
 	VideoMin   int    `json:"videoMinBitrateKbps"`
 	EDID       string `json:"edidPreferred"`
+	// Output protocols and encoding settings (OUTPUTS.md §9.3); protocol "" = no destination
+	Protocol    string `json:"protocol"`
+	Key         Secret `json:"key"`
+	RISTProfile string `json:"ristProfile"`
+	Username    string `json:"username"`
+	Password    Secret `json:"password"`
+	VideoCodec  string `json:"videoCodec"`
+	OutputSize  string `json:"outputSize"`
+	OutputFPS   string `json:"outputFps"`
 }
 
 type Secret struct {
@@ -151,12 +56,114 @@ type Secret struct {
 }
 
 func (s Settings) Public() Public {
+	p := s.EffectiveProtocol()
 	url, ok := SafeURL(s.URL)
-	return Public{
-		ManagedBy: s.ManagedBy, URL: url, URLInvalid: !ok, Mode: s.Mode, LatencyMs: s.LatencyMs,
-		StreamID:   Secret{Set: s.StreamID != "", Masked: MaskStreamID(s.StreamID)},
-		Passphrase: Secret{Set: s.Passphrase != ""},
-		VideoKbps:  s.VideoKbps, AudioKbps: s.AudioKbps, Output: s.Output, EDID: s.EDIDPreferred,
-		Transport: Transport(s.URL), ABR: s.ABR, VideoMin: s.VideoMinKbps,
+	latency, passphrase := s.LatencyMs, s.Passphrase
+	if !usesSRT(p) && p != "" {
+		url, ok = safeOutputURL(s.OutputURL)
 	}
+	switch {
+	case p == ProtoRIST:
+		latency, passphrase = s.OutputLatencyMs, s.OutputPassphrase
+		if latency == 0 {
+			latency = RISTLatencyDefault
+		}
+	case p != "" && !usesLatency(p):
+		latency = 0 // like the saved destination: rtmp(s) and udp have none
+	}
+	transport := p
+	if transport == "" {
+		transport = ProtoSRT
+	}
+	fps := s.OutputFPS
+	if fps == "" {
+		fps = "full"
+	}
+	return Public{
+		ManagedBy: s.ManagedBy, URL: url, URLInvalid: !ok, Mode: s.Mode, LatencyMs: latency,
+		StreamID:   Secret{Set: s.StreamID != "", Masked: MaskStreamID(s.StreamID)},
+		Passphrase: Secret{Set: passphrase != ""},
+		VideoKbps:  s.VideoKbps, AudioKbps: s.AudioKbps, Output: s.Output, EDID: s.EDIDPreferred,
+		Transport: transport, ABR: s.ABR, VideoMin: s.VideoMinKbps,
+		Protocol: p, Key: Secret{Set: s.Key != "", Masked: MaskKey(s.Key)}, RISTProfile: s.RISTProfile,
+		Username: s.OutputUser, Password: Secret{Set: s.OutputPassword != ""}, VideoCodec: s.Codec(),
+		OutputSize: s.OutputSize, OutputFPS: fps,
+	}
+}
+
+// safeOutputURL: like SafeURL for the other protocols' URLs (OUTPUT_URL).
+func safeOutputURL(raw string) (string, bool) {
+	if raw == "" {
+		return "", true
+	}
+	if _, err := checkOutputURL(raw); err != nil {
+		return "", false
+	}
+	return raw, true
+}
+
+// MaskKey shows the ends of a stream key: live…wXyZ (all dots if it is short).
+func MaskKey(k string) string {
+	switch {
+	case k == "":
+		return ""
+	case len(k) < 12:
+		return "••••"
+	}
+	return k[:4] + "…" + k[len(k)-4:]
+}
+
+// DestinationView: the public view of a saved destination (GET /destinations): the secrets only as "set" and
+// masked, like the stream ID of GET /destination.
+type DestinationView struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Template    string `json:"template"`
+	Managed     bool   `json:"managed"`
+	Active      bool   `json:"active"`
+	Protocol    string `json:"protocol"`
+	URL         string `json:"url"`
+	URLInvalid  bool   `json:"urlInvalid"`
+	Mode        string `json:"mode"`
+	LatencyMs   int    `json:"latencyMs"`
+	StreamID    Secret `json:"streamId"`
+	Passphrase  Secret `json:"passphrase"`
+	Key         Secret `json:"key"`
+	RISTProfile string `json:"ristProfile"`
+	Username    string `json:"username"`
+	Password    Secret `json:"password"`
+	VideoCodec  string `json:"videoCodec"`
+	VideoKbps   int    `json:"videoBitrateKbps"`
+	VideoMin    int    `json:"videoMinBitrateKbps"`
+	ABR         bool   `json:"adaptiveBitrate"`
+	AudioKbps   int    `json:"audioBitrateKbps"`
+	OutputSize  string `json:"outputSize"`
+	OutputFPS   string `json:"outputFps"`
+}
+
+// View: the public view; active says whether it is the active one.
+func (d Destination) View(active bool) DestinationView {
+	url, ok := SafeURL(d.URL)
+	if !usesSRT(d.Protocol) {
+		url, ok = safeOutputURL(d.URL)
+	}
+	return DestinationView{ID: d.ID, Name: d.Name, Template: d.Template, Managed: d.Managed, Active: active,
+		Protocol: d.Protocol, URL: url, URLInvalid: !ok, Mode: d.Mode, LatencyMs: d.LatencyMs,
+		StreamID:   Secret{Set: d.StreamID != "", Masked: MaskStreamID(d.StreamID)},
+		Passphrase: Secret{Set: d.Passphrase != ""}, Key: Secret{Set: d.Key != "", Masked: MaskKey(d.Key)},
+		RISTProfile: d.RISTProfile, Username: d.Username, Password: Secret{Set: d.Password != ""},
+		VideoCodec: d.VideoCodec, VideoKbps: d.VideoKbps, VideoMin: d.VideoMinKbps, ABR: d.ABR, AudioKbps: d.AudioKbps,
+		OutputSize: d.OutputSize, OutputFPS: d.OutputFPS}
+}
+
+// Secrets: the four secrets in clear ("" when unset), for the screen's eye (local socket only).
+type Secrets struct {
+	StreamID   string `json:"streamId"`
+	Passphrase string `json:"passphrase"`
+	Key        string `json:"key"`
+	Password   string `json:"password"`
+}
+
+func (d Destination) Secrets() Secrets {
+	return Secrets{StreamID: d.StreamID, Passphrase: d.Passphrase, Key: d.Key, Password: d.Password}
 }

@@ -420,9 +420,12 @@ type Bridge struct {
 	Stills   []string // From of each still pushed
 	stats    gst.BridgeStats
 	Freed    bool
+	Every    int
 }
 
 func (b *Bridge) SetParams(p gst.BridgeParams) { b.mu.Lock(); b.Params = p; b.mu.Unlock() }
+
+func (b *Bridge) SetEvery(n int) { b.mu.Lock(); b.Every = n; b.mu.Unlock() }
 
 func (b *Bridge) SetScreen(dst gst.Element, _ time.Duration) {
 	b.mu.Lock()

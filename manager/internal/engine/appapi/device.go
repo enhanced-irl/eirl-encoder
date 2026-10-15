@@ -111,6 +111,8 @@ type DeviceState struct {
 	// secretGen moves on every DropSecrets (and when what was revealed stops being true: a new key): a reveal queued
 	// before it does not bring its secrets back
 	secretGen uint64
+	// destsRetry: the Destination page was opened again, GET /destinations is asked again (an app updated since)
+	destsRetry bool
 }
 
 var _ ui.App = (*DeviceState)(nil)
@@ -175,6 +177,9 @@ func (d *DeviceState) Watch(w ui.AppWatch) {
 		s := *d.snap.Setup
 		s.Code = ""
 		d.snap.Setup = &s
+	}
+	if w.Dest && !old.Dest && d.snap.DestsAPI == ui.No {
+		d.destsRetry = true
 	}
 	if (w.Device && !old.Device) || (w.Setup && !old.Setup) || (w.Update && !old.Update) || (w.Slots && !old.Slots) ||
 		(w.Zones && !old.Zones) || (w.Cloud && !old.Cloud) || (w.About && !old.About) || (w.Dest && !old.Dest) ||
@@ -324,7 +329,8 @@ func (d *DeviceState) loop() {
 				upd = time.Time{}
 			case "slots":
 				slots = time.Time{}
-			case "dest_save", "restart", "input_save", "uplink", "modem_save", "modem_pin", "modem_reset", "modem_subnet":
+			case "dest_save", "restart", "input_save", "uplink", "modem_save", "modem_pin", "modem_reset", "modem_subnet",
+				"dest_create", "dest_update", "dest_delete", "dest_activate":
 				dest, status = time.Time{}, time.Time{}
 			case "cloud_unlink":
 				cloud = time.Time{}

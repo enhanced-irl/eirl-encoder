@@ -77,6 +77,10 @@ type OutputStatus struct {
 	Reason   string `json:"reason,omitempty"`
 	SentKbps *int   `json:"sentKbps,omitempty"`
 	RTTMs    *int   `json:"rttMs,omitempty"`
+	// OUTPUTS.md §8 (optional): the output's protocol (srt | srtla | rtmp | rtmps | rist | udp) and video codec
+	// (h264 | h265)
+	Protocol string `json:"protocol,omitempty"`
+	Codec    string `json:"codec,omitempty"`
 }
 
 type AudioStatus struct {

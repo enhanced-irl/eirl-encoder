@@ -126,6 +126,8 @@ type CloudDevice struct {
 	Port         int // port of the local web, for lanUrls
 	Rebooter     Rebooter
 	Uptime       func() time.Duration // nil = /proc/uptime (the tests replace it)
+	// Linked: the device is still linked (cloud.Client.Linked); nil = yes. A config.set is not written once unlinked
+	Linked func() bool
 
 	thumbSeen atomic.Bool
 }
@@ -173,11 +175,11 @@ func (d *CloudDevice) Status(ctx context.Context) cloud.EncoderStatus {
 }
 
 func (d *CloudDevice) Reported() (cloud.ReportedConfig, error) {
-	cfg, err := d.Srv.Config.Load()
+	ds, cfg, err := d.Srv.Config.Destinations()
 	if err != nil {
 		return cloud.ReportedConfig{}, err
 	}
-	rep := cloud.Reported(cfg, d.disabled())
+	rep := cloud.Reported(cfg, ds, d.disabled())
 	// With eirl-netsetup, the real policy ("Create my Wi-Fi", with rule W4); without it, the client sets it
 	if d.Srv.Network != nil {
 		rep.AccessPoint = d.Srv.Network.APPolicy()
@@ -198,23 +200,24 @@ var errUnlinked = errors.New("unlinked: config.set dropped")
 
 func (d *CloudDevice) ApplyConfig(ctx context.Context, w cloud.WireConfig, apply bool) (cloud.ApplyResult, error) {
 	var res cloud.ApplyResult
-	before := d.Srv.Config.Hashes()
+	before := d.Srv.Config.Snapshot()
 	var disabled []string
-	cfg, err := d.Srv.Config.Update(func(cur config.Settings) (config.Settings, error) {
+	// The cloud manages only its own destination (eirl) in the saved list (OUTPUTS.md §10)
+	_, cfg, err := d.Srv.Config.UpdateDestinations(func(ds *config.Destinations, cur *config.Settings) error {
 		// With the Store's lock: if it was unlinked (or the session was cut) meanwhile, nothing is
 		// written. Unlinking waits for the session and then removes the destination.
 		if ctx.Err() != nil {
-			return cur, ctx.Err()
+			return ctx.Err()
 		}
-		if cur.ManagedBy != "eirl" {
-			return cur, errUnlinked
+		if d.Linked != nil && !d.Linked() {
+			return errUnlinked
 		}
-		next, dis, fe := cloud.ApplyWire(cur, w)
+		nds, next, dis, fe := cloud.ApplyWireDestinations(*ds, *cur, w)
 		if fe != nil {
-			return cur, fe
+			return fe
 		}
-		disabled = dis
-		return next, nil
+		*ds, *cur, disabled = nds, next, dis
+		return nil
 	})
 	if err != nil {
 		return res, err
@@ -239,7 +242,7 @@ func (d *CloudDevice) ApplyConfig(ctx context.Context, w cloud.WireConfig, apply
 	if !apply || ctx.Err() != nil {
 		return res, ctx.Err()
 	}
-	res.Restarted, err = d.Srv.applySaved(ctx, before)
+	res.Restarted, err = d.Srv.applyAfterSave(ctx, before)
 	return res, err
 }
 
@@ -316,7 +319,7 @@ func (d *CloudDevice) Action(ctx context.Context, name, password string) error {
 // and, if it did not restart, POST /service/start): saves the mode, applies with the common rule
 // (applySaved) and, if the stream was stopped or failed, starts it.
 func (d *CloudDevice) setOutput(ctx context.Context, output string) error {
-	before := d.Srv.Config.Hashes()
+	before := d.Srv.Config.Snapshot()
 	_, err := d.Srv.Config.Update(func(cur config.Settings) (config.Settings, error) {
 		cur.Output = output
 		return cur, cur.Validate()
@@ -331,7 +334,7 @@ func (d *CloudDevice) setOutput(ctx context.Context, output string) error {
 	if err != nil {
 		return err
 	}
-	restarted, err := d.Srv.applySaved(ctx, before)
+	restarted, err := d.Srv.applyAfterSave(ctx, before)
 	if err != nil || restarted {
 		return err
 	}
@@ -367,24 +370,31 @@ func (d *CloudDevice) Uplinks() []string {
 	return d.Srv.Uplinks.AvailableNames()
 }
 
-// Unlinked: if the cloud set the destination, it is removed (the key belongs to the account that no
-// longer has the device) and streaming stops (the picture goes on), with the common "apply" rule. A
-// destination the owner set locally before linking is kept.
+// Unlinked: the cloud's destination (eirl) is removed (the key belongs to the account that no longer has the
+// device); if it was the active one, nothing is active and streaming stops (the picture goes on), with the common
+// "apply" rule. The device's own destinations stay. clearDestination (the cloud set the destination, cloud.json) is
+// what the saved list already says: the cloud's destination exists only if the cloud set it.
 func (d *CloudDevice) Unlinked(ctx context.Context, clearDestination bool) error {
-	if !clearDestination {
+	before := d.Srv.Config.Snapshot()
+	removed := false
+	cfg, err := d.updateDestinations(func(ds *config.Destinations, cur *config.Settings) error {
+		var wasActive bool
+		if removed, wasActive = ds.Remove(config.CloudID); wasActive {
+			cur.Output = "off"
+		}
 		return nil
-	}
-	before := d.Srv.Config.Hashes()
-	cfg, err := d.Srv.Config.Update(func(cur config.Settings) (config.Settings, error) {
-		cur.URL, cur.Mode, cur.StreamID, cur.Passphrase, cur.Output = "", "caller", "", "", "off"
-		return cur, cur.Validate()
 	})
-	if err != nil {
+	if err != nil || !removed {
 		return err
 	}
-	d.Srv.logConfig("unlinked: EnhancedIRL destination removed, not streaming", cfg)
-	_, err = d.Srv.applySaved(ctx, before)
+	d.Srv.logConfig("unlinked: EnhancedIRL destination removed", cfg)
+	_, err = d.Srv.applyAfterSave(ctx, before)
 	return err
+}
+
+func (d *CloudDevice) updateDestinations(fn func(*config.Destinations, *config.Settings) error) (config.Settings, error) {
+	_, cfg, err := d.Srv.Config.UpdateDestinations(fn)
+	return cfg, err
 }
 
 // jsonFields: the JSON fields of v that pass keep (nil if none). So the mapping does not have to know

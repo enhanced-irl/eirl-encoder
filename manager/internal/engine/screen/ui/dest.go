@@ -55,6 +55,7 @@ func (d *destState) dirty() bool {
 func init() {
 	registerPage("dest", &pageDef{
 		layout: func(l *Layout) {
+			destsLayout(l) // with saved destinations (dests.go)
 			rows, bottom := l.FormRows(5)
 			b := l.Buttons
 			b["s_dest_url"] = rows[0]
@@ -74,12 +75,33 @@ func init() {
 			b["s_dest_apply"] = Rect{bottom.X + bottom.W - aw, bottom.Y, aw, bottom.H}
 			b["s_dest_save"] = Rect{bottom.X + bottom.W - aw - l.M - sw, bottom.Y, sw, bottom.H}
 		},
-		draw:  (*UI).drawDestPage,
-		keys:  (*UI).destKeys,
-		touch: (*UI).destTouch,
+		// With saved destinations (an app with GET /destinations), the list and a destination's page (dests.go); else
+		// the single destination of an older app
+		draw: func(u *UI, d *dc, app *AppSnapshot) {
+			if destsOn(app) {
+				u.drawDests(d, app)
+				return
+			}
+			u.drawDestPage(d, app)
+		},
+		title: (*UI).destsTitle,
+		keys: func(u *UI, app *AppSnapshot) []string {
+			if destsOn(app) {
+				return u.destsKeys(app)
+			}
+			return u.destKeys(app)
+		},
+		touch: func(u *UI, what string) bool {
+			app := u.app().AppSnapshot()
+			if destsOn(&app) {
+				return u.destsTouch(what)
+			}
+			return u.destTouch(what)
+		},
 		watch: func(_ *UI, w *AppWatch) { w.Dest = true },
 		leave: func(u *UI) {
 			u.dst.wipe()
+			u.destsLeave()
 			u.dropSecrets()
 		},
 	})
@@ -302,17 +324,25 @@ func (u *UI) drawDestPage(d *dc, app *AppSnapshot) {
 
 // bottomNote is the note of a form page, at the left of its buttons (wrapped in up to two lines).
 func (u *UI) bottomNote(d *dc, t string, warn bool, right float64) {
+	u.bottomNoteIn(d, t, warn, float64(u.Lay.SettingsPage.X), right)
+}
+
+// bottomNoteIn is bottomNote between left and right (a button on each side).
+func (u *UI) bottomNoteIn(d *dc, t string, warn bool, left, right float64) {
 	if t == "" {
 		return
 	}
-	pg, s := u.Lay.SettingsPage, d.s
+	s := d.s
 	_, bottom := u.Lay.FormRows(1)
 	col := cQuiet
 	style := Sans
 	if warn {
 		col, style = cWarn, SansBold
 	}
-	x0 := float64(pg.X) + 4*s
+	x0 := left + 4*s
+	if left > float64(u.Lay.SettingsPage.X) {
+		x0 = left + float64(u.Lay.M)
+	}
 	w := right - x0 - float64(u.Lay.M)
 	lines := d.wrap(t, 14*s, style, w)
 	if len(lines) > 2 {

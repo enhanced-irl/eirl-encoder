@@ -153,9 +153,16 @@ func TestParseURLSRTLA(t *testing.T) {
 	}
 }
 
-func patch(t *testing.T, cur Settings, body string) (Settings, error) {
+// dest: the settings as a saved custom destination (the migration's shape).
+func dest(s Settings) Destination {
+	d := fromSettings(s)
+	d.ID, d.Name, d.Template = "d-00000001", protocolNames[d.Protocol], TemplateCustom
+	return d
+}
+
+func patch(t *testing.T, cur Destination, body string) (Destination, error) {
 	t.Helper()
-	var p Patch
+	var p DestinationPatch
 	if err := json.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatal(err)
 	}
@@ -163,38 +170,40 @@ func patch(t *testing.T, cur Settings, body string) (Settings, error) {
 }
 
 func TestPatchSRTLA(t *testing.T) {
-	cur := valid() // srt to the same relay, latency 200
-	cur.URL, cur.LatencyMs = "srt://eu1.relay.example.com:5000", 200
+	s := valid() // srt to the same relay, latency 200
+	s.URL, s.LatencyMs = "srt://eu1.relay.example.com:5000", 200
+	cur := dest(s)
 	// The form sends the previous latency: switching to SRTLA raises it to 2000
-	s, err := patch(t, cur, `{"url": "srtla://eu1.relay.example.com:5001", "latencyMs": 200}`)
-	if err != nil || s.LatencyMs != SRTLALatencyMs || s.Mode != "caller" || s.Public().Transport != "srtla" {
-		t.Fatalf("switch to SRTLA: %+v %v", s, err)
+	d, err := patch(t, cur, `{"url": "srtla://eu1.relay.example.com:5001", "latencyMs": 200}`)
+	if err != nil || d.LatencyMs != SRTLALatencyMs || d.Mode != "caller" || d.Protocol != "srtla" {
+		t.Fatalf("switch to SRTLA: %+v %v", d, err)
 	}
 	// Same host: no need to type the key again
-	if s.StreamID != cur.StreamID {
-		t.Errorf("the key should be kept: %q", s.StreamID)
+	if d.StreamID != cur.StreamID {
+		t.Errorf("the key should be kept: %q", d.StreamID)
 	}
 	// A latency set on purpose in the same request wins
-	if s, _ := patch(t, cur, `{"url": "srtla://eu1.relay.example.com:5001", "latencyMs": 800}`); s.LatencyMs != 800 {
-		t.Errorf("explicit latency: %d", s.LatencyMs)
+	if d, _ := patch(t, cur, `{"url": "srtla://eu1.relay.example.com:5001", "latencyMs": 800}`); d.LatencyMs != 800 {
+		t.Errorf("explicit latency: %d", d.LatencyMs)
 	}
 	// Already on SRTLA, lowering the latency is respected
-	if s2, _ := patch(t, s, `{"url": "srtla://eu1.relay.example.com:5001", "latencyMs": 1200}`); s2.LatencyMs != 1200 {
-		t.Errorf("latency on SRTLA: %d", s2.LatencyMs)
+	if d2, _ := patch(t, d, `{"url": "srtla://eu1.relay.example.com:5001", "latencyMs": 1200}`); d2.LatencyMs != 1200 {
+		t.Errorf("latency on SRTLA: %d", d2.LatencyMs)
 	}
-	if _, err := patch(t, s, `{"mode": "listener"}`); err == nil {
+	if _, err := patch(t, d, `{"mode": "listener"}`); err == nil {
 		t.Error("SRTLA in listener should fail")
 	}
 }
 
 func TestPatchABR(t *testing.T) {
-	cur := valid()
-	s, err := patch(t, cur, `{"adaptiveBitrate": true, "videoMinBitrateKbps": 1500}`)
-	if err != nil || !s.ABR || s.VideoMinKbps != 1500 {
-		t.Fatalf("%+v %v", s, err)
+	cur := dest(valid())
+	d, err := patch(t, cur, `{"adaptiveBitrate": true, "videoMinBitrateKbps": 1500}`)
+	if err != nil || !d.ABR || d.VideoMinKbps != 1500 {
+		t.Fatalf("%+v %v", d, err)
 	}
+	ds := Destinations{V: 1, Active: d.ID, Destinations: []Destination{d}}
 	env := map[string]string{}
-	for _, l := range strings.Split(string(s.Render()), "\n") {
+	for _, l := range strings.Split(string(ds.Flatten(valid()).Render()), "\n") {
 		if k, v, ok := strings.Cut(l, "="); ok {
 			env[k] = v
 		}
@@ -216,43 +225,31 @@ func TestPatchABR(t *testing.T) {
 }
 
 func TestPatchKeepsAndClearsSecrets(t *testing.T) {
-	cur := valid()
-	cur.Passphrase = "abcdefghijk"
-	var p Patch
-	if err := json.Unmarshal([]byte(`{"latencyMs": 500}`), &p); err != nil {
-		t.Fatal(err)
+	s := valid()
+	s.Passphrase = "abcdefghijk"
+	cur := dest(s)
+	d, err := patch(t, cur, `{"latencyMs": 500}`)
+	if err != nil || d.StreamID != cur.StreamID || d.Passphrase != cur.Passphrase || d.LatencyMs != 500 {
+		t.Fatalf("absent must keep: %+v %v", d, err)
 	}
-	s, err := p.ApplyTo(cur)
-	if err != nil || s.StreamID != cur.StreamID || s.Passphrase != cur.Passphrase || s.LatencyMs != 500 {
-		t.Fatalf("absent must keep: %+v %v", s, err)
-	}
-	if err := json.Unmarshal([]byte(`{"passphrase": null}`), &p); err != nil {
-		t.Fatal(err)
-	}
-	if s, _ = p.ApplyTo(cur); s.Passphrase != "" {
+	if d, _ = patch(t, cur, `{"passphrase": null}`); d.Passphrase != "" {
 		t.Errorf("null must clear")
 	}
 	cur.Passphrase = "" // the URL cases below are not about the server-change rule
-	var p2 Patch
-	_ = json.Unmarshal([]byte(`{"url":"srt://relay.example:5000?streamid=publish:NEWKEY0123456789","streamId":"publish:OTHER"}`), &p2)
-	if s, _ = p2.ApplyTo(cur); s.StreamID != "publish:NEWKEY0123456789" {
-		t.Errorf("the URL query must win: %q", s.StreamID)
+	if d, _ = patch(t, cur, `{"url":"srt://relay.example:5000?streamid=publish:NEWKEY0123456789","streamId":"publish:OTHER"}`); d.StreamID != "publish:NEWKEY0123456789" {
+		t.Errorf("the URL query must win: %q", d.StreamID)
 	}
 	// pasting a URL with a host while in listener → caller; srt://:port → listener
 	lis := cur
 	lis.URL, lis.Mode = "srt://:9000", "listener"
-	var p3 Patch
-	_ = json.Unmarshal([]byte(`{"url":"srt://relay.example:5000?streamid=publish:NEWKEY0123456789","mode":"listener"}`), &p3)
-	if s, err := p3.ApplyTo(lis); err != nil || s.Mode != "caller" {
-		t.Errorf("URL with host must give caller: %+v %v", s, err)
+	if d, err := patch(t, lis, `{"url":"srt://relay.example:5000?streamid=publish:NEWKEY0123456789","mode":"listener"}`); err != nil || d.Mode != "caller" {
+		t.Errorf("URL with host must give caller: %+v %v", d, err)
 	}
-	var p4 Patch
-	_ = json.Unmarshal([]byte(`{"url":"srt://:9001"}`), &p4)
-	if s, err := p4.ApplyTo(cur); err != nil || s.Mode != "listener" {
-		t.Errorf("srt://:port must give listener: %+v %v", s, err)
+	if d, err := patch(t, cur, `{"url":"srt://:9001"}`); err != nil || d.Mode != "listener" {
+		t.Errorf("srt://:port must give listener: %+v %v", d, err)
 	}
 	// changing server without giving the secrets again: error; giving or removing them: OK
-	sec := valid()
+	sec := dest(valid())
 	sec.Passphrase = "abcdefghijk"
 	for body, wantErr := range map[string]string{
 		`{"url":"srt://atacante.example:9000"}`:                                             "streamId",
@@ -262,19 +259,13 @@ func TestPatchKeepsAndClearsSecrets(t *testing.T) {
 		`{"url":"srt://:9000"}`:                                                             "", // to listener: exposes nothing
 		`{"url":"srt://otro.example:1?streamid=publish:nueva0123456789","passphrase":null}`: "",
 	} {
-		var p Patch
-		if err := json.Unmarshal([]byte(body), &p); err != nil {
-			t.Fatal(err)
-		}
-		_, err := p.ApplyTo(sec)
+		_, err := patch(t, sec, body)
 		fe, _ := err.(FieldErrors)
 		if wantErr == "" && err != nil || wantErr != "" && fe[wantErr] == "" {
 			t.Errorf("%s → %v (want error on %q)", body, err, wantErr)
 		}
 	}
-	var bad Patch
-	_ = json.Unmarshal([]byte(`{"streamId":"publish:x&mode=listener"}`), &bad)
-	if s, err := bad.ApplyTo(cur); err == nil || s.StreamID != cur.StreamID {
+	if d, err := patch(t, cur, `{"streamId":"publish:x&mode=listener"}`); err == nil || d.StreamID != cur.StreamID {
 		t.Errorf("an invalid patch must not change anything")
 	}
 }
@@ -301,6 +292,7 @@ func TestLoadOverlayAndClearedKeys(t *testing.T) {
 func TestPublicNeverLeaksSecrets(t *testing.T) {
 	s := valid()
 	s.Passphrase = "supersecretpass"
+	s.Key = "live_" + key // not used by srt, but Public never shows it either
 	b, _ := json.Marshal(s.Public())
 	if strings.Contains(string(b), key) || strings.Contains(string(b), "supersecretpass") {
 		t.Fatalf("secrets leak: %s", b)

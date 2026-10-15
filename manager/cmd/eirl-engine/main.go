@@ -75,7 +75,9 @@ func run(checkOnly bool) int {
 		e.Stop()
 		return 1
 	}
-	_ = cfg.WriteState(cfg.ReadyState(cfg.Program(prep.FPS), prep.Device, prep.DeviceName, cfg.AudioMain(prep.ALSA)))
+	ready := cfg.ReadyState(cfg.Program(prep.FPS), prep.Device, prep.DeviceName, cfg.AudioMain(prep.ALSA))
+	_ = cfg.WriteState(ready)
+	e.SetReadyState(ready)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

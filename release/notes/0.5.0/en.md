@@ -1,0 +1,4 @@
+- Saved destinations: keep several (EnhancedIRL, Twitch, YouTube, Kick, Facebook or your own) and switch between them from the touch screen (Settings › Stream › Destination) or from the web page. While live, the stream comes back within a second, without restarting the encoder.
+- More protocols: besides SRT and SRTLA, now RTMP and RTMPS (to stream straight to the platforms), RIST and UDP. RIST shares the stream across your connections, like SRTLA; RTMP leaves through the healthiest one.
+- Each destination has its own video: H.264 or H.265, the output size (the program's, 720p or 540p) and, if you want, half the frame rate. Towards EnhancedIRL it uses H.265, the same quality with less data; Twitch, Kick and Facebook only take H.264.
+- This is a first version: if something does not work with your platform, tell us.

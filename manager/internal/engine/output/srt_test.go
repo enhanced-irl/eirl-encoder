@@ -142,10 +142,10 @@ func TestRetryPlan(t *testing.T) {
 	}
 }
 
-// MessagesTest.test_reasons_are_the_contract
+// MessagesTest.test_reasons_are_the_contract, and the output protocols' (OUTPUTS.md §8)
 func TestReasonsAreTheContract(t *testing.T) {
 	want := []string{"no_destination", "no_uplinks", "relay_unreachable", "rejected", "connection_lost",
-		"encoder_error", "internal"}
+		"encoder_error", "internal", "tls_failed", "clock_not_synced"}
 	got := slices.Clone(Reasons)
 	slices.Sort(got)
 	slices.Sort(want)

@@ -1,0 +1,78 @@
+1792050981.391949|0.0|[INFO] Starting ristsender version: 30 libRIST library: 0.2.20 API version: 4.13.0
+1792050981.392086|0.0|[INFO] Assigning stream-id 0 to this input
+1792050981.392164|0.0|[INFO] Starting in Main Profile Mode
+1792050981.392234|0.0|[INFO] RIST Sender Library 0.2.20
+1792050981.392556|0.0|[INFO] Link configured with maxrate=100000 bufmin=1000 bufmax=1000 reorder=15 rttmin=5 rttmax=500 congestion_control=1 min_retries=6 max_retries=20
+1792050981.392636|0.281472831402000|[INFO] Encryption is disabled for this peer
+1792050981.392740|0.281472831402000|[INFO] URL parsed successfully: Host 127.0.0.1, Port 8000
+1792050981.392928|0.281472831402000|[INFO] Starting in URL connect mode (3)
+1792050981.392992|0.281472831402000|[INFO] Configured the starting socket receive buffer size to 16777216 Bytes.
+1792050981.393030|0.281472831402000|[INFO] Configured the starting socket send buffer size to 16777216 Bytes.
+1792050981.393068|0.281472831402000|[INFO] Peer cname is 4ff1cf12c5ec
+1792050981.393107|0.281472831402000|[INFO] rtt_min is too small (5) for the buffer size, using 1000/20 = 50ms instead
+1792050981.393142|0.281472831402000|[INFO] Setting max nacks per cycle to 88
+1792050981.393174|0.281472831402000|[INFO] Setting buffer size to 1100ms (Max buffer size + 2 * Min RTT, 1000+2*50)
+1792050981.393204|0.281472831402000|[INFO] Advertising flow_id  265143316 and peer_id 1, 32768/1969
+1792050981.393357|0.281472831402000|[INFO] Initialized Sender Peer, connecting to receiver ...
+1792050981.393392|0.281472831402000|[INFO] Active Peer Information, IP:Port => 0.0.0.0:8000 (0), id: 1, ports: 32768->1969
+1792050981.393424|0.281472831402000|[INFO] Enabling keepalive for peer 1
+1792050981.393484|0.281472831402000|[INFO] Successfully Authenticated peer 1
+1792050981.393591|0.0|[INFO] [EAP-SRP] EAP Authentication enabled, role = authenticatee
+1792050981.393655|0.0|[INFO] URL parsed successfully: Host 127.0.0.1, Port 6100
+1792050981.393687|0.0|[INFO] Input socket is open and bound 127.0.0.1:6100
+1792050981.393784|0.281472831402000|[INFO] Starting master sender loop at 5 ms max jitter
+1792050981.399302|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":265143316,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":4,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":268,"retransmitted_bytes":0,"bandwidth":0,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050981.399452|0.281472831402000|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050981.399551|0.281472831402000|[INFO] New keepalive received. MAC: 42:63:5:9b:69:9c X: 0 R: 0 B: 1 A: 0 P: 0 E: 1 L: 0: N: 1 D: 1 T: 0 V: 0: J: 1 F: 0
+1792050982.394678|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":265143316,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":640,"retransmitted_bytes":0,"bandwidth":4330,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050982.429422|0.281472831402000|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050983.398383|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":265143316,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":640,"retransmitted_bytes":0,"bandwidth":4734,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050983.463273|0.281472831402000|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050984.396335|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":265143316,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":9,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":576,"retransmitted_bytes":0,"bandwidth":4834,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050984.501793|0.281472831402000|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050985.394488|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":265143316,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":640,"retransmitted_bytes":0,"bandwidth":4967,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050985.527695|0.281472831402000|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050986.394719|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":265143316,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":640,"retransmitted_bytes":0,"bandwidth":4973,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050986.560451|0.281472831402000|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050987.397408|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":265143316,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":9,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":576,"retransmitted_bytes":0,"bandwidth":4970,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050987.579595|0.281472831402000|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050988.394589|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":265143316,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":640,"retransmitted_bytes":0,"bandwidth":4970,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050988.616304|0.281472831402000|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050989.396407|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":265143316,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":640,"retransmitted_bytes":0,"bandwidth":4958,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050989.650395|0.281472831402000|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050990.395332|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":265143316,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":9,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":576,"retransmitted_bytes":0,"bandwidth":4352,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050990.677330|0.281472831402000|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050991.396518|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":265143316,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":640,"retransmitted_bytes":0,"bandwidth":5003,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050991.700556|0.281472831402000|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050992.394342|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":265143316,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":640,"retransmitted_bytes":0,"bandwidth":4946,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050992.740679|0.281472831402000|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050993.397310|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":265143316,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":640,"retransmitted_bytes":0,"bandwidth":4965,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050993.767973|0.281472831402000|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050994.397319|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":265143316,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":9,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":576,"retransmitted_bytes":0,"bandwidth":5029,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050994.798940|0.281472831402000|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050995.399032|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":265143316,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":640,"retransmitted_bytes":0,"bandwidth":4994,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050995.836061|0.281472831402000|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050996.399990|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":265143316,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":640,"retransmitted_bytes":0,"bandwidth":4943,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050996.857530|0.281472831402000|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050997.396619|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":265143316,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":640,"retransmitted_bytes":0,"bandwidth":4990,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050997.891535|0.281472831402000|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050998.395342|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":265143316,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":9,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":576,"retransmitted_bytes":0,"bandwidth":4965,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050998.910312|0.281472831402000|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415

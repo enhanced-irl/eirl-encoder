@@ -110,17 +110,30 @@ func (p Platform) Program(c Program) string {
 	return strings.TrimSpace(b.String())
 }
 
-// Output is the hot output pipeline (F3): fed by outv/outa, encoded and muxed to MPEG-TS, written to
-// the FIFO of srt-live-transmit (@FIFO@, replaced at each session).
+// Output is the hot output pipeline (F3): fed by outv/outa, encoded and muxed to MPEG-TS, and handed to
+// its sender (OUTPUTS.md §2): the FIFO of srt-live-transmit or eirl-send (@FIFO@, replaced at each
+// session), or UDP (ristsender on this machine, or a receiver on the network).
 type Output struct {
-	Width, Height, FPS int
-	VKbps, AKbps       int
-	GOP                int
-	Profile, Preset    int
-	TwoPass            bool
-	QPRange            string // validated by the config: digits, commas and colons
-	AEnc               string // voaacenc | avenc_aac
-	Record             string // optional local copy (diagnostics)
+	Width, Height, FPS  int // the program's: the appsrc's caps
+	OutWidth, OutHeight int // the output's (0 = the program's): the converter scales
+	Half                bool
+	Codec               string // h264 | h265 ("" = h264)
+	VKbps, AKbps        int
+	GOP                 int // frames at the output's rate
+	Profile, Preset     int // Profile is H.264's (H.265 is always Main)
+	TwoPass             bool
+	QPRange             string // validated by the config: digits, commas and colons
+	AEnc                string // voaacenc | avenc_aac
+	Record              string // optional local copy (diagnostics)
+	Sink                Sink
+}
+
+// Sink is where the muxed TS goes. Host is validated by the config (a DNS name or an IP address, without
+// the brackets of an IPv6 URL).
+type Sink struct {
+	Kind string // fifo (the default) | udp | rtp
+	Host string
+	Port int
 }
 
 // FIFOPlaceholder is replaced by the FIFO's path at each session.
@@ -128,7 +141,8 @@ const FIFOPlaceholder = "@FIFO@"
 
 // Output builds the output pipeline like the launcher's out_pipeline. The converter to I420 before the
 // encoder copies each frame into the output's own pool: if the encoder imported the program's buffers it
-// kept them, and stopping the service after emitting hung (6.8 s, or SIGKILL with the output on).
+// kept them, and stopping the service after emitting hung (6.8 s, or SIGKILL with the output on). It also
+// scales to the output's size (the VIC, no CPU). Half the rate is dropped before the output, by its bridge.
 // audioconvert: voaacenc wants a channel-mask in stereo and the appsrc's fixed caps have none.
 func (p Platform) Output(c Output) string {
 	tune := ""
@@ -138,21 +152,47 @@ func (p Platform) Output(c Output) string {
 	if c.QPRange != "" {
 		tune += fmt.Sprintf(` qp-range="%s"`, c.QPRange)
 	}
+	fps := c.FPS
+	if c.Half {
+		// The output's bridge passes one frame of two (gst.Bridge.SetEvery): the appsrc says the rate the
+		// encoder gets, which its rate control needs
+		fps = max(1, c.FPS/2)
+	}
+	size := ""
+	if c.OutWidth > 0 && c.OutHeight > 0 && (c.OutWidth != c.Width || c.OutHeight != c.Height) {
+		size = fmt.Sprintf(",width=%d,height=%d", c.OutWidth, c.OutHeight)
+	}
+	var enc string
+	if c.Codec == "h265" {
+		// No poc-type in nvv4l2h265enc; Main is its default profile (OUTPUTS.md §7)
+		enc = fmt.Sprintf(`%s name=venc control-rate=1 bitrate=%d iframeinterval=%d idrinterval=%d `+
+			`preset-level=%d maxperf-enable=true insert-sps-pps=true insert-vui=true%s `+
+			`! h265parse config-interval=-1`, p.H265Enc, c.VKbps*1000, c.GOP, c.GOP, c.Preset, tune)
+	} else {
+		enc = fmt.Sprintf(`%s name=venc control-rate=1 bitrate=%d iframeinterval=%d idrinterval=%d `+
+			`profile=%d preset-level=%d maxperf-enable=true insert-sps-pps=true insert-vui=true poc-type=2%s `+
+			`! h264parse config-interval=-1`, p.H264Enc, c.VKbps*1000, c.GOP, c.GOP, c.Profile, c.Preset, tune)
+	}
 	d := fmt.Sprintf(`appsrc name=ov is-live=true format=time do-timestamp=false max-bytes=0 block=false `+
 		`caps="%s,format=NV12,width=%d,height=%d,framerate=%d/1" `+
-		`! queue max-size-buffers=4 leaky=downstream ! %s output-buffers=6 ! %s,format=I420 `+
-		`! %s name=venc control-rate=1 bitrate=%d iframeinterval=%d idrinterval=%d `+
-		`profile=%d preset-level=%d maxperf-enable=true insert-sps-pps=true insert-vui=true poc-type=2%s `+
-		`! h264parse config-interval=-1 ! queue ! mux. `+
+		`! queue max-size-buffers=4 leaky=downstream ! %s output-buffers=6 ! %s,format=I420%s `+
+		`! %s ! queue ! mux. `+
 		`appsrc name=oa is-live=true format=time do-timestamp=false max-bytes=0 block=false `+
 		`caps="audio/x-raw,format=S16LE,rate=48000,channels=2,layout=interleaved" `+
 		`! queue max-size-buffers=100 leaky=downstream ! audioconvert ! %s bitrate=%d ! aacparse ! queue ! mux. `+
 		`mpegtsmux name=mux alignment=7`,
-		p.Mem, c.Width, c.Height, c.FPS, p.Convert, p.Mem, p.H264Enc, c.VKbps*1000, c.GOP, c.GOP,
-		c.Profile, c.Preset, tune, c.AEnc, c.AKbps*1000)
-	tofifo := "filesink location=" + FIFOPlaceholder + " buffer-mode=unbuffered sync=false async=false"
-	if c.Record != "" {
-		return d + " ! tee name=rt rt. ! queue ! " + tofifo + " rt. ! queue ! filesink location=" + c.Record + " sync=false async=false"
+		p.Mem, c.Width, c.Height, fps, p.Convert, p.Mem, size, enc, c.AEnc, c.AKbps*1000)
+	var sink string
+	switch c.Sink.Kind {
+	case "udp":
+		sink = fmt.Sprintf("udpsink host=%s port=%d sync=false async=false", c.Sink.Host, c.Sink.Port)
+	case "rtp":
+		sink = fmt.Sprintf("rtpmp2tpay ! udpsink host=%s port=%d sync=false async=false", c.Sink.Host, c.Sink.Port)
+	default:
+		sink = "filesink location=" + FIFOPlaceholder + " buffer-mode=unbuffered sync=false async=false"
 	}
-	return d + " ! " + tofifo
+	if c.Record != "" {
+		return d + " ! tee name=rt rt. ! queue ! " + sink + " rt. ! queue ! filesink location=" + c.Record + " sync=false async=false"
+	}
+	return d + " ! " + sink
 }

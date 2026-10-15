@@ -51,6 +51,16 @@ if ! [ -x ../build/out/srt-live-transmit ] || ! [ -f "../build/out/$srt_soname" 
   ../build/srt.sh
 fi
 cp ../build/out/srt-live-transmit "../build/out/$srt_soname" dist/pkg/
+# RTMP and RTMPS (OUTPUTS.md §5): eirl-send, the engine's RTMP sender (pure Go, this module)
+build dist/pkg/eirl-send ./cmd/eirl-send
+# RIST (OUTPUTS.md §6): ristsender of librist, one static binary built separately in build/out/rist (arm64
+# container, pinned release in build/rist.sh); reused while build/out has the pinned one
+rist_version=$(sed -n 's/^RIST_VERSION=\([^ ]*\).*/\1/p' ../build/rist.sh)
+[ -n "$rist_version" ] || { echo "build/rist.sh without RIST_VERSION" >&2; exit 1; }
+if ! [ -x ../build/out/rist/ristsender ] || [ "$(head -1 ../build/out/rist/rist.version 2>/dev/null)" != "$rist_version" ]; then
+  ../build/rist.sh
+fi
+cp ../build/out/rist/ristsender dist/pkg/
 # Update helper (UPDATES.md §7)
 build dist/pkg/eirl-update ./cmd/eirl-update
 
@@ -58,7 +68,7 @@ build dist/pkg/eirl-update ./cmd/eirl-update
 # Go module linked into the binaries, MediaMTX (MIT), srtla_send (AGPL-3.0) and SRT (MPL-2.0), the last two
 # with where their source is
 doc=dist/pkg/doc
-mkdir -p "$doc/licenses/go" "$doc/licenses/mediamtx" "$doc/licenses/srtla" "$doc/licenses/srt"
+mkdir -p "$doc/licenses/go" "$doc/licenses/mediamtx" "$doc/licenses/srtla" "$doc/licenses/srt" "$doc/licenses/rist"
 for f in LICENSE NOTICE; do [ -f "../$f" ] && cp "../$f" "$doc/$f"; done
 # The Go toolchain's licence (Homebrew keeps it next to GOROOT, not inside)
 goroot=$(go env GOROOT)
@@ -68,7 +78,7 @@ for l in "$goroot/LICENSE" "$goroot/../LICENSE"; do [ -f "$l" ] && { golic=$l; b
 cp "$golic" "$doc/licenses/go/LICENSE.golang"
 [ -f "$goroot/PATENTS" ] && cp "$goroot/PATENTS" "$doc/licenses/go/PATENTS.golang"
 GOOS=linux GOARCH=arm64 go list -deps -f '{{with .Module}}{{if not .Main}}{{.Path}} {{.Version}} {{.Dir}}{{end}}{{end}}' \
-    ./cmd/eirl-encoderd ./cmd/eirl-splash ./cmd/eirl-netsetup ./cmd/eirl-update ./cmd/eirl-engine | sort -u |
+    ./cmd/eirl-encoderd ./cmd/eirl-splash ./cmd/eirl-netsetup ./cmd/eirl-update ./cmd/eirl-engine ./cmd/eirl-send | sort -u |
   while read -r mod modver dir; do
     [ -n "$dir" ] || continue
     d="$doc/licenses/go/$mod"
@@ -97,6 +107,14 @@ srt-live-transmit and $srt_soname are Haivision SRT (Secure Reliable Transport) 
 the Mozilla Public License 2.0 (LICENSE here).
 Source: https://github.com/Haivision/srt/tree/$srt_commit
 They are built from that commit without changes by build/srt.sh of eirl-encoder
+(https://github.com/enhanced-irl/eirl-encoder), which also gives the build options.
+SRC
+cp ../build/out/rist/LICENSE* "$doc/licenses/rist/"
+cat > "$doc/licenses/rist/SOURCE.txt" <<SRC
+ristsender is librist $rist_version (BSD-2-Clause, LICENSE here), statically linked with the copies of
+mbedtls (Apache-2.0, LICENSE.mbedtls), cJSON (MIT, LICENSE.cJSON) and LZ4 (BSD-2-Clause, LICENSE.lz4) it
+bundles. Source: https://code.videolan.org/rist/librist/-/tree/$rist_version
+It is built from that release without changes by build/rist.sh of eirl-encoder
 (https://github.com/enhanced-irl/eirl-encoder), which also gives the build options.
 SRC
 

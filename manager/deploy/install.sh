@@ -12,7 +12,8 @@
 #   system user eirl-encoder (groups video, i2c, systemd-journal) · /etc/eirl-encoder · udev rule of the
 #   USB capture devices (no autosuspend; the board's hub writable by the group eirl-usbhub, which only
 #   eirl-engine has, to recover a hung device) · app binary · the SRT output (srt-live-transmit and its
-#   libsrt in /usr/lib/eirl-encoder/lib) · srtla_send + NetworkManager dispatcher (SRTLA) · narrow
+#   libsrt in /usr/lib/eirl-encoder/lib) · srtla_send + NetworkManager dispatcher (SRTLA) · eirl-send (RTMP)
+#   and ristsender (RIST) · narrow
 #   sudoers · polkit · tmpfiles of the power readings and /run/eirl-uplinks · network cameras
 #   (eirl-netsetup, MediaMTX and their units; F7) · app unit (+ /etc/default/eirl-encoderd) · eirl-engine
 #   drop-in · the engine itself when the package carries it (a release bundle: engine/; its units enabled) ·
@@ -71,6 +72,8 @@ list_files() {
   for l in "$SRC"/libsrt.so.*; do [ -f "$l" ] && echo "$LIB/lib/$(basename "$l")"; done
   [ -f "$SRC/srt-live-transmit" ] && echo /usr/local/bin/srt-live-transmit
   [ -f "$SRC/srtla_send" ] && echo /usr/local/bin/srtla_send
+  [ -f "$SRC/eirl-send" ] && echo /usr/local/bin/eirl-send
+  [ -f "$SRC/ristsender" ] && echo /usr/local/bin/ristsender
   echo /etc/NetworkManager/dispatcher.d/90-eirl-uplinks
   if [ -f "$SRC/eirl-netsetup" ]; then
     echo /usr/local/sbin/eirl-netsetup
@@ -211,6 +214,11 @@ for l in "$SRC"/libsrt.so.*; do [ -f "$l" ] && put 0644 "$l" "$LIB/lib/$(basenam
 #     links already up; afterwards NetworkManager runs it on every change.
 [ -f "$SRC/srtla_send" ] && put 0755 "$SRC/srtla_send" /usr/local/bin/srtla_send
 put 0755 "$D/90-eirl-uplinks" /etc/NetworkManager/dispatcher.d/90-eirl-uplinks
+
+# 3b'. The other output protocols (OUTPUTS.md §4): eirl-send (RTMP, RTMPS) and ristsender (RIST), which the
+#      engine starts when it streams to them
+[ -f "$SRC/eirl-send" ] && put 0755 "$SRC/eirl-send" /usr/local/bin/eirl-send
+[ -f "$SRC/ristsender" ] && put 0755 "$SRC/ristsender" /usr/local/bin/ristsender
 
 # 3c. Network cameras (F7, NETWORK_SOURCES.md §6): the root helper eirl-netsetup, MediaMTX (own user
 #     eirl-media, unprivileged) and their units. Nothing comes up by itself: the access point only comes

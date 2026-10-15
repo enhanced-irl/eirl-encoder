@@ -211,6 +211,8 @@ type Bridge interface {
 	SetThumb(dst Element, every time.Duration)
 	// SetDst changes where the frames go (the hot output's appsrc of each session); nil drops them.
 	SetDst(dst Element)
+	// SetEvery passes one frame of every n (a pass bridge: the output at half the rate); n ≤ 1 = all.
+	SetEvery(n int)
 	// Attach makes appsink the bridge's input; frames of a previous appsink are dropped.
 	Attach(appsink Element)
 	Detach()

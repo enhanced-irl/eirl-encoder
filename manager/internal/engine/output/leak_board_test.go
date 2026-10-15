@@ -91,7 +91,7 @@ func TestBoardLeakSessions(t *testing.T) {
 	cfg := &config.Config{SRTURL: "srt://127.0.0.1:9", SRTMode: "caller", SRTLatencyMs: 200,
 		SRTStreamID: config.NewSecret(streamID), Transport: "srt", VBitrate: 6000, VBitrateMin: 1000, ABR: true,
 		ABitrate: 128, RunDir: dir, SRTStats: dir + "/srt-stats.json"}
-	out, err := New(Options{Config: cfg, Media: g, Program: pgm, Desc: boardOutputDesc(), RunDir: dir})
+	out, err := New(Options{Config: cfg, Media: g, Program: pgm, Desc: fixedDesc(boardOutputDesc()), RunDir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}

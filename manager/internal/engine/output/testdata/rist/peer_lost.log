@@ -1,0 +1,90 @@
+1792050981.621519|0.0|[INFO] Starting ristsender version: 30 libRIST library: 0.2.20 API version: 4.13.0
+1792050981.621697|0.0|[INFO] Assigning stream-id 0 to this input
+1792050981.621873|0.0|[INFO] Starting in Main Profile Mode
+1792050981.621937|0.0|[INFO] RIST Sender Library 0.2.20
+1792050981.622361|0.0|[INFO] Link configured with maxrate=100000 bufmin=1000 bufmax=1000 reorder=15 rttmin=5 rttmax=500 congestion_control=1 min_retries=6 max_retries=20
+1792050981.622501|0.281473075851280|[INFO] Encryption is disabled for this peer
+1792050981.622666|0.281473075851280|[INFO] URL parsed successfully: Host 127.0.0.1, Port 8000
+1792050981.622762|0.281473075851280|[INFO] Starting in URL connect mode (3)
+1792050981.622837|0.281473075851280|[INFO] Configured the starting socket receive buffer size to 16777216 Bytes.
+1792050981.622922|0.281473075851280|[INFO] Configured the starting socket send buffer size to 16777216 Bytes.
+1792050981.622963|0.281473075851280|[INFO] Peer cname is cea39e4bd83a
+1792050981.622999|0.281473075851280|[INFO] rtt_min is too small (5) for the buffer size, using 1000/20 = 50ms instead
+1792050981.623030|0.281473075851280|[INFO] Setting max nacks per cycle to 88
+1792050981.623094|0.281473075851280|[INFO] Setting buffer size to 1100ms (Max buffer size + 2 * Min RTT, 1000+2*50)
+1792050981.623188|0.281473075851280|[INFO] Advertising flow_id  3552436078 and peer_id 1, 32768/1969
+1792050981.623276|0.281473075851280|[INFO] Initialized Sender Peer, connecting to receiver ...
+1792050981.623463|0.281473075851280|[INFO] Active Peer Information, IP:Port => 0.0.0.0:8000 (0), id: 1, ports: 32768->1969
+1792050981.623537|0.281473075851280|[INFO] Enabling keepalive for peer 1
+1792050981.623620|0.281473075851280|[INFO] Successfully Authenticated peer 1
+1792050981.623836|0.0|[INFO] URL parsed successfully: Host 127.0.0.1, Port 6100
+1792050981.623941|0.0|[INFO] Input socket is open and bound 127.0.0.1:6100
+1792050981.624097|0.281473075851280|[INFO] Starting master sender loop at 5 ms max jitter
+1792050981.630289|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":3552436078,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":4,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":268,"retransmitted_bytes":0,"bandwidth":0,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050981.630442|0.281473075851280|[INFO] New keepalive received. MAC: 9a:da:c9:7d:4c:a5 X: 0 R: 0 B: 1 A: 0 P: 0 E: 1 L: 0: N: 1 D: 1 T: 0 V: 0: J: 1 F: 0
+1792050981.630550|0.281473075851280|[INFO] Peer 1 receiver name is now: cea39e4bd83a@127.0.0.1:8000
+1792050981.630631|0.281473075851280|[INFO] Peer 1 receiver with name cea39e4bd83a@127.0.0.1:8000 reconnected
+1792050981.630717|0.0|[INFO] Connection Status changed for Peer 187651472843216, new status is 0, peer connected count is 1
+1792050981.630911|0.0|[INFO] Out-of-band api data received: auth,127.0.0.1:58264,127.0.0.1:8000
+1792050982.626575|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":3552436078,"id":1,"cname":"cea39e4bd83a@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":210,"ts_null":0,"received":23,"retransmitted":0,"sent_bytes":233312,"retransmitted_bytes":0,"bandwidth":1356019,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":6.24200046240169,"avg_rtt":13.653909709899983,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":190,"bytesize":226352,"time_length":935,"packets_per_second":203}}}
+
+1792050983.627845|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":3552436078,"id":1,"cname":"cea39e4bd83a@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":201,"ts_null":0,"received":20,"retransmitted":0,"sent_bytes":222720,"retransmitted_bytes":0,"bandwidth":1620667,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":5.8006254762842184,"avg_rtt":6.76610213186737,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":234,"bytesize":278240,"time_length":1166,"packets_per_second":200}}}
+
+1792050984.629362|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":3552436078,"id":1,"cname":"cea39e4bd83a@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":241,"ts_null":0,"received":18,"retransmitted":0,"sent_bytes":275432,"retransmitted_bytes":0,"bandwidth":1906659,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":6.2116672840559657,"avg_rtt":5.8588581996089841,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":230,"bytesize":274668,"time_length":1135,"packets_per_second":202}}}
+
+1792050985.628421|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":3552436078,"id":1,"cname":"cea39e4bd83a@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":201,"ts_null":0,"received":20,"retransmitted":0,"sent_bytes":223284,"retransmitted_bytes":0,"bandwidth":1832808,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":6.0169174757338064,"avg_rtt":5.7972656716570814,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":222,"bytesize":265832,"time_length":1166,"packets_per_second":190}}}
+
+1792050986.628458|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":3552436078,"id":1,"cname":"cea39e4bd83a@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":198,"ts_null":0,"received":20,"retransmitted":0,"sent_bytes":221884,"retransmitted_bytes":0,"bandwidth":1803964,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":5.9543335257290684,"avg_rtt":5.60488963011823,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":207,"bytesize":250604,"time_length":1167,"packets_per_second":177}}}
+
+1792050987.628621|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":3552436078,"id":1,"cname":"cea39e4bd83a@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":191,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":222752,"retransmitted_bytes":0,"bandwidth":1778873,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":5.9543335257290684,"avg_rtt":5.60488963011823,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":215,"bytesize":257748,"time_length":1133,"packets_per_second":189}}}
+
+1792050988.629433|0.0|[WARNING] Listening peer 1 timed out after 2022 ms
+1792050988.629740|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":207,"bytesize":247972,"time_length":1133,"packets_per_second":182}}}
+
+1792050989.629345|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":213,"bytesize":248724,"time_length":1166,"packets_per_second":182}}}
+
+1792050990.629405|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":205,"bytesize":244588,"time_length":1099,"packets_per_second":186}}}
+
+1792050991.628570|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":210,"bytesize":251732,"time_length":1066,"packets_per_second":196}}}
+
+1792050992.628453|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":215,"bytesize":254176,"time_length":1134,"packets_per_second":189}}}
+
+1792050993.628987|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":213,"bytesize":253612,"time_length":1167,"packets_per_second":182}}}
+
+1792050994.629030|0.0|[INFO] Connection Status changed for Peer 187651472843216, new status is 1, peer connected count is 0
+1792050994.629224|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":205,"bytesize":242144,"time_length":1100,"packets_per_second":186}}}
+
+1792050995.625234|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":205,"bytesize":242144,"time_length":1100,"packets_per_second":186}}}
+
+1792050996.628933|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":205,"bytesize":242144,"time_length":1100,"packets_per_second":186}}}
+
+1792050997.627501|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":205,"bytesize":242144,"time_length":1100,"packets_per_second":186}}}
+
+1792050998.629574|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":205,"bytesize":242144,"time_length":1100,"packets_per_second":186}}}
+
+1792050999.628033|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":205,"bytesize":242144,"time_length":1100,"packets_per_second":186}}}
+
+1792051000.628205|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":205,"bytesize":242144,"time_length":1100,"packets_per_second":186}}}
+
+1792051001.626949|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":205,"bytesize":242144,"time_length":1100,"packets_per_second":186}}}
+
+1792051001.712030|0.281473075851280|[INFO] Peer 1 was dead for 0 ms and it is now alive again
+1792051001.712212|0.0|[INFO] Connection Status changed for Peer 187651472843216, new status is 0, peer connected count is 1
+1792051001.712362|0.0|[INFO] Out-of-band api data received: auth,127.0.0.1:58264,127.0.0.1:8000
+1792051002.626278|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":3552436078,"id":1,"cname":"cea39e4bd83a@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":677,"ts_null":0,"received":18,"retransmitted":0,"sent_bytes":649596,"retransmitted_bytes":0,"bandwidth":1173888,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":5.91725035372798,"avg_rtt":5.7390560858791231,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":163,"bytesize":194768,"time_length":868,"packets_per_second":187}}}
+
+1792051003.630440|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":3552436078,"id":1,"cname":"cea39e4bd83a@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":201,"ts_null":0,"received":20,"retransmitted":0,"sent_bytes":223472,"retransmitted_bytes":0,"bandwidth":1624337,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":5.9813754098692726,"avg_rtt":5.4879345114875155,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":216,"bytesize":257748,"time_length":1134,"packets_per_second":190}}}
+
+1792051004.630379|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":3552436078,"id":1,"cname":"cea39e4bd83a@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":201,"ts_null":0,"received":20,"retransmitted":0,"sent_bytes":220464,"retransmitted_bytes":0,"bandwidth":1762084,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":6.8344594964291927,"avg_rtt":5.6511079712603145,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":209,"bytesize":247220,"time_length":1132,"packets_per_second":184}}}
+
+1792051005.629178|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":3552436078,"id":1,"cname":"cea39e4bd83a@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":201,"ts_null":0,"received":18,"retransmitted":0,"sent_bytes":224492,"retransmitted_bytes":0,"bandwidth":1773785,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":6.1091254018948229,"avg_rtt":5.81409830971926,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":217,"bytesize":256808,"time_length":1169,"packets_per_second":185}}}
+
+1792051006.625921|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":3552436078,"id":1,"cname":"cea39e4bd83a@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":202,"ts_null":0,"received":20,"retransmitted":0,"sent_bytes":221808,"retransmitted_bytes":0,"bandwidth":1784696,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":6.1583756056798578,"avg_rtt":6.1735396337154631,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":208,"bytesize":245340,"time_length":1132,"packets_per_second":183}}}
+
+1792051007.628476|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":3552436078,"id":1,"cname":"cea39e4bd83a@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":211,"ts_null":0,"received":20,"retransmitted":0,"sent_bytes":239168,"retransmitted_bytes":0,"bandwidth":1769735,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":6.3747083504948936,"avg_rtt":6.2570745595949866,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":219,"bytesize":266020,"time_length":1134,"packets_per_second":193}}}
+
+1792051008.627896|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":3552436078,"id":1,"cname":"cea39e4bd83a@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":207,"ts_null":0,"received":18,"retransmitted":0,"sent_bytes":230488,"retransmitted_bytes":0,"bandwidth":1805516,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":5.7733754415342426,"avg_rtt":5.7933547277546023,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":213,"bytesize":252672,"time_length":1135,"packets_per_second":187}}}
+
+1792051009.630015|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":3552436078,"id":1,"cname":"cea39e4bd83a@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":203,"ts_null":0,"received":20,"retransmitted":0,"sent_bytes":221836,"retransmitted_bytes":0,"bandwidth":1825426,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":6.9814175522186783,"avg_rtt":5.8461445396437268,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":219,"bytesize":257748,"time_length":1166,"packets_per_second":187}}}
+

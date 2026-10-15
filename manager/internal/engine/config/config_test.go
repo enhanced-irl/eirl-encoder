@@ -82,8 +82,10 @@ func TestDefaults(t *testing.T) {
 		VBitrate: 6000, VBitrateMin: 1000, ABitrate: 128, AENC: "voaacenc", Profile: 4, H264Preset: 2, H264TwoPass: true,
 		OutputAtBoot: true, SRTMode: "caller", SRTLatencyMs: 200, Transport: "srt", SRTLABin: "/usr/local/bin/srtla_send",
 		SRTLALocalPort: 6000, UplinksFile: "/run/eirl-uplinks/available", UplinkWait: 30,
-		SRTStats: "/run/eirl-engine/srt-stats.json",
-		Levels:   true, LevelsPort: 5005, Live: true, LiveSize: "640x360", LiveVBitrate: 800, LiveABitrate: 96,
+		SRTStats:    "/run/eirl-engine/srt-stats.json",
+		RISTProfile: "main", OutputLatencyMs: 1000, VCodec: "h264", SendBin: "/usr/local/bin/eirl-send",
+		RISTBin: "/usr/local/bin/ristsender", RISTLocalPort: 6100,
+		Levels: true, LevelsPort: 5005, Live: true, LiveSize: "640x360", LiveVBitrate: 800, LiveABitrate: 96,
 		LiveVPort: 5006, LiveAPort: 5008,
 		Thumb: true, ThumbSize: "320x180", ThumbEvery: 5, ThumbFile: "/run/eirl-engine/thumb.jpg",
 		PulseServer: "unix:/nonexistent",
@@ -260,8 +262,8 @@ func TestWhitelist(t *testing.T) {
 	if len(got) != 1 || got["VBITRATE"] != "5000" {
 		t.Fatalf("ParseConfFile kept %v", got)
 	}
-	if len(Whitelist) != 16 {
-		t.Fatalf("whitelist has %d keys, the launcher has 16", len(Whitelist))
+	if len(Whitelist) != 27 {
+		t.Fatalf("whitelist has %d keys: the launcher's 16 and the output's 11 (OUTPUTS.md §3)", len(Whitelist))
 	}
 }
 

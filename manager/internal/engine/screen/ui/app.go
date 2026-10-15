@@ -41,7 +41,7 @@ type AppWatch struct {
 	Cloud  bool // the wizard's link step: the link state every ~3 s
 	About  bool // the About page: the IP addresses and the build's commit
 	// MIXER.md §21: the pages of everything the web configures
-	Dest    bool // the Destination page: GET /destination every ~2 s
+	Dest    bool // the Destination page: GET /destinations (an older app: GET /destination) every ~2 s
 	Status  bool // the Uplinks and Input pages: GET /status every ~2 s
 	Sources bool // the Input page: GET /sources every ~10 s (a camera just plugged in shows up)
 }
@@ -66,6 +66,15 @@ type AppAction struct {
 //	dest_save     PUT /destination  Body: url, latencyMs, videoBitrateKbps, audioBitrateKbps, adaptiveBitrate,
 //	              videoMinBitrateKbps, apply; streamId / passphrase: null clears it; Secrets: streamId, passphrase
 //	dest_reveal   GET /destination/secrets → AppSnapshot.DestSecrets (until DropSecrets)
+//	The saved destinations (an app with GET /destinations; OUTPUTS.md §9.3):
+//	dest_create   POST /destinations  Body: template, protocol and the patch's fields (name, url, latencyMs, ristProfile,
+//	              username, videoCodec, videoBitrateKbps, videoMinBitrateKbps, adaptiveBitrate, audioBitrateKbps,
+//	              outputSize, outputFps); Secrets: streamId, passphrase, key, password → AppResult.ID
+//	dest_update   PUT /destinations/{ID}  Body: the patch's changed fields and apply; streamId / passphrase / key /
+//	              password: null clears it; Secrets: the typed ones
+//	dest_delete   DELETE /destinations/{ID}
+//	dest_activate POST /destinations/{ID}/activate  Body: apply (true) → AppSnapshot.Dests
+//	dest_secrets  GET /destinations/{ID}/secrets → AppSnapshot.DestSecrets (with its ID; until DropSecrets)
 //	restart       POST /service/restart (apply what is saved)
 //	uplink        PUT /uplinks/{ID}  Body: disabled
 //	input_save    PUT /input  Body: source, device, format, mode, audio, edidPreferred, apply
@@ -81,7 +90,8 @@ type AppAction struct {
 //	ap_channel    PUT /network/ap  Body: channel (auto | 1-11)
 //	ap_rotate     PUT /network/ap  (rotatePassword)
 //	lan_enabled   PUT /network/lan  Body: enabled (the cameras by cable)
-var AppActions = []string{"dest_save", "dest_reveal", "restart", "uplink", "input_save", "sources_scan",
+var AppActions = []string{"dest_save", "dest_reveal", "dest_create", "dest_update", "dest_delete", "dest_activate",
+	"dest_secrets", "restart", "uplink", "input_save", "sources_scan",
 	"cloud_unlink", "password", "cam_add", "cam_rename", "cam_rotate", "cam_remove", "cam_creds", "ap_enabled",
 	"ap_channel", "ap_rotate", "lan_enabled", "modem_save", "modem_pin", "modem_reset", "modem_subnet"}
 
@@ -115,8 +125,11 @@ type AppSnapshot struct {
 	Cloud     *CloudInfo
 	CloudAPI  Tri
 	// MIXER.md §21
-	Dest       *DestInfo
-	DestAPI    Tri
+	Dest    *DestInfo
+	DestAPI Tri
+	// The saved destinations (OUTPUTS.md §9.3): DestsAPI No is an older app (the single destination of Dest)
+	Dests      *DestList
+	DestsAPI   Tri
 	Status     *StatusInfo
 	StatusAPI  Tri
 	Sources    *SourcesInfo
@@ -265,7 +278,8 @@ type CloudInfo struct {
 }
 
 // DestInfo is GET /destination: the stream's destination as the web shows it (the key and the passphrase never:
-// only whether they are set, and the key masked).
+// only whether they are set, and the key masked). It is also one saved destination of GET /destinations (its
+// public view, OUTPUTS.md §9.3), which carries the fields after PendingRestart.
 type DestInfo struct {
 	ManagedBy      string // "eirl": EnhancedIRL sets it (read-only here and on the web)
 	URL            string // without its secrets ("" if none, or URLInvalid)
@@ -282,11 +296,76 @@ type DestInfo struct {
 	Transport      string // srt | srtla (the saved URL's)
 	Output         string // on | off (saved)
 	PendingRestart bool   // saved, not applied: «Apply» restarts the stream
+	// A saved destination's (GET /destinations); empty from an older app
+	ID          string // eirl | d-<8 hex>
+	Name        string
+	Template    string // eirl | twitch | youtube | kick | facebook | custom
+	Managed     bool   // the cloud's (eirl): it can be activated, not edited or deleted
+	Active      bool
+	Protocol    string // srt | srtla | rtmp | rtmps | rist | udp
+	KeySet      bool   // the RTMP stream key
+	KeyMasked   string
+	RistProfile string // simple | main
+	Username    string // RIST main profile
+	PasswordSet bool
+	VideoCodec  string // h264 | h265
+	OutputSize  string // "" (the program's) | 1280x720 | 960x540
+	OutputFps   string // full | half
 }
 
-// DestSecrets is GET /destination/secrets (local socket only): what the eye of the key and of the passphrase shows.
+// DestList is GET /destinations: the saved destinations, the active one and the templates.
+type DestList struct {
+	Active         string // the active one's id ("" none)
+	ManagedBy      string // local | eirl
+	Destinations   []DestInfo
+	Templates      []DestTemplate
+	PendingRestart bool
+}
+
+// ByID is a saved destination by its id (nil: none).
+func (l *DestList) ByID(id string) *DestInfo {
+	if l == nil || id == "" {
+		return nil
+	}
+	for i := range l.Destinations {
+		if l.Destinations[i].ID == id {
+			return &l.Destinations[i]
+		}
+	}
+	return nil
+}
+
+// Template is a template by its id (nil: the app did not list it).
+func (l *DestList) Template(id string) *DestTemplate {
+	if l == nil {
+		return nil
+	}
+	for i := range l.Templates {
+		if l.Templates[i].ID == id {
+			return &l.Templates[i]
+		}
+	}
+	return nil
+}
+
+// DestTemplate is one of the app's templates (OUTPUTS.md §9.2): the protocols and codecs a destination of it takes
+// (the first ones, its defaults), its server, the most video it takes, and whether it needs a stream key.
+type DestTemplate struct {
+	ID           string
+	Protocols    []string
+	URL          string
+	URLs         map[string]string // the server of each protocol, when the template has its own (Twitch: rtmp and rtmps)
+	Codecs       []string
+	MaxVideoKbps int // 0: not said (the app's own maximum)
+	KeyRequired  bool
+}
+
+// DestSecrets is GET /destination/secrets (local socket only): what the eye of the key and of the passphrase shows;
+// or GET /destinations/{ID}/secrets, with the destination's ID, its RTMP key and RIST password too.
 type DestSecrets struct {
+	ID                   string // the saved destination they are of ("" the single destination of an older app)
 	StreamID, Passphrase string
+	Key, Password        string
 }
 
 // StatusInfo is what the pages use of GET /status: the uplinks (SRTLA) and the saved input.
@@ -425,6 +504,8 @@ type AppResult struct {
 	Applied *bool
 	// Restarted: PUT /destination's or /input's (with apply): the stream restarted to take it; nil if not given
 	Restarted *bool
+	// ID: the destination POST /destinations created
+	ID string
 }
 
 // AppFieldError is a field's error: its code (duplicate, invalid…) and the app's message.

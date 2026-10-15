@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -37,8 +38,12 @@ type Status struct {
 	Input          InputView       `json:"input"`
 	SRT            *srtstats.Stats `json:"srt"`
 	System         hw.System       `json:"system"`
-	// Transport: srt | srtla, that of the RUNNING broadcast (or the saved one when stopped)
+	// Transport: the protocol (srt | srtla | rtmp | rtmps | rist | udp) of the RUNNING broadcast (or the saved one
+	// when stopped; srt without a destination). Protocol: the same (OUTPUTS.md §9.4); Codec: h264 | h265, the
+	// engine's when the output says it, else the saved one
 	Transport string `json:"transport"`
+	Protocol  string `json:"protocol"`
+	Codec     string `json:"codec"`
 	// Uplinks: internet links (SRTLA). Absent without the NetworkManager dispatcher.
 	Uplinks []uplinks.Uplink `json:"uplinks,omitempty"`
 	// Modems: the cellular modems, also those without a usable link (no SIM, PIN…); MODEMS.md §4
@@ -184,7 +189,10 @@ func (s *Server) collect(ctx context.Context) Status {
 	}
 	// Mode and source of the running execution, not the saved ones: they differ until it restarts
 	st.Output = cfg.Output
-	st.Transport = config.Transport(cfg.URL)
+	st.Transport, st.Codec = cfg.EffectiveProtocol(), cfg.Codec()
+	if st.Transport == "" {
+		st.Transport = config.ProtoSRT
+	}
 	source := cfg.Source
 	st.Input = InputView{EDIDPreferred: cfg.EDIDPreferred, Source: cfg.Source, Device: cfg.VideoDevice,
 		Format: cfg.VideoFormat, Mode: cfg.VideoMode, Audio: cfg.AudioSource}
@@ -193,7 +201,7 @@ func (s *Server) collect(ctx context.Context) Status {
 	if running {
 		st.Output, source = rs.Output, rs.Source
 		st.Input.EDIDActive = rs.EDID
-		if rs.Transport != "" { // a script older than SRTLA does not write it
+		if slices.Contains(config.Protocols, rs.Transport) { // an engine older than SRTLA does not write it
 			st.Transport = rs.Transport
 		}
 		if rs.Input != "" {
@@ -247,7 +255,15 @@ func (s *Server) collect(ctx context.Context) Status {
 		o := st.Mixer.Output
 		st.Output = o.Mode // the mode in force is the engine's (it changes hot)
 		st.OutputState = OutputStateView{State: o.State, Reason: o.Reason, Detail: o.Detail}
+		// What the engine streams now (it takes a new destination hot: the run state may be older)
+		if o.Protocol != "" {
+			st.Transport = o.Protocol
+		}
+		if o.Codec != "" {
+			st.Codec = o.Codec
+		}
 	}
+	st.Protocol = st.Transport
 	ph := phase(svc.State, st.Signal.Present || mixing, st.Output)
 	if running && rs.Input == "waiting_device" && ph != "failed" && ph != "restarting" {
 		ph = "waiting_device"

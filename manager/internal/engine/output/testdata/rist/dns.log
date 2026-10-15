@@ -1,0 +1,11 @@
+1792050980.779730|0.0|[INFO] Starting ristsender version: 30 libRIST library: 0.2.20 API version: 4.13.0
+1792050980.779937|0.0|[INFO] Assigning stream-id 0 to this input
+1792050980.779995|0.0|[INFO] Starting in Main Profile Mode
+1792050980.780139|0.0|[INFO] RIST Sender Library 0.2.20
+1792050980.781497|0.0|[INFO] Link configured with maxrate=100000 bufmin=1000 bufmax=1000 reorder=15 rttmin=5 rttmax=500 congestion_control=1 min_retries=6 max_retries=20
+1792050980.781532|0.281473301688336|[INFO] Encryption is disabled for this peer
+1792050980.781988|0.281473301688336|[INFO] URL parsed successfully: Host nonexistent.invalid, Port 8000
+1792050980.804893|0.0|[ERROR] Failure resolving host nonexistent.invalid: Name or service not known
+1792050980.805859|0.281473301688336|[ERROR] Host nonexistent.invalid cannot be resolved
+1792050980.806155|0.281473301688336|[ERROR] Could not create socket
+1792050980.806596|0.0|[ERROR] Could not add peer connector to rist://nonexistent.invalid:8000

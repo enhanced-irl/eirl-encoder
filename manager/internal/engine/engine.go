@@ -68,24 +68,29 @@ type Options struct {
 
 // Engine is the running engine.
 type Engine struct {
-	cfg      *config.Config
-	media    gst.Media
-	plat     pipeline.Platform
-	run      sysx.Runner
-	net      *netcam.Client
-	srv      *server.Server
-	hubs     *usbhub.Hubs
-	nslots   int
-	tc       bool
-	out      *output.Output // the hot output (F3): SRT/SRTLA with ABR
-	scr      *screen.Screen // the touch screen (nil with MIXER_SCREEN=0)
-	appNet   *appapi.NetState
-	scrMu    sync.Mutex
-	mvBridge gst.Bridge     // program → screen (pgmtap → mvp)
-	audio    *audio.Bus     // nil without audio slots
-	phones   *phones.Phones // nil without phtap
-	inALSA   string
-	cams     *camera.Store // the image settings given to each camera (SOURCES.md §7.4)
+	cfg    *config.Config
+	media  gst.Media
+	plat   pipeline.Platform
+	run    sysx.Runner
+	net    *netcam.Client
+	srv    *server.Server
+	hubs   *usbhub.Hubs
+	nslots int
+	tc     bool
+	out    *output.Output // the hot output (F3): SRT, SRTLA, RTMP(S), RIST or UDP, with ABR (OUTPUTS.md)
+	// loadConfig reads the configuration again for output_config (config.Load; the tests replace it)
+	loadConfig func() (*config.Config, error)
+	// readyState is the state file's second write (main's), rewritten when output_config changes the
+	// output's keys (CONF_SHA, TRANSPORT, ABR)
+	readyState *config.State
+	scr        *screen.Screen // the touch screen (nil with MIXER_SCREEN=0)
+	appNet     *appapi.NetState
+	scrMu      sync.Mutex
+	mvBridge   gst.Bridge     // program → screen (pgmtap → mvp)
+	audio      *audio.Bus     // nil without audio slots
+	phones     *phones.Phones // nil without phtap
+	inALSA     string
+	cams       *camera.Store // the image settings given to each camera (SOURCES.md §7.4)
 
 	width, height, fps int
 	latency, sync      time.Duration
@@ -166,15 +171,16 @@ func New(o Options) *Engine {
 		runDir:  c.RunDir, configMain: o.MixerMain,
 		net:       &netcam.Client{KeyFile: netcam.KeyFile(c.NetConfDir)},
 		previewOn: true, outBy: "start",
-		hidden:    map[string]bool{},
-		events:    make(chan func(), 64),
-		changes:   make(chan struct{}, 1),
-		fatal:     make(chan error, 1),
-		stopped:   make(chan struct{}),
-		pauseSlot: c.MixerSlots,
-		hubs:      usbhub.NewHubs(o.USB),
-		tc:        o.TC358743,
-		inALSA:    o.InputALSA,
+		hidden:     map[string]bool{},
+		events:     make(chan func(), 64),
+		changes:    make(chan struct{}, 1),
+		fatal:      make(chan error, 1),
+		stopped:    make(chan struct{}),
+		pauseSlot:  c.MixerSlots,
+		hubs:       usbhub.NewHubs(o.USB),
+		tc:         o.TC358743,
+		inALSA:     o.InputALSA,
+		loadConfig: func() (*config.Config, error) { return config.Load(config.Options{}) },
 	}
 	e.ctx, e.cancel = context.WithCancel(context.Background())
 	camFile := ""
@@ -631,15 +637,12 @@ func (e *Engine) audioView() audio.View {
 // switched on, at start when OUTPUT=on.
 func (e *Engine) startOutput(pgm gst.Pipeline) {
 	c := e.cfg
-	prog := c.Program(e.fps)
 	runDir := e.runDir
 	if runDir == "" {
 		runDir = os.TempDir() // the launcher's /tmp when RUN_DIR is not usable
 	}
-	desc := e.plat.Output(pipeline.Output{Width: e.width, Height: e.height, FPS: e.fps, VKbps: c.VBitrate, AKbps: c.ABitrate,
-		GOP: prog.GOP, Profile: c.Profile, Preset: c.H264Preset, TwoPass: c.H264TwoPass, QPRange: c.H264QPRange,
-		AEnc: c.AENC, Record: c.Record})
-	o, err := output.New(output.Options{Config: c, Media: e.media, Program: pgm, Desc: desc, RunDir: runDir, OnChange: e.changed})
+	o, err := output.New(output.Options{Config: c, Media: e.media, Program: pgm, Desc: e.outputDesc,
+		Width: e.width, Height: e.height, FPS: e.fps, RunDir: runDir, OnChange: e.changed})
 	if err != nil {
 		elog.Event("engine", "output_unavailable", "err", err)
 		return
@@ -648,6 +651,50 @@ func (e *Engine) startOutput(pgm gst.Pipeline) {
 	if c.OutputAtBoot {
 		o.Set(true)
 	}
+}
+
+// outputDesc is a session's output pipeline (OUTPUTS.md §2, §7): the codec, size and rate of its
+// configuration on the program's frames, and its sink. The keyframe stays every 2 s of the output's rate
+// unless GOP is set (then it counts output frames).
+func (e *Engine) outputDesc(c *config.Config, sink pipeline.Sink) string {
+	prog := c.Program(e.fps)
+	ow, oh := c.OutputDims(e.width, e.height)
+	gop := prog.GOP
+	if c.OutputHalf && !c.GOPSet {
+		gop = max(1, gop/2)
+	}
+	return e.plat.Output(pipeline.Output{Width: e.width, Height: e.height, FPS: e.fps, OutWidth: ow, OutHeight: oh,
+		Half: c.OutputHalf, Codec: c.VCodec, VKbps: c.VBitrate, AKbps: c.ABitrate, GOP: gop, Profile: c.Profile,
+		Preset: c.H264Preset, TwoPass: c.H264TwoPass, QPRange: c.H264QPRange, AEnc: c.AENC, Record: c.Record, Sink: sink})
+}
+
+// SetReadyState is the state file's ready write (main's), for output_config to rewrite it with the new
+// output keys. Before Run.
+func (e *Engine) SetReadyState(s config.State) { e.readyState = &s }
+
+// reloadOutput is output_config (OUTPUTS.md §8): the app saved a new destination or new encoding settings;
+// the output takes them without restarting the engine (a live session restarts with them). Anything else
+// changed needs the restart: restart_required, and nothing is touched.
+func (e *Engine) reloadOutput() (bool, string) {
+	if e.out == nil {
+		return false, "unsupported"
+	}
+	fresh, err := e.loadConfig()
+	if err != nil {
+		elog.Event("engine", "output_config_invalid", "err", err)
+		return false, "invalid_config"
+	}
+	cur := e.out.Config()
+	if !cur.SameDevice(fresh) {
+		return false, "restart_required"
+	}
+	next := cur.WithOutput(fresh)
+	e.out.SetConfig(next)
+	if e.readyState != nil {
+		_ = next.WriteState(*e.readyState)
+	}
+	e.publish()
+	return true, ""
 }
 
 // setOutput: emit or stop, live (F3). by: socket (the app, which also saves OUTPUT) or screen (the app

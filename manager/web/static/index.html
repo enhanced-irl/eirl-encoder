@@ -298,7 +298,7 @@ sudo systemctl restart eirl-encoderd</pre>
       <div class="stats">
         <div class="card stat"><h3 class="stat-label" data-i18n="status.signal"></h3><p id="st-signal" class="big">—</p><p id="st-signal-sub" class="sub"></p></div>
         <div class="card stat"><h3 class="stat-label" data-i18n="status.audio"></h3><p id="st-audio" class="big">—</p><p id="st-audio-sub" class="sub"></p></div>
-        <div class="card stat"><h3 class="stat-label">SRT</h3><p id="st-srt" class="big">—</p><p id="st-srt-sub" class="sub"></p></div>
+        <div class="card stat"><h3 class="stat-label" data-i18n="status.connection"></h3><p id="st-srt" class="big">—</p><p id="st-srt-sub" class="sub"></p></div>
         <div class="card stat"><h3 class="stat-label" data-i18n="status.board"></h3><p id="st-sys" class="big">—</p><p id="st-sys-sub" class="sub"></p></div>
       </div>
 
@@ -320,6 +320,7 @@ sudo systemctl restart eirl-encoderd</pre>
         <div class="card-head">
           <h3 id="dest-title" class="card-title" data-i18n="dest.title"></h3>
           <button id="dest-edit" class="btn small" type="button" data-i18n="common.edit"></button>
+          <button id="dests-add" class="btn small" type="button" hidden data-i18n="dests.add"></button>
         </div>
         <dl id="dest-view" class="kv"></dl>
         <form id="dest-form" class="form" hidden novalidate>
@@ -374,6 +375,172 @@ sudo systemctl restart eirl-encoderd</pre>
           </div>
           <p class="hint" data-i18n="dest.applyHint"></p>
         </form>
+
+        <!-- Saved destinations (OUTPUTS.md §9.3, §11): shown instead of the single destination above when the app
+             has GET /destinations. An older app answers 404 and the card stays as it was -->
+        <div id="dests" hidden>
+          <ul id="dests-list" class="uplinks dests"></ul>
+          <p id="dests-empty" class="hint" hidden data-i18n="dests.empty"></p>
+          <div id="dests-ask" class="dests-ask" role="alertdialog" hidden>
+            <p></p>
+            <div class="form-actions"><button class="btn small ghost" type="button" data-ask="no" data-i18n="common.cancel"></button><button class="btn small primary" type="button" data-ask="yes"></button></div>
+          </div>
+          <div id="dests-pick" class="dests-pick" hidden>
+            <p class="sub-title" data-i18n="dests.pickTitle"></p>
+            <div id="dests-tpls" class="dests-tpls"></div>
+            <div class="form-actions"><button class="btn ghost" type="button" id="dests-pick-cancel" data-i18n="common.cancel"></button></div>
+          </div>
+
+          <form id="dd-form" class="form" hidden novalidate>
+            <p id="dd-head" class="sub-title"></p>
+            <label for="dd-name" data-i18n="dests.name"></label>
+            <input id="dd-name" name="name" type="text" maxlength="32" autocomplete="off" spellcheck="false">
+            <p class="err" data-for="name" hidden></p>
+
+            <label for="dd-proto" data-i18n="dests.protocol"></label>
+            <select id="dd-proto" name="protocol"></select>
+            <p id="dd-single" class="uplinks-warn" hidden></p>
+            <p class="err" data-for="protocol" hidden></p>
+            <p class="err" data-for="template" hidden></p>
+
+            <label id="dd-url-label" for="dd-url"></label>
+            <input id="dd-url" name="url" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <p class="hint"><span id="dd-url-hint"></span> <button id="dd-url-unlock" class="linkbtn" type="button" hidden data-i18n="dests.urlChange"></button></p>
+            <p class="err" data-for="url" hidden></p>
+
+            <div class="dd-g" data-protos="srt">
+              <label for="dd-mode" data-i18n="dest.k.mode"></label>
+              <select id="dd-mode" name="mode">
+                <option value="caller" data-i18n="dest.modeCaller"></option>
+                <option value="listener" data-i18n="dest.modeListener"></option>
+              </select>
+              <p class="err" data-for="mode" hidden></p>
+            </div>
+
+            <div class="dd-g" data-protos="rist">
+              <label for="dd-rprof" data-i18n="dests.ristProfile"></label>
+              <select id="dd-rprof" name="ristProfile">
+                <option value="main" data-i18n="dests.ristMain"></option>
+                <option value="simple" data-i18n="dests.ristSimple"></option>
+              </select>
+              <p class="hint" data-i18n="dests.ristProfileHint"></p>
+              <p class="err" data-for="ristProfile" hidden></p>
+            </div>
+
+            <div class="dd-g" data-protos="srt srtla rist">
+              <label id="dd-lat-label" for="dd-lat"></label>
+              <input id="dd-lat" name="latencyMs" type="number" inputmode="numeric" min="20" max="8000" step="10">
+              <p id="dd-lat-hint" class="hint"></p>
+              <p class="err" data-for="latencyMs" hidden></p>
+            </div>
+
+            <div class="dd-g" data-protos="srt srtla">
+              <label for="dd-sid" data-i18n="dest.streamId"></label>
+              <input id="dd-sid" name="streamId" type="password" autocomplete="off" autocapitalize="off" spellcheck="false">
+              <label class="check" id="dd-sid-clear-row"><input id="dd-sid-clear" type="checkbox"> <span data-i18n="dest.streamIdClear"></span></label>
+              <p class="err" data-for="streamId" hidden></p>
+            </div>
+
+            <div class="dd-g" data-protos="rtmp rtmps">
+              <label for="dd-key" data-i18n="dests.key"></label>
+              <input id="dd-key" name="key" type="password" autocomplete="off" autocapitalize="off" spellcheck="false">
+              <p class="hint" data-i18n="dests.keyHint"></p>
+              <label class="check" id="dd-key-clear-row"><input id="dd-key-clear" type="checkbox"> <span data-i18n="dests.keyClear"></span></label>
+              <p class="err" data-for="key" hidden></p>
+            </div>
+
+            <div class="dd-g" data-protos="srt srtla rist" id="dd-pass-g">
+              <label for="dd-pass" data-i18n="dest.passphrase"></label>
+              <input id="dd-pass" name="passphrase" type="password" autocomplete="off" autocapitalize="off" spellcheck="false">
+              <label class="check" id="dd-pass-clear-row"><input id="dd-pass-clear" type="checkbox"> <span data-i18n="dest.passClear"></span></label>
+              <p class="err" data-for="passphrase" hidden></p>
+            </div>
+
+            <div class="dd-g" data-protos="rist" id="dd-srp">
+              <div class="row">
+                <div>
+                  <label for="dd-user" data-i18n="dests.user"></label>
+                  <input id="dd-user" name="username" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+                  <p class="err" data-for="username" hidden></p>
+                </div>
+                <div>
+                  <label for="dd-pw" data-i18n="dests.password"></label>
+                  <input id="dd-pw" name="password" type="password" autocomplete="off" autocapitalize="off" spellcheck="false">
+                  <p class="err" data-for="password" hidden></p>
+                </div>
+              </div>
+              <label class="check" id="dd-pw-clear-row"><input id="dd-pw-clear" type="checkbox"> <span data-i18n="dests.passwordClear"></span></label>
+              <p class="hint" data-i18n="dests.userHint"></p>
+            </div>
+
+            <p class="sub-title dd-sec" data-i18n="dests.video"></p>
+            <div class="row">
+              <div>
+                <label for="dd-codec" data-i18n="dests.codec"></label>
+                <select id="dd-codec" name="videoCodec"></select>
+                <p class="err" data-for="videoCodec" hidden></p>
+              </div>
+              <div>
+                <label for="dd-vbr" data-i18n="dest.videoKbps"></label>
+                <input id="dd-vbr" name="videoBitrateKbps" type="number" inputmode="numeric" min="500" max="20000" step="100">
+                <p class="err" data-for="videoBitrateKbps" hidden></p>
+              </div>
+            </div>
+            <p id="dd-codec-hint" class="hint" hidden></p>
+            <p id="dd-max-hint" class="hint" hidden></p>
+            <div class="dd-g" data-protos="srt srtla rtmp rtmps rist">
+            <label class="check"><input id="dd-adaptive" name="adaptiveBitrate" type="checkbox"> <span data-i18n="dest.adaptive"></span></label>
+            <p class="hint" data-i18n="dest.adaptiveHint"></p>
+            <div id="dd-vmin-row">
+              <label for="dd-vmin" data-i18n="dest.videoMinKbps"></label>
+              <input id="dd-vmin" name="videoMinBitrateKbps" type="number" inputmode="numeric" min="200" max="20000" step="100">
+              <p class="err" data-for="videoMinBitrateKbps" hidden></p>
+            </div>
+            </div>
+            <div class="row">
+              <div>
+                <label for="dd-size" data-i18n="dests.size"></label>
+                <select id="dd-size" name="outputSize">
+                  <option value="" data-i18n="dests.sizeProgram"></option>
+                  <option value="1280x720" data-i18n="dests.size720"></option>
+                  <option value="960x540" data-i18n="dests.size540"></option>
+                </select>
+                <p class="err" data-for="outputSize" hidden></p>
+              </div>
+              <div>
+                <label for="dd-fps" data-i18n="dests.fps"></label>
+                <select id="dd-fps" name="outputFps">
+                  <option value="full" data-i18n="dests.fpsFull"></option>
+                  <option value="half" data-i18n="dests.fpsHalf"></option>
+                </select>
+                <p class="err" data-for="outputFps" hidden></p>
+              </div>
+            </div>
+            <p class="hint" data-i18n="dests.sizeHint"></p>
+
+            <p class="sub-title dd-sec" data-i18n="dests.audio"></p>
+            <div class="row">
+              <div>
+                <label for="dd-abr" data-i18n="dest.audioKbps"></label>
+                <select id="dd-abr" name="audioBitrateKbps"><option>64</option><option>96</option><option>128</option><option>160</option><option>192</option><option>256</option></select>
+                <p class="err" data-for="audioBitrateKbps" hidden></p>
+              </div>
+            </div>
+
+            <p id="dd-err" class="err" hidden></p>
+            <div id="dd-ask" class="dests-ask" role="alertdialog" hidden>
+              <p></p>
+              <div class="form-actions"><button class="btn small ghost" type="button" data-ask="no" data-i18n="common.cancel"></button><button class="btn small primary" type="button" data-ask="yes"></button></div>
+            </div>
+            <div class="form-actions">
+              <button class="btn danger dd-del" type="button" id="dd-delete" data-i18n="dests.delete"></button>
+              <button class="btn ghost" type="button" id="dd-cancel" data-i18n="common.cancel"></button>
+              <button class="btn" type="submit" id="dd-save" value="save" data-i18n="common.save"></button>
+              <button class="btn primary" type="submit" id="dd-apply" value="apply"></button>
+            </div>
+            <p id="dd-apply-hint" class="hint" data-i18n="dests.applyHint"></p>
+          </form>
+        </div>
       </section>
 
       <section class="card" aria-labelledby="input-title">

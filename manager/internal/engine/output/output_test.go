@@ -16,6 +16,7 @@ import (
 
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/config"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/elog"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/pipeline"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/gst"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/gst/fake"
 )
@@ -138,6 +139,11 @@ type rig struct {
 	changes atomic.Int32
 }
 
+// fixedDesc is a pipeline builder that always gives d.
+func fixedDesc(d string) func(*config.Config, pipeline.Sink) string {
+	return func(*config.Config, pipeline.Sink) string { return d }
+}
+
 // newRig is an output on a fake program, with the test binary as srt-live-transmit and srtla_send.
 func newRig(t *testing.T, edit func(c *config.Config)) *rig {
 	t.Helper()
@@ -170,7 +176,7 @@ func newRig(t *testing.T, edit func(c *config.Config)) *rig {
 	}
 	r.pgm = p.(*fake.Pipeline)
 	r.pgm.FixBase(123456789)
-	r.out, err = New(Options{Config: r.cfg, Media: r.m, Program: r.pgm, Desc: testDesc, RunDir: dir,
+	r.out, err = New(Options{Config: r.cfg, Media: r.m, Program: r.pgm, Desc: fixedDesc(testDesc), RunDir: dir,
 		OnChange: func() { r.changes.Add(1) }})
 	if err != nil {
 		t.Fatal(err)

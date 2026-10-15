@@ -190,44 +190,7 @@ func (s *Server) logs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, entries)
 }
 
-// --- destination ------------------------------------------------------------------
-
-type destinationView struct {
-	config.Public
-	PendingRestart bool `json:"pendingRestart"`
-	Restarted      bool `json:"restarted,omitempty"`
-}
-
-func (s *Server) destinationView(r *http.Request, cfg config.Settings) destinationView {
-	v := destinationView{Public: cfg.Public()}
-	if st, err := s.Unit.Status(r.Context()); err == nil {
-		v.PendingRestart = s.pending(st.State)
-	}
-	return v
-}
-
-func (s *Server) getDestination(w http.ResponseWriter, r *http.Request) {
-	cfg, err := s.Config.Load()
-	if err != nil {
-		fail(w, r, 500, "internal", "config.read_failed")
-		return
-	}
-	writeJSON(w, 200, s.destinationView(r, cfg))
-}
-
-func (s *Server) putDestination(w http.ResponseWriter, r *http.Request) {
-	var p config.Patch
-	if err := decode(r, &p); err != nil {
-		fail(w, r, 400, "bad_request", "common.bad_body")
-		return
-	}
-	s.saveAndApply(w, r, p.Apply, func(cur config.Settings) (config.Settings, error) {
-		if cur.ManagedBy == "eirl" {
-			return cur, errManaged
-		}
-		return p.ApplyTo(cur)
-	})
-}
+// --- output -------------------------------------------------------------------------
 
 // putOutput: start (on) or stop (off) streaming.
 func (s *Server) putOutput(w http.ResponseWriter, r *http.Request) {
@@ -245,37 +208,18 @@ func (s *Server) putOutput(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-var errManaged = i18n.E("destination.managed")
-
+// saveAndApply: a change of the global keys (Store.Update), answered with the active destination's view.
 func (s *Server) saveAndApply(w http.ResponseWriter, r *http.Request, apply bool, fn func(config.Settings) (config.Settings, error)) {
-	before := s.Config.Hashes()
-	cfg, err := s.Config.Update(fn)
-	var fe config.FieldErrors
-	switch {
-	case errors.As(err, &fe):
-		fieldErrors(w, r, fe)
-		return
-	case errors.Is(err, errManaged):
-		failErr(w, r, 409, "managed", err)
-		return
-	case err != nil:
-		s.Log.Error("save configuration", "err", err)
-		fail(w, r, 500, "internal", "common.save_failed")
+	_, restarted, ok := s.commit(w, r, apply, func() (config.Settings, error) { return s.Config.Update(fn) })
+	if !ok {
 		return
 	}
-	s.logConfig("configuration saved", cfg)
-	restarted := false
-	if apply { // the same rule as the cloud (applySaved)
-		// Not cut if the caller hangs up: over the socket the caller is the engine, which this restart stops
-		ctx, cancel := s.applyCtx(r)
-		defer cancel()
-		if restarted, err = s.applySaved(ctx, before); err != nil {
-			s.Log.Error("restart", "err", err)
-			fail(w, r, 500, "restart_failed", "apply.restart_failed")
-			return
-		}
+	ds, cfg, err := s.Config.Destinations()
+	if err != nil {
+		fail(w, r, 500, "internal", "config.read_failed")
+		return
 	}
-	v := s.destinationView(r, cfg)
+	v := s.destinationView(r, ds, cfg)
 	v.Restarted = restarted
 	writeJSON(w, 200, v)
 }

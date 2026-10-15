@@ -1,0 +1,74 @@
+1792050981.222161|0.0|[INFO] Starting ristsender version: 30 libRIST library: 0.2.20 API version: 4.13.0
+1792050981.222295|0.0|[INFO] Assigning stream-id 0 to this input
+1792050981.222377|0.0|[INFO] Starting in Main Profile Mode
+1792050981.222447|0.0|[INFO] RIST Sender Library 0.2.20
+1792050981.222536|0.0|[INFO] Link configured with maxrate=100000 bufmin=1000 bufmax=1000 reorder=15 rttmin=5 rttmax=500 congestion_control=1 min_retries=6 max_retries=20
+1792050981.222581|0.281473208299536|[INFO] Using 128 bits secret key
+1792050981.222770|0.281473208299536|[INFO] URL parsed successfully: Host 127.0.0.1, Port 8000
+1792050981.222884|0.281473208299536|[INFO] Starting in URL connect mode (3)
+1792050981.222962|0.281473208299536|[INFO] Configured the starting socket receive buffer size to 16777216 Bytes.
+1792050981.223017|0.281473208299536|[INFO] Configured the starting socket send buffer size to 16777216 Bytes.
+1792050981.223073|0.281473208299536|[INFO] Peer cname is 83ece143a08b
+1792050981.223116|0.281473208299536|[INFO] rtt_min is too small (5) for the buffer size, using 1000/20 = 50ms instead
+1792050981.223149|0.281473208299536|[INFO] Setting max nacks per cycle to 88
+1792050981.223180|0.281473208299536|[INFO] Setting buffer size to 1100ms (Max buffer size + 2 * Min RTT, 1000+2*50)
+1792050981.223214|0.281473208299536|[INFO] Advertising flow_id  2001372412 and peer_id 1, 32768/1969
+1792050981.223289|0.281473208299536|[INFO] Initialized Sender Peer, connecting to receiver ...
+1792050981.223408|0.281473208299536|[INFO] Active Peer Information, IP:Port => 0.0.0.0:8000 (0), id: 1, ports: 32768->1969
+1792050981.223493|0.281473208299536|[INFO] Enabling keepalive for peer 1
+1792050981.224325|0.281473208299536|[INFO] Successfully Authenticated peer 1
+1792050981.224376|0.0|[INFO] URL parsed successfully: Host 127.0.0.1, Port 6100
+1792050981.224773|0.0|[INFO] Input socket is open and bound 127.0.0.1:6100
+1792050981.225050|0.281473208299536|[INFO] Starting master sender loop at 5 ms max jitter
+1792050981.230332|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":2001372412,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":4,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":284,"retransmitted_bytes":0,"bandwidth":0,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050981.231103|0.281473208299536|[INFO] New keepalive received. MAC: b3:1b:1e:bf:49:80 X: 1 R: 0 B: 1 A: 1 P: 1 E: 1 L: 1: N: 1 D: 0 T: 1 V: 1: J: 1 F: 1
+1792050981.231150|0.281473208299536|[INFO] New keepalive received. MAC: 7b:80:4a:5b:4:95 X: 0 R: 1 B: 1 A: 1 P: 1 E: 1 L: 1: N: 1 D: 0 T: 0 V: 0: J: 0 F: 1
+1792050981.231185|0.281473208299536|[INFO] New keepalive received. MAC: 8c:71:d3:d1:4c:e8 X: 1 R: 0 B: 1 A: 1 P: 0 E: 0 L: 0: N: 0 D: 0 T: 1 V: 1: J: 1 F: 1
+1792050981.231368|0.281473208299536|[ERROR] Malformed packet, rtp flag value is fd instead of 0x80.
+1792050981.231397|0.281473208299536|[INFO] New keepalive received. MAC: f3:86:78:68:b1:41 X: 0 R: 1 B: 0 A: 0 P: 1 E: 1 L: 1: N: 1 D: 1 T: 1 V: 0: J: 0 F: 0
+1792050982.245868|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":2001372412,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":680,"retransmitted_bytes":0,"bandwidth":4598,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050982.282724|0.281473208299536|[INFO] New keepalive received. MAC: 3a:22:92:24:4f:1a X: 0 R: 0 B: 0 A: 0 P: 1 E: 1 L: 1: N: 1 D: 0 T: 0 V: 1: J: 1 F: 1
+1792050982.361729|0.281473208299536|[ERROR] Malformed packet, rtp flag value is 74 instead of 0x80.
+1792050983.225658|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":2001372412,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":680,"retransmitted_bytes":0,"bandwidth":5066,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050983.237557|0.281473208299536|[INFO] New keepalive received. MAC: da:22:d7:b6:be:1 X: 0 R: 1 B: 0 A: 1 P: 0 E: 0 L: 1: N: 0 D: 0 T: 1 V: 0: J: 1 F: 1
+1792050983.396280|0.281473208299536|[ERROR] Malformed packet, rtp flag value is 60 instead of 0x80.
+1792050984.228515|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":2001372412,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":8,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":544,"retransmitted_bytes":0,"bandwidth":5021,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050984.240304|0.281473208299536|[INFO] New keepalive received. MAC: cf:a6:81:8a:94:9e X: 1 R: 1 B: 1 A: 1 P: 1 E: 1 L: 0: N: 1 D: 0 T: 1 V: 1: J: 0 F: 0
+1792050984.544576|0.281473208299536|[ERROR] Malformed packet, rtp flag value is 4e instead of 0x80.
+1792050985.226565|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":2001372412,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":680,"retransmitted_bytes":0,"bandwidth":5188,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050985.244602|0.281473208299536|[INFO] New keepalive received. MAC: a9:dd:af:f8:2f:79 X: 0 R: 1 B: 1 A: 1 P: 0 E: 1 L: 1: N: 1 D: 0 T: 1 V: 1: J: 0 F: 0
+1792050985.613385|0.281473208299536|[ERROR] Malformed packet, rtp flag value is 1a instead of 0x80.
+1792050986.225396|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":2001372412,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":680,"retransmitted_bytes":0,"bandwidth":5252,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050986.243325|0.281473208299536|[INFO] New keepalive received. MAC: b9:84:84:e9:f5:aa X: 1 R: 1 B: 0 A: 0 P: 1 E: 1 L: 0: N: 1 D: 0 T: 0 V: 1: J: 1 F: 0
+1792050987.226530|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":2001372412,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":9,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":612,"retransmitted_bytes":0,"bandwidth":5271,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050987.250443|0.281473208299536|[INFO] New keepalive received. MAC: 1e:47:d:29:d1:c0 X: 1 R: 0 B: 0 A: 1 P: 0 E: 0 L: 0: N: 0 D: 0 T: 0 V: 0: J: 1 F: 1
+1792050988.228468|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":2001372412,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":680,"retransmitted_bytes":0,"bandwidth":5293,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050988.245307|0.281473208299536|[INFO] New keepalive received. MAC: e2:6c:94:d8:14:fc X: 1 R: 0 B: 0 A: 0 P: 0 E: 0 L: 1: N: 0 D: 1 T: 0 V: 1: J: 0 F: 0
+1792050989.229574|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":2001372412,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":680,"retransmitted_bytes":0,"bandwidth":5270,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050989.253539|0.281473208299536|[INFO] New keepalive received. MAC: 3e:c4:15:ac:32:1b X: 0 R: 1 B: 1 A: 0 P: 0 E: 0 L: 0: N: 0 D: 0 T: 1 V: 1: J: 1 F: 1
+1792050990.228792|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":2001372412,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":9,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":612,"retransmitted_bytes":0,"bandwidth":4629,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050990.256492|0.281473208299536|[INFO] New keepalive received. MAC: 8a:20:d1:d1:97:cf X: 0 R: 0 B: 0 A: 1 P: 0 E: 0 L: 1: N: 0 D: 0 T: 1 V: 0: J: 1 F: 0
+1792050991.228461|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":2001372412,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":680,"retransmitted_bytes":0,"bandwidth":5305,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050991.251455|0.281473208299536|[INFO] New keepalive received. MAC: 45:ed:53:e0:fe:24 X: 0 R: 0 B: 0 A: 0 P: 0 E: 1 L: 0: N: 1 D: 1 T: 0 V: 1: J: 1 F: 1
+1792050992.226403|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":2001372412,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":680,"retransmitted_bytes":0,"bandwidth":5278,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050993.230510|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":2001372412,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":680,"retransmitted_bytes":0,"bandwidth":5296,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050994.229813|0.0|[WARNING] Listening peer 1 timed out after 2977 ms
+1792050994.229961|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050995.228298|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050996.229899|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+

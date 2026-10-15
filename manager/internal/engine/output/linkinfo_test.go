@@ -20,7 +20,7 @@ func TestLinkInfo(t *testing.T) {
 	if tr, n := o.LinkInfo(); tr != "srt" || n != 0 {
 		t.Errorf("srt: %s %d", tr, n)
 	}
-	o.cfg.Transport = "srtla"
+	o.cfg = &config.Config{Transport: "srtla", UplinksFile: a, UplinksDisabled: dis, UplinksNoInternet: nonet}
 	if tr, n := o.LinkInfo(); tr != "srtla" || n != 2 {
 		t.Errorf("srtla: %s %d", tr, n)
 	}

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/screen/ui"
 )
@@ -31,7 +32,11 @@ var parityActions = map[string]bool{}
 func init() {
 	routes := map[string][2]string{
 		"dest_save": {"PUT", "/destination"}, "dest_reveal": {"GET", "/destination/secrets"},
-		"restart": {"POST", "/service/restart"}, "uplink": {"PUT", "/uplinks/{id}"},
+		// The saved destinations (OUTPUTS.md §9.3); dest_create's and dest_update's secrets go as secret fields
+		"dest_create": {"POST", "/destinations"}, "dest_update": {"PUT", "/destinations/{id}"},
+		"dest_delete": {"DELETE", "/destinations/{id}"}, "dest_activate": {"POST", "/destinations/{id}/activate"},
+		"dest_secrets": {"GET", "/destinations/{id}/secrets"},
+		"restart":      {"POST", "/service/restart"}, "uplink": {"PUT", "/uplinks/{id}"},
 		"input_save": {"PUT", "/input"}, "sources_scan": {"GET", "/sources"},
 		"cloud_unlink": {"DELETE", "/cloud"}, "password": {"PUT", "/password"},
 		"cam_add": {"POST", "/cameras"}, "cam_rename": {"PATCH", "/cameras/{id}"},
@@ -142,6 +147,26 @@ func (d *DeviceState) runParity(q queued, route [2]string) {
 		if current {
 			d.snap.DestSecrets = destSecrets(v)
 		}
+	case "dest_create", "dest_update":
+		if dst := destInfo(v); dst != nil && dst.ID != "" {
+			res.ID = dst.ID
+			d.snap.Dests = withDest(d.snap.Dests, *dst)
+		}
+		d.snap.DestSecrets = nil // what an eye showed may be the old key: asked again
+		d.secretGen++
+	case "dest_delete":
+		d.snap.Dests = withoutDest(d.snap.Dests, a.ID)
+		d.snap.DestSecrets = nil
+		d.secretGen++
+	case "dest_activate":
+		if l := destList(v); l != nil {
+			d.snap.Dests, d.snap.DestsAPI = l, ui.Yes
+		}
+	case "dest_secrets":
+		if s := destSecrets(v); current && s != nil {
+			s.ID = a.ID
+			d.snap.DestSecrets = s
+		}
 	case "sources_scan":
 		if s := sourcesInfo(v); s != nil {
 			d.snap.Sources, d.snap.SourcesAPI = s, ui.Yes
@@ -186,7 +211,30 @@ var _ ui.SecretsDropper = (*DeviceState)(nil)
 
 // --- polls (blocking: only from the goroutine, and tests) ---
 
+// pollDest asks for the saved destinations (GET /destinations); an older app without them (403, 404), for its single
+// destination (GET /destination), and the list is asked again only when the page is opened again.
 func (d *DeviceState) pollDest(ui.AppWatch) {
+	d.mu.Lock()
+	list := d.snap.DestsAPI != ui.No || d.destsRetry
+	d.destsRetry = false
+	d.mu.Unlock()
+	if list {
+		_, v, e := d.call("", "GET", "/destinations", nil, d.getTimeout)
+		d.mu.Lock()
+		l := destList(v)
+		switch {
+		case e == nil && l != nil:
+			d.snap.Dests, d.snap.DestsAPI = l, ui.Yes
+			d.mu.Unlock()
+			return
+		case e == nil || d.gone(e): // not there (or not a list): the single destination
+			d.snap.Dests, d.snap.DestsAPI = nil, ui.No
+		default: // passing (no answer, a 5xx): the last one stays
+			d.mu.Unlock()
+			return
+		}
+		d.mu.Unlock()
+	}
 	_, v, e := d.call("", "GET", "/destination", nil, d.getTimeout)
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -236,20 +284,28 @@ func (d *DeviceState) PollSources() { d.pollSources(ui.AppWatch{}) }
 // --- what the app says, validated (whatever does not fit is left out) ---
 
 var (
-	destModes   = set("caller", "listener")
-	transports  = set("srt", "srtla")
-	onOff       = set("on", "off")
-	inputKinds  = set("hdmi", "usb", "test")
-	activeState = set("starting", "waiting_device", "ready")
-	srcKinds    = set("hdmi-csi", "usb", "test")
-	audioKinds  = set("i2s", "usb", "network")
-	reMode      = regexp.MustCompile(`^(auto|[0-9]{2,5}x[0-9]{2,5}@[0-9]{1,6}(/[0-9]{1,6})?)$`)
-	reFormat    = regexp.MustCompile(`^(auto|[A-Z0-9]{2,8})$`)
-	reAudioID   = regexp.MustCompile(`^(auto|none|i2s|silence|test|alsa:[A-Za-z0-9_.-]{1,64}|net:cam[1-8])$`)
-	reEDID      = regexp.MustCompile(`^[A-Za-z0-9_.@-]{1,32}$`)
-	reUplink    = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,32}$`)
-	reModemID   = regexp.MustCompile(`^[mh]-[0-9a-f]{12}$`)
-	modemStates = set("failed", "locked", "disabled", "enabling", "searching", "registered", "connecting", "connected",
+	destModes  = set("caller", "listener")
+	transports = set("srt", "srtla", "rtmp", "rtmps", "rist", "udp") // also the destinations' protocols
+	// The saved destinations (OUTPUTS.md §7, §9): closed lists, anything else is left out
+	destTemplates = set("eirl", "twitch", "youtube", "kick", "facebook", "custom")
+	destCodecs    = set("h264", "h265")
+	destSizes     = set("1280x720", "960x540") // "" is the program's
+	destFps       = set("full", "half")
+	ristProfiles  = set("simple", "main")
+	reDestID      = regexp.MustCompile(`^(eirl|d-[0-9a-f]{8})$`)
+	reRistUser    = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
+	onOff         = set("on", "off")
+	inputKinds    = set("hdmi", "usb", "test")
+	activeState   = set("starting", "waiting_device", "ready")
+	srcKinds      = set("hdmi-csi", "usb", "test")
+	audioKinds    = set("i2s", "usb", "network")
+	reMode        = regexp.MustCompile(`^(auto|[0-9]{2,5}x[0-9]{2,5}@[0-9]{1,6}(/[0-9]{1,6})?)$`)
+	reFormat      = regexp.MustCompile(`^(auto|[A-Z0-9]{2,8})$`)
+	reAudioID     = regexp.MustCompile(`^(auto|none|i2s|silence|test|alsa:[A-Za-z0-9_.-]{1,64}|net:cam[1-8])$`)
+	reEDID        = regexp.MustCompile(`^[A-Za-z0-9_.@-]{1,32}$`)
+	reUplink      = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,32}$`)
+	reModemID     = regexp.MustCompile(`^[mh]-[0-9a-f]{12}$`)
+	modemStates   = set("failed", "locked", "disabled", "enabling", "searching", "registered", "connecting", "connected",
 		"disconnected", "unknown")
 	simStates     = set("ready", "missing", "pin", "puk", "error", "unknown")
 	regStates     = set("home", "roaming", "searching", "denied", "idle", "unknown")
@@ -297,21 +353,149 @@ func destInfo(v any) *ui.DestInfo {
 	d.ABR, _ = boolOf(m["adaptiveBitrate"])
 	d.VideoMinKbps, _ = intIn(m["videoMinBitrateKbps"], 0, 1000000)
 	d.PendingRestart, _ = boolOf(m["pendingRestart"])
+	// A saved destination's view (GET /destinations); absent from an older app
+	if id, _ := m["id"].(string); reDestID.MatchString(id) {
+		d.ID = id
+	}
+	if n := textField(m, "name", 128); utf8.RuneCountInString(n) <= 32 {
+		d.Name = n
+	}
+	d.Template = oneOf(m, "template", destTemplates)
+	d.Managed, _ = boolOf(m["managed"])
+	d.Active, _ = boolOf(m["active"])
+	d.Protocol = oneOf(m, "protocol", transports)
+	if k := obj(m["key"]); k != nil {
+		d.KeySet, _ = boolOf(k["set"])
+		d.KeyMasked = textField(k, "masked", 200)
+	}
+	if p := obj(m["password"]); p != nil {
+		d.PasswordSet, _ = boolOf(p["set"])
+	}
+	d.RistProfile = oneOf(m, "ristProfile", ristProfiles)
+	if u, _ := m["username"].(string); reRistUser.MatchString(u) {
+		d.Username = u
+	}
+	d.VideoCodec = oneOf(m, "videoCodec", destCodecs)
+	d.OutputSize = oneOf(m, "outputSize", destSizes)
+	d.OutputFps = oneOf(m, "outputFps", destFps)
 	return d
 }
 
-// destSecrets is GET /destination/secrets: the key and the passphrase as they are saved (at most 512 bytes each).
+// MaxDests is the most saved destinations the app keeps (OUTPUTS.md §9.1).
+const MaxDests = 16
+
+// destList is GET /destinations (or what POST …/activate returns); nil if it is not one. A destination without a
+// valid id, or one more than MaxDests, is left out; the active one is the list's (and only if it is in it).
+func destList(v any) *ui.DestList {
+	m := obj(v)
+	raw, ok := m["destinations"].([]any)
+	if m == nil || !ok {
+		return nil
+	}
+	l := &ui.DestList{ManagedBy: textField(m, "managedBy", 32)}
+	l.PendingRestart, _ = boolOf(m["pendingRestart"])
+	active, _ := m["active"].(string)
+	seen := map[string]bool{}
+	for _, x := range raw {
+		dst := destInfo(x)
+		if dst == nil || dst.ID == "" || seen[dst.ID] || len(l.Destinations) >= MaxDests {
+			continue
+		}
+		seen[dst.ID] = true
+		dst.Active = dst.ID == active
+		if dst.Active {
+			l.Active = active
+		}
+		l.Destinations = append(l.Destinations, *dst)
+	}
+	if ts, ok := m["templates"].([]any); ok {
+		for _, x := range ts {
+			if t, ok := destTemplate(obj(x)); ok && l.Template(t.ID) == nil {
+				l.Templates = append(l.Templates, t)
+			}
+		}
+	}
+	return l
+}
+
+// destTemplate is one of GET /destinations' templates; ok false if it does not fit (an unknown id, no protocol).
+func destTemplate(m map[string]any) (ui.DestTemplate, bool) {
+	id := oneOf(m, "id", destTemplates)
+	if m == nil || id == "" {
+		return ui.DestTemplate{}, false
+	}
+	t := ui.DestTemplate{ID: id, URL: textField(m, "url", 512), Protocols: closedList(m["protocols"], transports),
+		Codecs: closedList(m["codecs"], destCodecs)}
+	t.MaxVideoKbps, _ = intIn(m["maxVideoKbps"], 500, 1000000)
+	t.KeyRequired, _ = boolOf(m["keyRequired"])
+	if us := obj(m["urls"]); us != nil {
+		for _, p := range t.Protocols {
+			if u := textField(us, p, 512); u != "" {
+				if t.URLs == nil {
+					t.URLs = map[string]string{}
+				}
+				t.URLs[p] = u
+			}
+		}
+	}
+	return t, len(t.Protocols) > 0
+}
+
+// closedList is a JSON list of strings kept to the allowed ones, each once, in their order.
+func closedList(v any, allowed map[string]bool) []string {
+	xs, _ := v.([]any)
+	var out []string
+	for _, x := range xs {
+		if s, ok := x.(string); ok && allowed[s] && !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// withDest is the list with a destination added or replaced (a copy: the screen may be reading the old one).
+func withDest(l *ui.DestList, dst ui.DestInfo) *ui.DestList {
+	if l == nil {
+		return nil
+	}
+	n := *l
+	n.Destinations = slices.Clone(l.Destinations)
+	dst.Active = dst.ID == n.Active
+	for i := range n.Destinations {
+		if n.Destinations[i].ID == dst.ID {
+			n.Destinations[i] = dst
+			return &n
+		}
+	}
+	if len(n.Destinations) < MaxDests {
+		n.Destinations = append(n.Destinations, dst)
+	}
+	return &n
+}
+
+// withoutDest is the list without a destination (a copy).
+func withoutDest(l *ui.DestList, id string) *ui.DestList {
+	if l == nil {
+		return nil
+	}
+	n := *l
+	n.Destinations = slices.DeleteFunc(slices.Clone(l.Destinations), func(x ui.DestInfo) bool { return x.ID == id })
+	return &n
+}
+
+// destSecrets is GET /destination/secrets (the stream ID and the passphrase as they are saved) or GET
+// /destinations/{id}/secrets (also the RTMP key and the RIST password); at most 512 bytes each.
 func destSecrets(v any) *ui.DestSecrets {
 	m := obj(v)
 	if m == nil {
 		return nil
 	}
 	s := &ui.DestSecrets{}
-	if x, ok := m["streamId"].(string); ok && (x == "" || textOK(x, 512)) {
-		s.StreamID = x
-	}
-	if x, ok := m["passphrase"].(string); ok && (x == "" || textOK(x, 512)) {
-		s.Passphrase = x
+	for k, dst := range map[string]*string{"streamId": &s.StreamID, "passphrase": &s.Passphrase, "key": &s.Key,
+		"password": &s.Password} {
+		if x, ok := m[k].(string); ok && (x == "" || textOK(x, 512)) {
+			*dst = x
+		}
 	}
 	return s
 }

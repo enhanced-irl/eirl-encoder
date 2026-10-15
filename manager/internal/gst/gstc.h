@@ -72,6 +72,7 @@ void eg_bridge_params(EgBridge *b, gint64 sync_ns, gint64 extra_ns, gint64 early
 		      gint64 judge_limit_ns);
 void eg_bridge_mv(EgBridge *b, GstElement *mv_dst, gint64 gap_ns);
 void eg_bridge_thumb(EgBridge *b, GstElement *thumb_dst, gint64 every_ns);
+void eg_bridge_every(EgBridge *b, int every);
 void eg_bridge_dst(EgBridge *b, GstElement *dst);
 void eg_bridge_attach(EgBridge *b, GstElement *appsink);
 void eg_bridge_detach(EgBridge *b);

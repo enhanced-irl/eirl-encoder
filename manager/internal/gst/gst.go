@@ -396,6 +396,8 @@ func (b *bridge) SetThumb(dst Element, every time.Duration) {
 
 func (b *bridge) SetDst(dst Element) { C.eg_bridge_dst(b.p, raw(dst)) }
 
+func (b *bridge) SetEvery(n int) { C.eg_bridge_every(b.p, C.int(n)) }
+
 func (b *bridge) Attach(appsink Element) { C.eg_bridge_attach(b.p, raw(appsink)) }
 
 func (b *bridge) Detach() { C.eg_bridge_detach(b.p) }

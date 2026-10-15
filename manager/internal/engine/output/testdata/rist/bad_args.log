@@ -1,0 +1,6 @@
+1792050980.829119|0.0|[INFO] Starting ristsender version: 30 libRIST library: 0.2.20 API version: 4.13.0
+1792050980.830470|0.0|[INFO] Assigning stream-id 0 to this input
+1792050980.834125|0.0|[INFO] Starting in Main Profile Mode
+1792050980.834667|0.0|[INFO] RIST Sender Library 0.2.20
+Unknown or invalid parameter bogus
+1792050980.836410|0.0|[ERROR] Could not parse peer options for sender: rist://127.0.0.1:8000?buffer=1000&bogus=1

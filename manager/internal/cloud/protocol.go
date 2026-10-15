@@ -58,6 +58,13 @@ const (
 	CapABR       = "abr"
 	CapEDID      = "edid"
 	CapThumbnail = "thumbnail"
+	// Output protocols, H.265 and saved destinations (OUTPUTS.md §10)
+	CapRTMP         = "rtmp"
+	CapRTMPS        = "rtmps"
+	CapRIST         = "rist"
+	CapUDP          = "udp"
+	CapH265         = "h265"
+	CapDestinations = "destinations"
 )
 
 // Journal events forwarded to the cloud (§4.1, the `kind`s of service.ParseJournal) and the ones
@@ -244,7 +251,8 @@ func (s *EncoderStatus) Normalize() {
 		s.OutputState = StatusOutput{State: "off"}
 	}
 	switch s.OutputState.Reason {
-	case "", "no_destination", "no_uplinks", "relay_unreachable", "rejected", "connection_lost", "encoder_error", "internal":
+	case "", "no_destination", "no_uplinks", "relay_unreachable", "rejected", "connection_lost", "encoder_error", "internal",
+		"tls_failed", "clock_not_synced":
 	default:
 		s.OutputState.Reason = "internal"
 	}

@@ -662,3 +662,32 @@ func TestCleanControls(t *testing.T) {
 		t.Errorf("controls:\n%s\nwant\n%s", b, want)
 	}
 }
+
+// The output's protocol, codec, size and frame rate (OUTPUTS.md §8): closed sets and sane ranges; the new reasons pass
+func TestCleanOutputConfig(t *testing.T) {
+	for _, c := range []struct {
+		in   Output
+		want Output
+	}{
+		{Output{Mode: "on", State: "error", Reason: "tls_failed", Protocol: "rtmps", Codec: "h265", Size: "1280x720", FPS: 30},
+			Output{Mode: "on", State: "error", Reason: "tls_failed", Protocol: "rtmps", Codec: "h265", Size: "1280x720", FPS: 30}},
+		{Output{Mode: "on", State: "connecting", Reason: "clock_not_synced", Protocol: "udp", FPS: 59.94},
+			Output{Mode: "on", State: "connecting", Reason: "clock_not_synced", Protocol: "udp", FPS: 59.94}},
+		{Output{Mode: "off", State: "off", Reason: "whatever", Protocol: "whip", Codec: "av1", Size: "1280x720;x", FPS: 1000},
+			Output{Mode: "off", State: "off"}},
+		{Output{Mode: "off", State: "off", Size: "<b>", FPS: -1}, Output{Mode: "off", State: "off"}},
+	} {
+		o := c.in
+		st := clean(&State{Output: &o})
+		if *st.Output != c.want {
+			t.Errorf("clean(%+v) = %+v, want %+v", c.in, *st.Output, c.want)
+		}
+	}
+	if err := (Command{Cmd: "output_config"}).Validate(); err != nil {
+		t.Errorf("output_config: %v", err)
+	}
+	on := true
+	if err := (Command{Cmd: "output_config", On: &on}).Validate(); err == nil {
+		t.Error("output_config takes no fields")
+	}
+}

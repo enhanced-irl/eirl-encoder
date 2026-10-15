@@ -232,6 +232,7 @@ struct EgBridge {
 	gint64 prev_arrival;
 	int judge_n;
 	gint64 judge_min;
+	int every;            // pass bridges: one frame of every `every` (the output at half the rate); ≤ 1 = all
 	EgBridgeStats st;
 };
 
@@ -304,6 +305,13 @@ void eg_bridge_mv(EgBridge *b, GstElement *mv_dst, gint64 gap_ns)
 	g_mutex_lock(&b->lock);
 	swap_ref(&b->mv_dst, mv_dst);
 	b->mv_gap_ns = gap_ns;
+	g_mutex_unlock(&b->lock);
+}
+
+void eg_bridge_every(EgBridge *b, int every)
+{
+	g_mutex_lock(&b->lock);
+	b->every = every;
 	g_mutex_unlock(&b->lock);
 }
 
@@ -424,6 +432,14 @@ static GstFlowReturn on_sample(GstAppSink *snk, gpointer data)
 
 	if (b->kind == 2) {
 		timing_add(b, now, FALSE, 0);
+		// Half the rate (OUTPUTS.md §7) here and not with videorate in the output: its frames keep the
+		// program's timestamps, minutes past the output's segment start, and videorate in drop-only mode
+		// never catches up with them, so it let every frame through
+		if (b->every > 1 && b->st.frames % (guint64)b->every != 0) {
+			g_mutex_unlock(&b->lock);
+			gst_buffer_unref(buf);
+			return GST_FLOW_OK;
+		}
 		gst_app_src_push_buffer(GST_APP_SRC(b->dst), buf);
 		g_mutex_unlock(&b->lock);
 		return GST_FLOW_OK;

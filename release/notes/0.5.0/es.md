@@ -1,0 +1,4 @@
+- Destinos guardados: guarda varios (EnhancedIRL, Twitch, YouTube, Kick, Facebook o uno propio) y cambia de uno a otro desde la pantalla táctil (Ajustes › Emisión › Destino) o desde la web. Si estás en directo, la emisión vuelve en un segundo, sin reiniciar el codificador.
+- Más protocolos: además de SRT y SRTLA, ahora RTMP y RTMPS (para emitir directamente a las plataformas), RIST y UDP. RIST reparte la emisión entre tus conexiones, como SRTLA; RTMP sale por la conexión más sana.
+- Cada destino tiene su vídeo: H.264 o H.265, el tamaño de salida (el del programa, 720p o 540p) y, si quieres, la mitad de fotogramas. Hacia EnhancedIRL se usa H.265, que da la misma calidad con menos datos; Twitch, Kick y Facebook solo admiten H.264.
+- Es una primera versión: si algo no va con tu plataforma, cuéntanoslo.

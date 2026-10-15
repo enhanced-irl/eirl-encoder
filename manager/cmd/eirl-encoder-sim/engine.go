@@ -31,6 +31,10 @@ type simEngine struct {
 	hidden    map[string]bool
 	cams      map[string][]mixer.Control // source id → its image settings, as the camera has them now
 	subs      map[chan []byte]struct{}
+	// outputConfig: the saved output configuration (protocol, codec, size, fps), read at start and on output_config
+	// (OUTPUTS.md §8): the real engine rereads engine.env. nil = nothing in the state
+	outputConfig func() (protocol, codec, size string, fps float64)
+	out          mixer.Output // what outputConfig gave last
 }
 
 var simCatalog = []mixer.CatalogEntry{
@@ -69,12 +73,19 @@ func (e *simEngine) client() *mixer.Client {
 	return &mixer.Client{Sock: e.sock, StatePath: e.statePath, RunDir: filepath.Dir(e.sock)}
 }
 
-// setOutput: what the engine streams at start (OUTPUT of the saved configuration).
+// setOutput: what the engine streams at start (OUTPUT of the saved configuration), with its output configuration.
 func (e *simEngine) setOutput(on bool) {
 	e.mu.Lock()
 	e.output = on
+	e.loadOutputLocked()
 	e.mu.Unlock()
 	e.publish()
+}
+
+func (e *simEngine) loadOutputLocked() {
+	if e.outputConfig != nil {
+		e.out.Protocol, e.out.Codec, e.out.Size, e.out.FPS = e.outputConfig()
+	}
 }
 
 func (e *simEngine) streaming() bool {
@@ -123,6 +134,7 @@ func (e *simEngine) stateLocked() mixer.State {
 	if e.output {
 		st.Output.Mode, st.Output.State = "on", "on"
 	}
+	st.Output.Protocol, st.Output.Codec, st.Output.Size, st.Output.FPS = e.out.Protocol, e.out.Codec, e.out.Size, e.out.FPS
 	main, sec := e.main, e.secondary
 	st.Program.Main = &main
 	if sec != "" {
@@ -299,6 +311,8 @@ func (e *simEngine) command(c mixer.Command) string {
 		e.layout = c.Layout
 	case "output":
 		e.output = *c.On
+	case "output_config": // the app saved a new destination: taken hot, like the real engine with only output keys
+		e.loadOutputLocked()
 	case "slots":
 		cfg := make([]mixer.SlotAssign, len(e.slots))
 		for i := range cfg {

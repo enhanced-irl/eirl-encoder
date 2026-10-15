@@ -718,3 +718,29 @@ select.invalid { border-color: var(--error); box-shadow: 0 0 0 3px var(--error-a
 /* The pairing link as a QR (white quiet zone included in the SVG) */
 .cloud-qr { display: flex; justify-content: center; margin: 4px 0 8px; }
 .cloud-qr svg { width: 100%; max-width: 200px; height: auto; border-radius: 8px; }
+
+/* Saved destinations (OUTPUTS.md §11): a list with the active one marked, the template picker and a form per protocol */
+.uplinks.dests li { grid-template-columns: auto minmax(0, 1fr) auto; }
+.dests .dmark { width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--gray-600); }
+.dests li.on .dmark { background: var(--brand-500); box-shadow: inset 0 0 0 3px var(--brand-500), 0 0 0 3px var(--brand-a); }
+.dests .dname { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dests .dname .name { min-width: 0; }
+.dests .dbadge { flex: none; padding: 1px 7px; border-radius: 5px; font-size: .64rem; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; background: var(--brand-a); color: var(--brand-300); }
+.dests .dmanaged { display: block; margin-top: 2px; font-size: .76rem; color: var(--brand-300); }
+.dests .acts { display: flex; gap: 6px; }
+.dests-ask { margin: 0 0 10px; padding: 10px 12px; border-radius: var(--radius-sm); font-size: .88rem; color: var(--gray-200); background: var(--warning-a); border: 1px solid rgba(247, 144, 9, .35); }
+.dests-ask .form-actions { margin-top: 8px; }
+#dd-form .dests-ask { margin: 8px 0 0; }
+.dests-pick { padding-top: 4px; }
+.dests-tpls { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-top: 10px; }
+.dests-tpls .btn { flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; text-align: left; }
+.dests-tpls .btn small { font-size: .72rem; font-weight: 500; color: var(--gray-400); }
+#dd-head { margin-bottom: 2px; color: var(--gray-300); }
+.dd-g { display: flex; flex-direction: column; gap: 6px; }
+.dd-sec { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--gray-800); }
+#dd-form input[readonly] { color: var(--gray-400); }
+#dd-form select:disabled { opacity: .7; cursor: default; }
+#dd-form .uplinks-warn { margin: 4px 0 0; }
+#dd-form .form-actions .dd-del { margin-right: auto; }
+.linkbtn { padding: 0; border: 0; background: none; font: inherit; color: var(--brand-300); text-decoration: underline; cursor: pointer; }
+.linkbtn:hover { color: var(--gray-50); }

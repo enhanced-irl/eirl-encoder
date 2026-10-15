@@ -1,7 +1,7 @@
 # Multi-camera: composition, multiview and touch screen
 
 > **Status:** IN PROGRESS (F0, F1 —single engine— and F2 —web ↔ screen— in main; F3 —no rehearsal mode— on the board; next F4, per-source audio)
-> **Updated:** 2026-10-14 (translated to English; the Python engine retired, the Go engine is the only one: [`ENGINE_GO.md`](ENGINE_GO.md); last content change Oct 13: header and Settings, §18; Wi-Fi in Settings, §19; Oct 14: renaming "Create my Wi-Fi", §19; everything the web configures, on the screen, §21; fades one step per program frame and the screen's tiles in step with the program, §22)
+> **Updated:** 2026-10-15 (Oct 15: the output protocols and encoding settings in the state and `output_config`, §5, [`OUTPUTS.md`](OUTPUTS.md); translated to English; the Python engine retired, the Go engine is the only one: [`ENGINE_GO.md`](ENGINE_GO.md); last content change Oct 13: header and Settings, §18; Wi-Fi in Settings, §19; Oct 14: renaming "Create my Wi-Fi", §19; everything the web configures, on the screen, §21; fades one step per program frame and the screen's tiles in step with the program, §22)
 
 **The mixer is the encoder.** `eirl-engine` captures all the sources it detects at the same time, and what
 comes out is always the composed **program** (cut, PiP, side by side, fades). That includes SRT/SRTLA
@@ -350,6 +350,13 @@ Composition (§11): `program.pip` `{"corner": "br", "size": 33}`, `program.pause
 `by: "screen"` and a new `seq`, the app saves `OUTPUT`: that way what is streamed from the screen
 survives a restart and the cloud sees it.
 
+**Output protocols and encoding ([`OUTPUTS.md`](OUTPUTS.md) §8)**, additive: `output.protocol` (`srt` · `srtla` · `rtmp` ·
+`rtmps` · `rist` · `udp`) and `output.codec` (`h264` · `h265`), also while off; `output.size` (`"1280x720"`) and
+`output.fps` while on. Reasons gain `tls_failed` and `clock_not_synced`. A new command, `{"cmd": "output_config"}`: the
+engine rereads the app's file and takes the output's keys live (destination, bitrates, codec, size, rate), restarting the
+output session if it is on air; it answers `restart_required` when anything else changed, `invalid_config` when the file
+is invalid, and an older engine `unknown_command` (the app then restarts it).
+
 `output` is used by the screen's panel ("LIVE · Mbps · RTT") and `eirl-encoderd` forwards it,
 bounded, in `GET /api/v1/mixer` and in the `mixer` SSE (F5 review: before, this document said the
 opposite). Its `detail`, the libsrt line without the time, also goes through the app's redactor
@@ -456,7 +463,8 @@ starts, connect to the output channel".
   process dies, it is retried after 2, 4, 8, 15 and 30 s.
 - **Configuration.** With the mixer, the configuration fingerprint does not count `OUTPUT`, so
   Go live does not leave "unapplied changes". The app, the script (`CONF_SHA`) and `config.Store.Hashes` use
-  the same rule. Changing the destination or the bitrate does restart.
+  the same rule. Changing the destination or the bitrate does restart (since [`OUTPUTS.md`](OUTPUTS.md), only the
+  output: `output_config`).
 - **Cloud.** `start` = start streaming and `stop` = stop streaming, live; `rehearsal` = `stop`. The phase
   `ready` replaces `rehearsal` and `outputState` arrives (ENCODER_CLOUD.md §13.3). The EnhancedIRL cloud
   already accepts it.

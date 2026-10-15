@@ -162,6 +162,9 @@ func settingsPage(variant string) (page, view string) {
 		return "updates", ""
 	}
 	page, _, _ = strings.Cut(rest, "-")
+	if page == "dests" { // the saved destinations: the Destination page with the app's list
+		page = "dest"
+	}
 	return page, ""
 }
 

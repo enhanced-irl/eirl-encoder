@@ -32,11 +32,13 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/safefile"
 )
 
-// Settings is what the app manages. The secrets (StreamID, Passphrase) go out in clear only to the
-// screen, over the local socket (GET /destination/secrets, its eye); the web and the cloud get Public().
+// Settings is what the app manages: engine.env, that is the ACTIVE destination flattened (destinations.go) plus
+// the global keys (OUTPUT, EDID_PREFERRED and the input). The secrets (StreamID, Passphrase, Key,
+// OutputPassphrase, OutputPassword) go out in clear only to the screen, over the local socket (GET
+// /destination/secrets, its eye); the web and the cloud get Public().
 type Settings struct {
-	ManagedBy  string // local | eirl (v2: destino que da el backend)
-	URL        string // srt://host:port · listener: srt://:port · srtla://host:port (bonding)
+	ManagedBy  string // local | eirl: the active destination is the cloud's (destinations.go)
+	URL        string // SRT_URL: srt://host:port · listener: srt://:port · srtla://host:port (bonding); "" for other protocols
 	Mode       string // caller | listener
 	LatencyMs  int
 	StreamID   string
@@ -57,6 +59,20 @@ type Settings struct {
 	VideoFormat string // auto | NV12 | YUY2 | I420 | UYVY | MJPG (with usb)
 	VideoMode   string // auto | WxH@fps (with usb)
 	AudioSource string // auto | none | i2s | alsa:<card id>
+
+	// Output protocols and encoding settings of the active destination (OUTPUTS.md §3, output.go). "" = the
+	// engine's default.
+	Protocol         string // OUTPUT_PROTOCOL: "" (legacy: from SRT_URL) | srt | srtla | rtmp | rtmps | rist | udp
+	OutputURL        string // OUTPUT_URL: rtmp(s)://host[:port]/app · rist://host:port · udp:// or rtp://host:port
+	Key              string // OUTPUT_KEY: the RTMP stream key (secret)
+	OutputPassphrase string // OUTPUT_PASSPHRASE: RIST's pre-shared key (secret)
+	OutputUser       string // OUTPUT_USER: RIST main profile (SRP)
+	OutputPassword   string // OUTPUT_PASSWORD (secret)
+	RISTProfile      string // RIST_PROFILE: "" (main) | simple | main
+	OutputLatencyMs  int    // OUTPUT_LATENCY: RIST's buffer, 0 = "" (the engine's 1000)
+	VideoCodec       string // OUTPUT_VCODEC: "" (h264) | h264 | h265
+	OutputSize       string // OUTPUT_SIZE: "" (the program's) | 1280x720 | 960x540
+	OutputFPS        string // OUTPUT_FPS: "" (full) | full | half
 }
 
 // EDIDModes: the EDIDs the device installs (edid-<mode>-lpcm48k.bin next to the engine). The same
@@ -130,10 +146,11 @@ func (s Settings) Validate() error {
 	if !validEDID(s.EDIDPreferred) {
 		errs["edidPreferred"] = i18n.Ref("config.one_of", strings.Join(EDIDModes, ", "))
 	}
+	if s.Output == "on" && !s.HasDestination() {
+		errs["url"] = i18n.Ref("config.url_missing")
+	}
 	if s.URL == "" {
-		if s.Output == "on" {
-			errs["url"] = i18n.Ref("config.url_missing")
-		}
+		// no SRT destination (none, or another protocol: validateOutput)
 	} else if host, _, scheme, err := splitURL(s.URL); err != nil {
 		errs["url"] = i18n.RefOf(err)
 	} else if scheme == "srtla" && s.Mode != "caller" {
@@ -164,6 +181,7 @@ func (s Settings) Validate() error {
 		errs["videoMinBitrateKbps"] = i18n.Ref("config.min_above_max")
 	}
 	s.validateInput(errs)
+	s.validateOutput(errs)
 	if len(errs) > 0 {
 		return errs
 	}
@@ -293,7 +311,9 @@ func ParseURL(raw string) (Pasted, error) {
 
 // keys: script variable ↔ field. The order is the one of the written file.
 var keys = []string{"EIRL_MANAGED_BY", "SRT_URL", "SRT_MODE", "SRT_LATENCY", "SRT_STREAMID", "SRT_PASSPHRASE", "VBITRATE", "ABITRATE", "OUTPUT", "ABR", "VBITRATE_MIN", "EDID_PREFERRED",
-	"SOURCE", "VIDEO_DEVICE", "VIDEO_FORMAT", "VIDEO_MODE", "AUDIO_SOURCE"}
+	"SOURCE", "VIDEO_DEVICE", "VIDEO_FORMAT", "VIDEO_MODE", "AUDIO_SOURCE",
+	"OUTPUT_PROTOCOL", "OUTPUT_URL", "OUTPUT_KEY", "OUTPUT_PASSPHRASE", "OUTPUT_USER", "OUTPUT_PASSWORD",
+	"RIST_PROFILE", "OUTPUT_LATENCY", "OUTPUT_VCODEC", "OUTPUT_SIZE", "OUTPUT_FPS"}
 
 // ReadEnv reads an EnvironmentFile. Only the subset we write and the one /etc/default/eirl-engine has:
 // KEY=value, comments and empty lines; optional outer quotes.
@@ -385,6 +405,21 @@ func apply(s *Settings, env map[string]string) {
 	str("VIDEO_FORMAT", &s.VideoFormat)
 	str("VIDEO_MODE", &s.VideoMode)
 	str("AUDIO_SOURCE", &s.AudioSource)
+	str("OUTPUT_PROTOCOL", &s.Protocol)
+	str("OUTPUT_URL", &s.OutputURL)
+	str("OUTPUT_KEY", &s.Key)
+	str("OUTPUT_PASSPHRASE", &s.OutputPassphrase)
+	str("OUTPUT_USER", &s.OutputUser)
+	str("OUTPUT_PASSWORD", &s.OutputPassword)
+	str("RIST_PROFILE", &s.RISTProfile)
+	if v, ok := env["OUTPUT_LATENCY"]; ok && v == "" {
+		s.OutputLatencyMs = 0 // written empty: the engine's default
+	} else {
+		atoi("OUTPUT_LATENCY", &s.OutputLatencyMs)
+	}
+	str("OUTPUT_VCODEC", &s.VideoCodec)
+	str("OUTPUT_SIZE", &s.OutputSize)
+	str("OUTPUT_FPS", &s.OutputFPS)
 }
 
 // Render writes EVERY key, also the empty ones: a missing key would let the value of
@@ -398,6 +433,13 @@ func (s Settings) Render() []byte {
 		"EDID_PREFERRED": s.EDIDPreferred,
 		"SOURCE":         s.Source, "VIDEO_DEVICE": s.VideoDevice, "VIDEO_FORMAT": s.VideoFormat,
 		"VIDEO_MODE": s.VideoMode, "AUDIO_SOURCE": s.AudioSource,
+		"OUTPUT_PROTOCOL": s.Protocol, "OUTPUT_URL": s.OutputURL, "OUTPUT_KEY": s.Key,
+		"OUTPUT_PASSPHRASE": s.OutputPassphrase, "OUTPUT_USER": s.OutputUser, "OUTPUT_PASSWORD": s.OutputPassword,
+		"RIST_PROFILE": s.RISTProfile, "OUTPUT_LATENCY": "", "OUTPUT_VCODEC": s.VideoCodec,
+		"OUTPUT_SIZE": s.OutputSize, "OUTPUT_FPS": s.OutputFPS,
+	}
+	if s.OutputLatencyMs != 0 {
+		vals["OUTPUT_LATENCY"] = strconv.Itoa(s.OutputLatencyMs)
 	}
 	var b strings.Builder
 	b.WriteString("# Written by eirl-encoderd (the encoder management app). Do not edit by hand: it is overwritten.\n")

@@ -219,6 +219,7 @@ func (cc *cloudConn) count(typ string, d time.Duration) int {
 type fakeDevice struct {
 	mu        sync.Mutex
 	cfg       config.Settings
+	dests     config.Destinations
 	disabled  []string
 	phase     string
 	actions   []string
@@ -235,7 +236,7 @@ type fakeDevice struct {
 }
 
 func newFakeDevice(t *testing.T) *fakeDevice {
-	return &fakeDevice{cfg: config.Defaults(), phase: PhaseRehearsal, uplinks: []string{"eth0"}, journal: make(chan service.Entry, 8), jpeg: testJPEG(t)}
+	return &fakeDevice{cfg: config.Defaults(), dests: config.Empty(), phase: PhaseRehearsal, uplinks: []string{"eth0"}, journal: make(chan service.Entry, 8), jpeg: testJPEG(t)}
 }
 
 func (d *fakeDevice) Info() DeviceInfo {
@@ -250,7 +251,7 @@ func (d *fakeDevice) Status(context.Context) EncoderStatus {
 func (d *fakeDevice) Reported() (ReportedConfig, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	rep := Reported(d.cfg, d.disabled)
+	rep := Reported(d.cfg, d.dests, d.disabled)
 	rep.AccessPoint = d.apPolicy
 	return rep, nil
 }
@@ -260,11 +261,11 @@ func (d *fakeDevice) ApplyConfig(ctx context.Context, w WireConfig, apply bool) 
 	if ctx.Err() != nil {
 		return ApplyResult{}, ctx.Err()
 	}
-	next, dis, fe := ApplyWire(d.cfg, w)
+	ds, next, dis, fe := ApplyWireDestinations(d.dests, d.cfg, w)
 	if fe != nil {
 		return ApplyResult{}, fe
 	}
-	d.cfg, d.disabled = next, dis
+	d.dests, d.cfg, d.disabled = ds, next, dis
 	d.applies++
 	return ApplyResult{Saved: true, Restarted: apply}, d.applyErr
 }

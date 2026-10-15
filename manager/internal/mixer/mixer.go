@@ -157,11 +157,26 @@ type Output struct {
 	// Absent with an older engine
 	By  string `json:"by,omitempty"`
 	Seq int    `json:"seq,omitempty"`
+	// What the output streams (OUTPUTS.md §8): protocol, video codec, size ("1280x720") and frame rate. Absent with
+	// an older engine
+	Protocol string  `json:"protocol,omitempty"`
+	Codec    string  `json:"codec,omitempty"`
+	Size     string  `json:"size,omitempty"`
+	FPS      float64 `json:"fps,omitempty"`
 }
 
-// Reasons: the output reasons that are forwarded (closed list, the cloud contract's)
+// Reasons: the output reasons that are forwarded (closed list, the cloud contract's). tls_failed and
+// clock_not_synced come with RTMPS (OUTPUTS.md §8)
 var Reasons = map[string]bool{"no_destination": true, "no_uplinks": true, "relay_unreachable": true,
-	"rejected": true, "connection_lost": true, "encoder_error": true, "internal": true}
+	"rejected": true, "connection_lost": true, "encoder_error": true, "internal": true,
+	"tls_failed": true, "clock_not_synced": true}
+
+// Output protocols and codecs the state can carry (the rest are dropped)
+var (
+	outputProtocols = map[string]bool{"srt": true, "srtla": true, "rtmp": true, "rtmps": true, "rist": true, "udp": true}
+	outputCodecs    = map[string]bool{"h264": true, "h265": true}
+	reOutputSize    = regexp.MustCompile(`^[0-9]{2,5}x[0-9]{2,5}$`)
+)
 
 // Audio: the audio inputs (independent of video, F4) and which one plays. Main nil = no audio.
 type Audio struct {
@@ -340,7 +355,10 @@ var fields = map[string][]string{
 	"audio_mode": {"mode"}, "audio_mix": {"source", "on", "gain"},
 	"preview": {"on"}, // the WebRTC preview: the app stops it while nobody watches (FollowPreview)
 	"phones":  {"on", "gain"},
-	"slots":   {"slots"}, // the source slots (PUT /sources/slots writes slots.json and then sends it)
+	// The app saved a new output configuration (OUTPUTS.md §8, §9.4): the engine rereads engine.env and takes it
+	// hot, or answers restart_required (or unknown_command, an older engine) and the app restarts it
+	"output_config": nil,
+	"slots":         {"slots"}, // the source slots (PUT /sources/slots writes slots.json and then sends it)
 	// A USB camera's image settings (SOURCES.md §7.3): one control, or all back to the camera's defaults
 	"camera_control": {"source", "control", "value"}, "camera_reset": {"source"},
 }
@@ -623,6 +641,18 @@ func clean(st *State) *State {
 			o.By = ""
 		}
 		o.Seq = max(o.Seq, 0)
+		if !outputProtocols[o.Protocol] {
+			o.Protocol = ""
+		}
+		if !outputCodecs[o.Codec] {
+			o.Codec = ""
+		}
+		if !reOutputSize.MatchString(o.Size) {
+			o.Size = ""
+		}
+		if !(o.FPS > 0 && o.FPS <= 240) { // also NaN
+			o.FPS = 0
+		}
 	}
 	if p := st.Screen.Power; p != nil && (p.Want != "reboot" && p.Want != "poweroff" || p.Seq < 1) {
 		st.Screen.Power = nil
@@ -857,6 +887,9 @@ func (c *Client) Do(ctx context.Context, cmd Command) error {
 	timeout := c.Timeout
 	if timeout == 0 {
 		timeout = 3 * time.Second
+	}
+	if cmd.Cmd == "output_config" { // it may restart the output session (stopping a sender) before answering
+		timeout = max(timeout, 10*time.Second)
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

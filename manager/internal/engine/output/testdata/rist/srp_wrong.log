@@ -1,0 +1,84 @@
+1792050981.643138|0.0|[INFO] Starting ristsender version: 30 libRIST library: 0.2.20 API version: 4.13.0
+1792050981.643208|0.0|[INFO] Assigning stream-id 0 to this input
+1792050981.643257|0.0|[INFO] Starting in Main Profile Mode
+1792050981.643304|0.0|[INFO] RIST Sender Library 0.2.20
+1792050981.643439|0.0|[INFO] Link configured with maxrate=100000 bufmin=1000 bufmax=1000 reorder=15 rttmin=5 rttmax=500 congestion_control=1 min_retries=6 max_retries=20
+1792050981.643475|0.281473049309200|[INFO] Encryption is disabled for this peer
+1792050981.643576|0.281473049309200|[INFO] URL parsed successfully: Host 127.0.0.1, Port 8000
+1792050981.643616|0.281473049309200|[INFO] Starting in URL connect mode (3)
+1792050981.643652|0.281473049309200|[INFO] Configured the starting socket receive buffer size to 16777216 Bytes.
+1792050981.643687|0.281473049309200|[INFO] Configured the starting socket send buffer size to 16777216 Bytes.
+1792050981.643723|0.281473049309200|[INFO] Peer cname is 806e6a7d205a
+1792050981.643756|0.281473049309200|[INFO] rtt_min is too small (5) for the buffer size, using 1000/20 = 50ms instead
+1792050981.643787|0.281473049309200|[INFO] Setting max nacks per cycle to 88
+1792050981.643819|0.281473049309200|[INFO] Setting buffer size to 1100ms (Max buffer size + 2 * Min RTT, 1000+2*50)
+1792050981.643851|0.281473049309200|[INFO] Advertising flow_id  2312240198 and peer_id 1, 32768/1969
+1792050981.643883|0.281473049309200|[INFO] Initialized Sender Peer, connecting to receiver ...
+1792050981.643915|0.281473049309200|[INFO] Active Peer Information, IP:Port => 0.0.0.0:8000 (0), id: 1, ports: 32768->1969
+1792050981.643947|0.281473049309200|[INFO] Enabling keepalive for peer 1
+1792050981.644009|0.281473049309200|[INFO] Successfully Authenticated peer 1
+1792050981.644052|0.0|[INFO] [EAP-SRP] EAP Authentication enabled, role = authenticatee
+1792050981.644083|0.0|[INFO] URL parsed successfully: Host 127.0.0.1, Port 6100
+1792050981.644128|0.0|[INFO] Input socket is open and bound 127.0.0.1:6100
+1792050981.644218|0.281473049309200|[INFO] Starting master sender loop at 5 ms max jitter
+1792050981.650487|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":2312240198,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":4,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":268,"retransmitted_bytes":0,"bandwidth":0,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050981.650539|0.281473049309200|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050981.650576|0.281473049309200|[INFO] New keepalive received. MAC: 8e:be:d8:f4:94:9b X: 0 R: 0 B: 1 A: 0 P: 0 E: 1 L: 0: N: 1 D: 1 T: 0 V: 0: J: 1 F: 0
+1792050981.683165|0.0|[ERROR] [EAP-SRP] Authentication failed
+1792050982.288720|0.0|[ERROR] [EAP-SRP] Authentication failed
+1792050982.648488|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":2312240198,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"stats":{"quality":100,"sent":10,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":640,"retransmitted_bytes":0,"bandwidth":4260,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050982.716435|0.281473049309200|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050982.824262|0.0|[ERROR] [EAP-SRP] Authentication failed
+1792050983.362325|0.0|[ERROR] [EAP-SRP] Authentication failed
+1792050983.362378|0.281473049309200|[ERROR] Failed to process EAPOL pkt, return code: -8
+1792050983.428529|0.281473049309200|[ERROR] Failed to process EAPOL pkt, return code: -8
+1792050983.648351|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050983.783393|0.281473049309200|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050984.647192|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050984.814373|0.281473049309200|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050985.649316|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050985.854272|0.281473049309200|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050986.648584|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050986.890570|0.281473049309200|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050987.648437|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050987.918568|0.281473049309200|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050988.645314|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050988.955476|0.281473049309200|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050989.644552|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050989.991273|0.281473049309200|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050990.646432|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050991.022720|0.281473049309200|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050991.648557|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050992.053364|0.281473049309200|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050992.648347|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050993.088424|0.281473049309200|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050993.646148|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050994.116051|0.281473049309200|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050994.646917|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050995.147919|0.281473049309200|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050995.648848|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050996.172073|0.281473049309200|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050996.649040|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050997.208394|0.281473049309200|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050997.646948|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050998.238707|0.281473049309200|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415
+1792050998.647073|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792050999.256987|0.281473049309200|[INFO] Waiting for EAP authentication to happen for peer connecting on port 16415

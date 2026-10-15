@@ -104,6 +104,11 @@ type OutputState struct {
 	RTTMs    *int     `json:"rttMs,omitempty"`
 	By       string   `json:"by"` // start | socket | screen
 	Seq      int      `json:"seq"`
+	// OUTPUTS.md §8: the protocol and codec (also while off), the output's size and rate while on
+	Protocol string `json:"protocol,omitempty"` // srt | srtla | rtmp | rtmps | rist | udp
+	Codec    string `json:"codec,omitempty"`    // h264 | h265
+	Size     string `json:"size,omitempty"`     // "1280x720"
+	FPS      *int   `json:"fps,omitempty"`
 }
 
 // PreviewState is the web's WebRTC preview (present with LIVE=1).

@@ -194,3 +194,33 @@ func TestThumbs(t *testing.T) {
 		t.Errorf("thumbs: %s", got)
 	}
 }
+
+// The output's codec, size, rate and sink (OUTPUTS.md §2, §7)
+func TestOutputVariants(t *testing.T) {
+	base := Output{Width: 1920, Height: 1080, FPS: 60, VKbps: 4000, AKbps: 128, GOP: 60, Profile: 4, Preset: 2,
+		TwoPass: true, AEnc: "voaacenc"}
+	h265 := base
+	h265.Codec, h265.OutWidth, h265.OutHeight, h265.Half = "h265", 1280, 720, true
+	h265.Sink = Sink{Kind: "udp", Host: "127.0.0.1", Port: 6100}
+	got := Tegra.Output(h265)
+	for _, want := range []string{"framerate=30/1\" ! queue max-size-buffers=4 leaky=downstream ! nvvidconv",
+		"format=I420,width=1280,height=720 ! nvv4l2h265enc name=venc", "bitrate=4000000 iframeinterval=60 idrinterval=60",
+		"EnableTwopassCBR=true ! h265parse config-interval=-1", "mpegtsmux name=mux alignment=7 ! udpsink host=127.0.0.1 port=6100 sync=false async=false"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("h265 output lacks %q:\n%s", want, got)
+		}
+	}
+	for _, bad := range []string{"poc-type", "profile=", "h264", FIFOPlaceholder} {
+		if strings.Contains(got, bad) {
+			t.Errorf("h265 output has %q:\n%s", bad, got)
+		}
+	}
+	rtp := base
+	rtp.OutWidth, rtp.OutHeight = 1920, 1080 // the program's size: no scaling caps
+	rtp.Sink = Sink{Kind: "rtp", Host: "239.1.1.1", Port: 5004}
+	got = Tegra.Output(rtp)
+	if !strings.Contains(got, "format=I420 ! nvv4l2h264enc") || !strings.Contains(got, "! rtpmp2tpay ! udpsink host=239.1.1.1 port=5004") ||
+		!strings.Contains(got, "framerate=60/1") {
+		t.Errorf("rtp output:\n%s", got)
+	}
+}

@@ -261,7 +261,7 @@ func TestSocketScreenParity(t *testing.T) {
 		json.Unmarshal(w.Body.Bytes(), &m)
 		return w.Code, m, w.Header()
 	}
-	if code, m, h := secrets(); code != 200 || m["streamId"] != "publish:"+key || m["passphrase"] != pass || len(m) != 2 ||
+	if code, m, h := secrets(); code != 200 || m["streamId"] != "publish:"+key || m["passphrase"] != pass || len(m) != 4 ||
 		h.Get("Cache-Control") != "no-store" {
 		t.Errorf("secrets over the socket: %d %v %v", code, m, h)
 	}
@@ -271,14 +271,14 @@ func TestSocketScreenParity(t *testing.T) {
 		}
 	}
 	// Managed by EnhancedIRL: not editable (as on the web), but the screen still reveals the key
-	e.srv.Config.ManagedBy = func() string { return "eirl" }
+	e.setManaged(t, true)
 	if code, body := do("PUT", "/api/v1/destination", `{"latencyMs":800}`); code != 409 || !strings.Contains(body, `"error":"managed"`) {
 		t.Errorf("PUT /destination managed: %d %s", code, body)
 	}
 	if code, m, _ := secrets(); code != 200 || m["streamId"] != "publish:"+key {
 		t.Errorf("secrets with the destination managed: %d %v", code, m)
 	}
-	e.srv.Config.ManagedBy = nil
+	e.setManaged(t, false)
 	// PUT: the same validation and the same answer (the key masked); apply restarts the engine
 	if code, body := do("PUT", "/api/v1/destination", `{"latencyMs":5}`); code != 400 || !strings.Contains(body, `"latencyMs"`) {
 		t.Errorf("invalid PUT /destination: %d %s", code, body)

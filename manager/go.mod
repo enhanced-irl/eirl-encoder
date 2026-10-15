@@ -3,6 +3,9 @@ module github.com/enhanced-irl/eirl-encoder/manager
 go 1.26.4
 
 require (
+	github.com/abema/go-mp4 v1.7.3
+	github.com/bluenviron/gortmplib v1.0.4
+	github.com/bluenviron/mediacommon/v2 v2.9.6
 	github.com/coder/websocket v1.8.15
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/pion/ice/v4 v4.4.7
@@ -11,12 +14,15 @@ require (
 	github.com/pion/rtp v1.10.5
 	github.com/pion/webrtc/v4 v4.2.23
 	golang.org/x/crypto v0.57.0
+	golang.org/x/crypto/x509roots/fallback v0.0.0-20261014201258-cf169cd0986f
 	golang.org/x/image v0.46.0
 	golang.org/x/sys v0.48.0
 	rsc.io/qr v0.2.0
 )
 
 require (
+	github.com/asticode/go-astikit v0.30.0 // indirect
+	github.com/asticode/go-astits v1.16.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/pion/datachannel v1.6.3 // indirect
 	github.com/pion/dtls/v3 v3.1.10 // indirect

@@ -13,7 +13,10 @@ import (
 //	settings-dest-error · settings-uplinks · settings-uplinks-single · settings-uplinks-none · settings-uplinks-health ·
 //	settings-uplinks-modems · settings-uplinks-modem-page · settings-uplinks-modem-pin · settings-uplinks-modem-unlock · settings-pause ·
 //	settings-cloud · settings-cloud-pairing · settings-cloud-linked · settings-cloud-unlink · settings-account ·
-//	settings-account-kb
+//	settings-account-kb ·
+//	settings-dests-list · settings-dests-templates · settings-dests-confirm · settings-dests-rtmp ·
+//	settings-dests-srt · settings-dests-rist · settings-dests-video · settings-dests-managed · settings-dests-edited ·
+//	settings-dests-new · settings-dests-delete (the saved destinations, OUTPUTS.md §11)
 func streamState(variant, lang string, now time.Time, snap *ui.AppSnapshot) {
 	snap.Dest, snap.DestAPI = &ui.DestInfo{ManagedBy: "local", URL: "srtla://eu1.relay.enhancedirl.com:5000",
 		Mode: "caller", LatencyMs: 2000, StreamIDSet: true, StreamIDMasked: "publish:a1b2…", PassphraseSet: false,
@@ -30,6 +33,9 @@ func streamState(variant, lang string, now time.Time, snap *ui.AppSnapshot) {
 	snap.Status.Transport, snap.Status.HasUplinks, snap.Status.Uplinks = "srtla", true, ups // the input's stays
 	exp := now.Add(9 * time.Minute)
 	snap.Cloud, snap.CloudAPI = &ui.CloudInfo{State: "unlinked"}, ui.Yes
+	if strings.HasPrefix(variant, "settings-dests") { // saved destinations (OUTPUTS.md §11)
+		snap.Dests, snap.DestsAPI = fakeDests(variant), ui.Yes
+	}
 	switch {
 	case variant == "settings-dest-reveal":
 		snap.DestSecrets = &ui.DestSecrets{StreamID: "publish:a1b2c3d4e5f6EjemploNoEsLaReal"}
@@ -65,9 +71,67 @@ func streamState(variant, lang string, now time.Time, snap *ui.AppSnapshot) {
 	}
 }
 
+// fakeDests: three saved destinations (the cloud's over SRTLA, Twitch over RTMP and in use, a RIST one) with the app's
+// templates; settings-dests-srt adds a custom SRT one.
+func fakeDests(variant string) *ui.DestList {
+	set := true
+	d := func(id, name, tmpl, proto, url string) ui.DestInfo {
+		return ui.DestInfo{ID: id, Name: name, Template: tmpl, Protocol: proto, URL: url, Mode: "caller", LatencyMs: 2000,
+			VideoCodec: "h264", VideoKbps: 6000, VideoMinKbps: 1000, ABR: true, AudioKbps: 128, OutputFps: "full",
+			ManagedBy: "local"}
+	}
+	eirl := d("eirl", "EnhancedIRL", "eirl", "srtla", "srtla://eu1.relay.enhancedirl.com:5001")
+	eirl.Managed, eirl.StreamIDSet, eirl.StreamIDMasked, eirl.VideoCodec = true, set, "publish:a1b2…", "h265"
+	twitch := d("d-3f9a1c2b", "Twitch", "twitch", "rtmp", "rtmp://live.twitch.tv/app")
+	twitch.Active, twitch.KeySet, twitch.KeyMasked = true, set, "live…wXyZ"
+	rist := d("d-7c21e0a4", "Plató RIST", "custom", "rist", "rist://203.0.113.40:8200")
+	rist.LatencyMs, rist.RistProfile, rist.Username, rist.PassphraseSet, rist.PasswordSet = 1000, "main", "estudio", set, set
+	rist.VideoCodec, rist.VideoKbps, rist.OutputSize, rist.OutputFps = "h265", 8000, "1280x720", "half"
+	list := []ui.DestInfo{eirl, twitch, rist}
+	if variant == "settings-dests-srt" {
+		srt := d("d-0b9e55d1", "Relay propio", "custom", "srt", "srt://198.51.100.7:9000")
+		srt.StreamIDSet, srt.PassphraseSet, srt.LatencyMs = set, set, 1500
+		list = append(list, srt)
+	}
+	return &ui.DestList{Active: twitch.ID, ManagedBy: "local", Destinations: list, Templates: []ui.DestTemplate{
+		{ID: "eirl", Protocols: []string{"srtla", "srt"}, Codecs: []string{"h265", "h264"}},
+		{ID: "twitch", Protocols: []string{"rtmp", "rtmps"}, URL: "rtmp://live.twitch.tv/app", Codecs: []string{"h264"},
+			MaxVideoKbps: 6000, KeyRequired: true},
+		{ID: "youtube", Protocols: []string{"rtmps", "rtmp"}, URL: "rtmps://a.rtmps.youtube.com:443/live2",
+			Codecs: []string{"h264", "h265"}, MaxVideoKbps: 20000, KeyRequired: true},
+		{ID: "kick", Protocols: []string{"rtmps"}, Codecs: []string{"h264"}, MaxVideoKbps: 8000, KeyRequired: true},
+		{ID: "facebook", Protocols: []string{"rtmps"}, URL: "rtmps://live-api-s.facebook.com:443/rtmp/",
+			Codecs: []string{"h264"}, MaxVideoKbps: 6000, KeyRequired: true},
+		{ID: "custom", Protocols: []string{"srt", "srtla", "rtmp", "rtmps", "rist", "udp"}, Codecs: []string{"h264", "h265"},
+			MaxVideoKbps: 20000}}}
+}
+
 // streamPreview sets what a variant needs on the screen itself (an eye open, a draft, a confirmation, a keyboard).
 func streamPreview(p ui.Preview, variant string) {
 	switch variant {
+	case "settings-dests-templates":
+		p.AddDest()
+	case "settings-dests-confirm": // a touch on the RIST one while streaming: it waits for the second
+		p.Confirming("dl_act:d-7c21e0a4")
+	case "settings-dests-rtmp":
+		p.OpenDest("d-3f9a1c2b", "conn")
+	case "settings-dests-srt":
+		p.OpenDest("d-0b9e55d1", "conn")
+	case "settings-dests-rist":
+		p.OpenDest("d-7c21e0a4", "conn")
+	case "settings-dests-video":
+		p.OpenDest("d-7c21e0a4", "video")
+	case "settings-dests-managed":
+		p.OpenDest("eirl", "conn")
+	case "settings-dests-edited": // the active one with a change: «Save» and «Save and apply»
+		p.OpenDest("d-3f9a1c2b", "video")
+		p.Touch("s_de_vid_m")
+		p.Touch("s_de_abr")
+	case "settings-dests-new":
+		p.NewDest("youtube")
+	case "settings-dests-delete":
+		p.OpenDest("d-7c21e0a4", "conn")
+		p.Confirming("de_delete")
 	case "settings-dest-reveal":
 		p.Reveal("s_dest_sid_eye")
 	case "settings-dest-edited":

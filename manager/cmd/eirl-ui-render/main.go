@@ -15,7 +15,8 @@
 // settingsnetswrong · settingsnetsforget · settingskb · settingskbupper · settingskbsym · settingskbsym2 ·
 // settingskbwrong · settingsapoffname · settingsssidkb · settingsssidkbbad · settingsrenaming · settingsrenameonair ·
 // settingsrenamed · audioset (the audio view's settings) · audiosetpick (a camera's audio being chosen) · audioseterr (the
-// engine refused a delay). Modifiers: +wifi +srtla (2 uplinks) +srtla1 +dots +dots6 (the connections' dots) +press +presstile +noclient +camstab +noalias +details +phoff +phwait
+// engine refused a delay). Modifiers: +wifi +srtla (2 uplinks) +srtla1 +rtmps +rist (the header's protocol) +h265 (the
+// output's codec) +tls +clock (the output's reason: tls_failed, clock_not_synced) +dots +dots6 (the connections' dots) +press +presstile +noclient +camstab +noalias +details +phoff +phwait
 // +pherr +phmute
 // +gone (audioset: a camera linked to an input that is unplugged) +nophones +ant3 +ant1 +antnoinet +antsearch +anterror (the former tools/ui_render.py's header explained each) +apoff
 // («Create my Wi-Fi» off, its name known: e.g. wizard-3-network+apoff).
@@ -165,6 +166,17 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir string, bench 
 	}
 	if variant == "error" {
 		st["output"] = m("mode", "on", "state", "error", "reason", "rejected")
+	}
+	if out, _ := st["output"].(map[string]any); out != nil { // the output's codec and new reasons (OUTPUTS.md §8)
+		if has("h265") {
+			out["codec"] = "h265"
+		}
+		if has("tls") {
+			out["reason"] = "tls_failed"
+		}
+		if has("clock") {
+			out["reason"] = "clock_not_synced"
+		}
 	}
 	if variant == "pip" {
 		prog["layout"] = "pip"
@@ -434,6 +446,10 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir string, bench 
 		transport, links = "srtla", 2
 	case has("srtla1"):
 		transport, links = "srtla", 1
+	case has("rtmps"): // the other protocols (OUTPUTS.md §8): the header words them
+		transport = "rtmps"
+	case has("rist"):
+		transport = "rist"
 	}
 	lay := ui.NewLayout(1024, 600, 4)
 	u := ui.New(lay, tx, net)

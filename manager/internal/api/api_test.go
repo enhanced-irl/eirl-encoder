@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -85,6 +86,33 @@ func setup(t *testing.T, withPassword bool) *env {
 		RunStatePath: filepath.Join(dir, "state"), Hostnames: []string{"example.com"},
 	}
 	return &env{srv: s, unit: u, h: s.Handler(), dir: dir}
+}
+
+// setManaged: the active destination becomes the cloud's (id eirl, as a config.set creates it) or, with false, the
+// cloud's becomes a local one again: managedBy follows the active destination.
+func (e *env) setManaged(t *testing.T, cloudOwned bool) {
+	t.Helper()
+	_, _, err := e.srv.Config.UpdateDestinations(func(ds *config.Destinations, _ *config.Settings) error {
+		from, to := ds.Active, config.CloudID
+		if !cloudOwned {
+			from, to = config.CloudID, "d-0000abcd"
+		}
+		d, ok := ds.Get(from)
+		if !ok {
+			return errors.New("no destination to convert")
+		}
+		ds.Remove(from)
+		d.ID, d.Managed, d.Template, d.Name = to, cloudOwned, config.TemplateEIRL, "EnhancedIRL"
+		if !cloudOwned {
+			d.Template, d.Name = config.TemplateCustom, "SRT"
+		}
+		ds.Put(d)
+		ds.Active = to
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (e *env) do(method, path, body, cookie string, hdr ...string) *httptest.ResponseRecorder {
@@ -264,8 +292,8 @@ func TestDestinationNeverLeaksAndApplies(t *testing.T) {
 	if got := strings.Join(e.unit.actions, ","); got != "restart,restart" {
 		t.Errorf("inactive must not restart and failed must: %q", got)
 	}
-	// managed by EnhancedIRL → 409
-	os.WriteFile(filepath.Join(e.dir, "app.env"), []byte("EIRL_MANAGED_BY=eirl\n"), 0o600)
+	// the cloud's destination active (managed by EnhancedIRL) → 409; the file's EIRL_MANAGED_BY does not decide it
+	e.setManaged(t, true)
 	if w := e.do("PUT", "/api/v1/destination", `{"latencyMs":300}`, tok); w.Code != 409 {
 		t.Errorf("managed: %d", w.Code)
 	}

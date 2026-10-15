@@ -49,7 +49,7 @@ func TestApplyWireValid(t *testing.T) {
 		t.Fatalf("ApplyWire: %v", fe)
 	}
 	want := config.Settings{ManagedBy: "eirl", URL: "srt://eu1.relay.enhancedirl.com:5000", Mode: "caller", LatencyMs: 500,
-		StreamID: "publish:" + testKey, VideoKbps: 6000, AudioKbps: 160, Output: "on", ABR: true, VideoMinKbps: 1500, EDIDPreferred: "1080p50",
+		StreamID: "publish:" + testKey, VideoKbps: 6000, AudioKbps: 160, Output: "on", ABR: true, VideoMinKbps: 1500, EDIDPreferred: "1080p50", Protocol: "srt",
 		// The input (SOURCES.md) does not travel in wire v1: the device's is kept
 		Source: "hdmi", VideoDevice: "auto", VideoFormat: "auto", VideoMode: "auto", AudioSource: "auto"}
 	if s != want {
@@ -212,23 +212,123 @@ func TestDestinationAllowedD9(t *testing.T) {
 func TestReportedHasNoSecrets(t *testing.T) {
 	s := config.Defaults()
 	s.URL, s.StreamID, s.Passphrase, s.LatencyMs = "srtla://eu1.relay.enhancedirl.com:5002", "publish:"+testKey, "secretpassphrase", 2000
-	r := Reported(s, []string{"usb1", "eth0"})
+	ds := config.Migrate(s, true) // the cloud's, active
+	r := Reported(ds.Flatten(s), ds, []string{"usb1", "eth0"})
 	b, _ := json.Marshal(r)
 	if bytes.Contains(b, []byte(testKey)) || bytes.Contains(b, []byte("secretpassphrase")) {
 		t.Fatalf("secrets in the report: %s", b)
 	}
 	d := r.Destination
-	if d == nil || d.Host != "eu1.relay.enhancedirl.com" || d.Port != 5002 || d.Transport != "srtla" || d.LatencyMs != 2000 || !d.StreamIDSet {
+	if d == nil || d.Kind != "eirl" || d.Protocol != "srtla" || d.Codec != "h265" || d.Host != "eu1.relay.enhancedirl.com" ||
+		d.Port != 5002 || d.Transport != "srtla" || d.LatencyMs != 2000 || !d.StreamIDSet {
 		t.Errorf("reported destination: %+v", d)
 	}
 	if strings.Join(r.Uplinks.Disabled, ",") != "eth0,usb1" {
 		t.Errorf("uplinks: %v", r.Uplinks.Disabled)
 	}
-	if Reported(config.Defaults(), nil).Destination != nil {
-		t.Error("without a URL, destination must be null")
+	if Reported(config.Defaults(), config.Empty(), nil).Destination != nil {
+		t.Error("without an active destination, destination must be null")
 	}
-	if b, _ := json.Marshal(Reported(config.Defaults(), nil)); !bytes.Contains(b, []byte(`"disabled":[]`)) {
+	if b, _ := json.Marshal(Reported(config.Defaults(), config.Empty(), nil)); !bytes.Contains(b, []byte(`"disabled":[]`)) {
 		t.Errorf("disabled must be [] and not null: %s", b)
+	}
+	if a := r.ActiveDestination; a == nil || a.Kind != "eirl" || a.Protocol != "srtla" || a.Codec != "h265" {
+		t.Errorf("active destination: %+v", a)
+	}
+	// A local destination: destination null (an older cloud refuses the whole report for anything but srt/srtla
+	// with host, port and latency) and activeDestination with only its kind, protocol and codec (OUTPUTS.md §10),
+	// never where it goes
+	local := config.Defaults()
+	local.URL, local.StreamID = "srt://my.own.server.example:9000", "publish:"+testKey
+	lds := config.Migrate(local, false)
+	b, _ = json.Marshal(Reported(lds.Flatten(local), lds, nil))
+	if !bytes.Contains(b, []byte(`"destination":null`)) ||
+		!bytes.Contains(b, []byte(`"activeDestination":{"kind":"local","protocol":"srt","codec":"h264"}`)) ||
+		bytes.Contains(b, []byte("my.own.server")) {
+		t.Errorf("local destination: %s", b)
+	}
+}
+
+// The cloud's destination in the saved list (OUTPUTS.md §9.1, §10): created and made active the first time, updated
+// later without changing the active one, removed with null; its codec from the wire.
+func TestApplyWireDestinations(t *testing.T) {
+	cur := config.Defaults()
+	local := cur
+	local.URL = "srt://my.own.server.example:9000"
+	ds := config.Migrate(local, false)
+	localID := ds.Active
+	cur = ds.Flatten(local)
+
+	// The first time: created (H.265 by default) and active
+	w, fe := ParseWireConfig(wireJSON(t, nil))
+	if fe != nil {
+		t.Fatal(fe)
+	}
+	ds2, s, dis, fe := ApplyWireDestinations(ds, cur, w)
+	if fe != nil {
+		t.Fatalf("first config.set: %v", fe)
+	}
+	e, ok := ds2.Get(config.CloudID)
+	if !ok || ds2.Active != config.CloudID || !e.Managed || e.Template != "eirl" || e.VideoCodec != "h265" || e.Protocol != "srt" ||
+		e.VideoKbps != 6000 || e.AudioKbps != 160 || e.VideoMinKbps != 1500 || len(ds2.Destinations) != 2 {
+		t.Fatalf("created: %+v active=%s", e, ds2.Active)
+	}
+	if s.URL != "srt://eu1.relay.enhancedirl.com:5000" || s.ManagedBy != "eirl" || s.Output != "on" || s.VideoCodec != "h265" ||
+		s.EDIDPreferred != "1080p50" || strings.Join(dis, ",") != "usb1,usb0" {
+		t.Errorf("flattened: %+v", s)
+	}
+	// The owner activates their own one; an update from the cloud does not take it back, and streams to the active one
+	ds2.Active = localID
+	s = ds2.Flatten(s)
+	w, _ = ParseWireConfig(wireJSON(t, func(m map[string]any) {
+		m["destination"] = map[string]any{"url": "srtla://eu1.relay.enhancedirl.com:5001", "streamId": "publish:" + testKey,
+			"latencyMs": 2000, "videoCodec": "h264"}
+		m["video"] = map[string]any{"bitrateKbps": 4000, "adaptive": true, "minBitrateKbps": 1000}
+	}))
+	ds3, s3, _, fe := ApplyWireDestinations(ds2, s, w)
+	e, _ = ds3.Get(config.CloudID)
+	if fe != nil || ds3.Active != localID || e.Protocol != "srtla" || e.VideoCodec != "h264" || e.VideoKbps != 4000 ||
+		s3.URL != "srt://my.own.server.example:9000" || s3.ManagedBy != "local" || s3.Output != "on" || s3.VideoKbps != 6000 {
+		t.Errorf("update: %v %+v %+v", fe, e, s3)
+	}
+	// null: removed; the active local one stays
+	w, _ = ParseWireConfig(wireJSON(t, func(m map[string]any) { m["destination"] = nil }))
+	ds4, s4, _, fe := ApplyWireDestinations(ds3, s3, w)
+	if _, ok := ds4.Get(config.CloudID); fe != nil || ok || ds4.Active != localID || s4.URL != s3.URL || s4.Output != "on" {
+		t.Errorf("null with a local one active: %v %+v", fe, ds4)
+	}
+	// null with the cloud's active: nothing active and not streaming
+	ds3.Active = config.CloudID
+	ds5, s5, _, fe := ApplyWireDestinations(ds3, ds3.Flatten(s3), w)
+	if fe != nil || ds5.Active != "" || s5.URL != "" || s5.Output != "off" || s5.ManagedBy != "local" {
+		t.Errorf("null with the cloud's active: %v %+v %+v", fe, ds5, s5)
+	}
+	// Absent: nothing changes but the bitrates of the cloud's
+	w, _ = ParseWireConfig(wireJSON(t, func(m map[string]any) {
+		delete(m, "destination")
+		m["video"] = map[string]any{"bitrateKbps": 3000, "adaptive": false, "minBitrateKbps": 1000}
+	}))
+	ds6, _, _, fe := ApplyWireDestinations(ds3, ds3.Flatten(s3), w)
+	if e, _ := ds6.Get(config.CloudID); fe != nil || e.VideoKbps != 3000 || e.URL != "srtla://eu1.relay.enhancedirl.com:5001" {
+		t.Errorf("absent: %v %+v", fe, e)
+	}
+	// A codec the device does not know
+	if _, fe := ParseWireConfig(wireJSON(t, func(m map[string]any) {
+		m["destination"] = map[string]any{"url": "srt://eu1.relay.enhancedirl.com:5000", "streamId": "", "latencyMs": 500, "videoCodec": "av1"}
+	})); fe["destination.videoCodec"] == "" {
+		t.Errorf("videoCodec av1: %v", fe)
+	}
+	// D9 still applies
+	w, _ = ParseWireConfig(wireJSON(t, func(m map[string]any) {
+		m["destination"] = map[string]any{"url": "srt://evil.example.com:5000", "streamId": "", "latencyMs": 500}
+	}))
+	if _, _, _, fe := ApplyWireDestinations(ds, cur, w); fe["destination"] != ErrDestinationNotAllowed {
+		t.Errorf("D9: %v", fe)
+	}
+	// No destination at all and output on: stays off
+	w, _ = ParseWireConfig(wireJSON(t, func(m map[string]any) { delete(m, "destination") }))
+	if ds7, s7, _, fe := ApplyWireDestinations(config.Empty(), config.Defaults(), w); fe != nil || s7.Output != "off" || ds7.Active != "" {
+		t.Errorf("no destination: %v %+v", fe, s7)
 	}
 }
 
@@ -379,5 +479,16 @@ func TestApplyWireKeepsDeviceDestination(t *testing.T) {
 	s, _, fe := ApplyWire(cur, w)
 	if fe != nil || s.URL != cur.URL || s.StreamID != cur.StreamID || s.LatencyMs != 2000 || s.Output != "on" || s.VideoKbps != 5000 || s.ManagedBy != "eirl" {
 		t.Errorf("%+v %v", s, fe)
+	}
+}
+
+// The reasons of RTMPS (OUTPUTS.md §8) pass; unknown ones are internal
+func TestNormalizeOutputReasons(t *testing.T) {
+	for in, want := range map[string]string{"tls_failed": "tls_failed", "clock_not_synced": "clock_not_synced", "brand_new": "internal"} {
+		st := EncoderStatus{OutputState: StatusOutput{State: "error", Reason: in}}
+		st.Normalize()
+		if st.OutputState.Reason != want {
+			t.Errorf("%s → %s", in, st.OutputState.Reason)
+		}
 	}
 }

@@ -43,6 +43,10 @@ var localRoutes = []string{
 	"GET /api/v1/cloud", "POST /api/v1/cloud/pair", "DELETE /api/v1/cloud",
 	// The stream destination. GET masks the key as on the web; its value in clear is /destination/secrets (below)
 	"GET /api/v1/destination", "PUT /api/v1/destination",
+	// The saved destinations (OUTPUTS.md §9.3): the list (masked), add, change, delete and activate one (the screen's
+	// Settings › Stream › Destination). Their secrets in clear only through /destinations/{id}/secrets (below)
+	"GET /api/v1/destinations", "POST /api/v1/destinations", "PUT /api/v1/destinations/{id}",
+	"DELETE /api/v1/destinations/{id}", "POST /api/v1/destinations/{id}/activate",
 	// The status snapshot (uplinks, the saved input, pendingRestart, transport): the same as the web's SSE, without
 	// secrets (collect: no destination, no key, no Wi-Fi password)
 	"GET /api/v1/status",
@@ -74,6 +78,7 @@ func (s *Server) LocalHandler() http.Handler {
 	// Local-only (never on the web): what the screen's eye buttons reveal
 	mux.HandleFunc("GET /api/v1/network/credentials", s.getLocalCredentials)
 	mux.HandleFunc("GET /api/v1/destination/secrets", s.getDestinationSecrets)
+	mux.HandleFunc("GET /api/v1/destinations/{id}/secrets", s.getDestinationSecretsByID)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, 403, "local_forbidden", "access.local_forbidden")
 	})
@@ -111,19 +116,6 @@ func (s *Server) getLocalCredentials(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, 200, map[string]any{"wifi": cr.WiFi})
 	}
-}
-
-// getDestinationSecrets: GET /destination/secrets, only over the socket: the stream key and the passphrase in clear
-// ("" when unset), for the screen's eye button. Also with the destination managed by EnhancedIRL (the owner's
-// decision: the screen shows everything; the web never reveals them). no-store, and never logged.
-func (s *Server) getDestinationSecrets(w http.ResponseWriter, r *http.Request) {
-	cfg, err := s.Config.Load()
-	if err != nil {
-		fail(w, r, 500, "internal", "config.read_failed")
-		return
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, map[string]string{"streamId": cfg.StreamID, "passphrase": cfg.Passphrase})
 }
 
 type localKey struct{}

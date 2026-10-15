@@ -106,6 +106,7 @@ type UI struct {
 	aset audioSetState
 	cam  cameraState
 	dst  destState
+	dl   destsState // the saved destinations (dests.go)
 	acct accountState
 	// the uplink being switched (its row's switch halfway meanwhile) and to what
 	uplinkPend    string

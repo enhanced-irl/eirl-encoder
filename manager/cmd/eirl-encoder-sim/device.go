@@ -43,7 +43,8 @@ type simDevice struct {
 	connectDelay time.Duration
 
 	mu        sync.Mutex
-	cfg       config.Settings
+	cfg       config.Settings     // the active destination flattened + the global keys, like engine.env
+	dests     config.Destinations // the saved destinations (OUTPUTS.md §9): here only the cloud's
 	disabled  []string
 	svc       string // active | activating | inactive | failed
 	since     time.Time
@@ -59,7 +60,7 @@ func newSimDevice(log *slog.Logger, flap time.Duration, links int, legacy bool) 
 	cfg := config.Defaults()
 	cfg.Output = "off" // starts without streaming: there is a picture but it goes nowhere
 	now := time.Now()
-	return &simDevice{log: log, flap: flap, links: links, legacy: legacy, start: now, cfg: cfg, running: cfg,
+	return &simDevice{log: log, flap: flap, links: links, legacy: legacy, start: now, cfg: cfg, running: cfg, dests: config.Empty(),
 		startDelay: 2 * time.Second, connectDelay: 2 * time.Second,
 		svc: "active", since: now, signal: true, edid: cfg.EDIDPreferred, followers: map[chan service.Entry]struct{}{}}
 }
@@ -113,7 +114,7 @@ func (d *simDevice) Status(context.Context) cloud.EncoderStatus {
 		Output:         run.Output,
 		PendingRestart: d.svc == "active" && !d.sameRun(d.cfg, d.running),
 		Input:          cloud.StatusInput{EDIDPreferred: d.cfg.EDIDPreferred},
-		Transport:      config.Transport(run.URL),
+		Transport:      simTransport(run),
 		Audio:          cloud.StatusAudio{State: "no_samples"},
 		System: cloud.StatusSystem{
 			CPUPct: []int{28 + rand.IntN(6), 18 + rand.IntN(4), 6 + rand.IntN(3), 4 + rand.IntN(3)},
@@ -184,7 +185,15 @@ func (d *simDevice) Status(context.Context) cloud.EncoderStatus {
 func (d *simDevice) Reported() (cloud.ReportedConfig, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return cloud.Reported(d.cfg, d.disabled), nil
+	return cloud.Reported(d.cfg, d.dests, d.disabled), nil
+}
+
+// simTransport: the protocol of what streams (srt without a destination), as the device's /status says it.
+func simTransport(s config.Settings) string {
+	if p := s.EffectiveProtocol(); p != "" {
+		return p
+	}
+	return config.ProtoSRT
 }
 
 func (d *simDevice) ApplyConfig(ctx context.Context, w cloud.WireConfig, apply bool) (cloud.ApplyResult, error) {
@@ -193,13 +202,13 @@ func (d *simDevice) ApplyConfig(ctx context.Context, w cloud.WireConfig, apply b
 		d.mu.Unlock()
 		return cloud.ApplyResult{}, ctx.Err()
 	}
-	next, disabled, fe := cloud.ApplyWire(d.cfg, w)
+	dests, next, disabled, fe := cloud.ApplyWireDestinations(d.dests, d.cfg, w)
 	if fe != nil {
 		d.mu.Unlock()
 		return cloud.ApplyResult{}, fe
 	}
 	changed := !d.sameRun(next, d.running)
-	d.cfg, d.disabled = next, disabled
+	d.dests, d.cfg, d.disabled = dests, next, disabled
 	svc := d.svc
 	// F3: the output is switched hot while the broadcast runs; everything else, as always
 	hot := !d.legacy && apply && svc == "active" && !changed && next.Output != d.running.Output
@@ -210,7 +219,7 @@ func (d *simDevice) ApplyConfig(ctx context.Context, w cloud.WireConfig, apply b
 	if hot {
 		d.outputJournal(next.Output)
 	}
-	d.log.Info("sim: configuration", "url", next.URL, "streamid", config.MaskStreamID(next.StreamID), "latency", next.LatencyMs,
+	d.log.Info("sim: configuration", "url", next.URL, "codec", next.Codec(), "streamid", config.MaskStreamID(next.StreamID), "latency", next.LatencyMs,
 		"vbitrate", next.VideoKbps, "abr", next.ABR, "output", next.Output, "edid", next.EDIDPreferred, "apply", apply)
 	// Same rule as the device (api.applySaved): a deliberate stop is respected; otherwise only if it changed
 	if !apply || svc == "inactive" || !changed {
@@ -441,14 +450,16 @@ func (d *simDevice) Uplinks() []string {
 
 func (d *simDevice) Unlinked(ctx context.Context, clearDestination bool) error {
 	d.log.Info("sim: unlinked", "clearDestination", clearDestination)
-	if !clearDestination {
-		return nil
-	}
 	d.mu.Lock()
-	d.cfg.URL, d.cfg.Mode, d.cfg.StreamID, d.cfg.Passphrase, d.cfg.Output = "", "caller", "", "", "off"
+	// Like the device: the cloud's destination goes; if it was the active one, nothing streams
+	removed, wasActive := d.dests.Remove(config.CloudID)
+	if wasActive {
+		d.cfg.Output = "off"
+	}
+	d.cfg = d.dests.Flatten(d.cfg)
 	svc := d.svc
 	d.mu.Unlock()
-	if svc == "active" || svc == "activating" {
+	if removed && (svc == "active" || svc == "activating") {
 		d.restart("restart")
 	}
 	return nil

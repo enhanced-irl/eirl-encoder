@@ -1,0 +1,4 @@
+- Destinations enregistrées : gardez-en plusieurs (EnhancedIRL, Twitch, YouTube, Kick, Facebook ou la vôtre) et passez de l'une à l'autre depuis l'écran tactile (Réglages › Diffusion › Destination) ou depuis la page web. En direct, la diffusion revient en une seconde, sans redémarrer l'encodeur.
+- Plus de protocoles : en plus de SRT et SRTLA, désormais RTMP et RTMPS (pour diffuser directement sur les plateformes), RIST et UDP. RIST répartit la diffusion sur vos connexions, comme SRTLA ; RTMP sort par la connexion la plus saine.
+- Chaque destination a sa propre vidéo : H.264 ou H.265, la taille de sortie (celle du programme, 720p ou 540p) et, si vous le souhaitez, la moitié des images. Vers EnhancedIRL, c'est H.265 : la même qualité avec moins de données ; Twitch, Kick et Facebook n'acceptent que H.264.
+- C'est une première version : si quelque chose ne fonctionne pas avec votre plateforme, dites-le-nous.

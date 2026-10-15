@@ -1,5 +1,5 @@
 > **Status:** IN PROGRESS — v1 complete and deployed (phases 0-4, Oct 8); phase 5 (WebRTC preview with audio) deployed on Oct 8; in `main` (MR !1); pending: testing it on a real phone and the items in §12
-> **Updated:** 2026-10-15
+> **Updated:** 2026-10-15 (saved destinations and output protocols, §3 and §10: [`OUTPUTS.md`](OUTPUTS.md), not deployed)
 >
 > SRTLA and adaptive bitrate (branch `feat/srtla`, not deployed): design in [`SRTLA.md`](SRTLA.md); here, what changes in the API.
 >
@@ -297,6 +297,81 @@ Validation (whitelist; what does not fit is rejected, not "cleaned"):
 | `adaptiveBitrate` | boolean |
 | `videoMinBitrateKbps` | integer 200–20000; with `adaptiveBitrate`, ≤ `videoBitrateKbps` |
 
+#### Saved destinations and output protocols (Oct 15, [`OUTPUTS.md`](OUTPUTS.md) §9)
+
+Several destinations per device, **one active**: the one `engine.env` holds. They live in
+`/etc/eirl-encoder/destinations.json` (0600, the app's only; the engine never reads it):
+`{"v":1, "active":"<id>"|"", "destinations":[…]}`, each with every field of the view below plus its secrets in clear.
+At most 16, one place always kept for the cloud's (15 of the device's own); names 1-32 characters; ids `eirl` (the
+cloud's, `managed`) and `d-` + 8 hex. Output (on/off), `edidPreferred` and the input stay global.
+
+**Migration** (no file yet, on the first `GET`): a destination the cloud set (`cloud.json`'s `cloudDestination`) →
+`eirl`, active, H.265; any other one → a `custom` destination named after its protocol (`SRT`, `SRTLA`), active, with
+the codec it streamed with (H.264); none (or an invalid one) → an empty list. `engine.env` is not rewritten by the
+migration: the new keys appear with the next save.
+
+| Route | Body → answer |
+|---|---|
+| `GET /destinations` | → `{"active": id\|null, "managedBy": "local"\|"eirl", "destinations": [view…], "templates": [template…], "pendingRestart"}` |
+| `POST /destinations` | patch with `template` and `protocol` → `201` view (not active). `409 too_many`; `409 managed` with `template: "eirl"` |
+| `PUT /destinations/{id}` | patch + `"apply"` → view + `pendingRestart` (+ `restarted`). `409 managed` (the cloud's), `404 not_found` |
+| `DELETE /destinations/{id}` | → `204`. `409 active` (activate another first), `409 managed`, `404` |
+| `POST /destinations/{id}/activate` | `{"apply": bool}` → the list as in `GET` (+ `restarted`). The cloud's can be activated |
+| `GET /destinations/{id}/secrets` | **local socket only** → `{"streamId","passphrase","key","password"}` in clear, `no-store`, never logged |
+| `GET`/`PUT /destination` | as before, on the **active** one (`409 managed` when it is the cloud's), plus the view's new fields and `id`, `name`, `template`. `url: ""` leaves nothing active (the destination stays saved); with nothing active, a URL creates a `custom` destination and activates it |
+
+View (secrets never in clear; `key` masked `live…wXyZ`):
+
+```jsonc
+{ "id": "d-3f9a1c2b", "name": "Twitch", "template": "twitch", "managed": false, "active": true,
+  "protocol": "rtmp", "url": "rtmp://live.twitch.tv/app", "urlInvalid": false,
+  "mode": "caller",                 // listener only with srt
+  "latencyMs": 0,                   // SRT's latency (srt, srtla), RIST's buffer (rist); 0 for rtmp(s) and udp
+  "streamId": {"set": false}, "passphrase": {"set": false}, "key": {"set": true, "masked": "live…wXyZ"},
+  "ristProfile": "", "username": "", "password": {"set": false},
+  "videoCodec": "h264", "videoBitrateKbps": 6000, "videoMinBitrateKbps": 1000, "adaptiveBitrate": true,
+  "audioBitrateKbps": 128, "outputSize": "", "outputFps": "full" }
+```
+
+`templates[]`: `{"id", "protocols": [default first], "url": the default protocol's server, "urls": {protocol: server},
+"codecs": [default first], "maxVideoKbps", "keyRequired"}` — `eirl` (srtla, srt; h265, h264), `twitch` (rtmp, rtmps;
+h264; 6000), `youtube` (rtmps, rtmp; h264, h265; 20000), `kick` (rtmps, server per account; h264; 8000), `facebook`
+(rtmps; h264; 6000), `custom` (every protocol; h264, h265; 20000). A new destination takes its template's server, first
+codec, ABR on, minimum 1000 and min(6000, max) kbps.
+
+Patch: `name`, `template`, `protocol`, `url`, `mode`, `latencyMs`, `streamId`, `passphrase`, `key`, `password` (these
+four with the absent/null/value semantics above), `ristProfile`, `username`, `videoCodec`, `videoBitrateKbps`,
+`videoMinBitrateKbps`, `adaptiveBitrate`, `audioBitrateKbps`, `outputSize`, `outputFps`. The protocol follows the URL's
+scheme (`rtp://` is `udp`) unless given, and then they must agree. A pasted srt(la) URL with its query fills the SRT
+fields and the SRTLA latency rule as before. Changing protocol clears what the new one does not use (a value given for
+one of those is `400`); on a template's own server it takes the template's server for the new protocol. Changing the
+server asks for every set secret again (`streamId`, `passphrase`, `key`, `password`) or its removal.
+
+| Field | Rule (besides the table above) |
+|---|---|
+| `url` | srt/srtla as above; `rtmp://` and `rtmps://` host[:port]/app (app `[A-Za-z0-9._~!$'()*+,;=:@%/-]{1,400}`, no query: the key goes apart); `rist://host:port`; `udp://` or `rtp://host:port` (multicast allowed). Host: DNS name, IPv4 or `[IPv6]` |
+| `key` | `[A-Za-z0-9._~!$()*+,;=:@%/?&-]{1,512}` (rtmp, rtmps) |
+| `passphrase` | SRT's, or RIST's pre-shared key (same charset, 10-79) |
+| `ristProfile`, `username`, `password` | rist only: `simple` \| `main`; user `[A-Za-z0-9_.-]{1,64}` and password `[A-Za-z0-9_.~-]{1,128}`, both or neither. **Simple profile**: no passphrase, user or password (`config.rist_main_only`) and an even port (RTCP goes to the next one) |
+| `latencyMs` | srt/srtla 20-8000; rist 50-8000 (1000 by default) |
+| `videoCodec` | `h264` \| `h265`, and one of the template's (`config.codec_unsupported`) |
+| `videoBitrateKbps`, `videoMinBitrateKbps` | up to the template's maximum (`config.kbps_range`) |
+| `outputSize`, `outputFps` | `""` (the program's) \| `1280x720` \| `960x540`; `full` \| `half` |
+
+**engine.env** ([`OUTPUTS.md`](OUTPUTS.md) §3): the active destination flattened, every key always written.
+`OUTPUT_PROTOCOL` explicit; srt/srtla keep `SRT_URL` and an empty `OUTPUT_URL`; every other protocol an **empty
+`SRT_URL`** (an older engine answers `no_destination`), `OUTPUT_URL`, `OUTPUT_KEY`, and for RIST `OUTPUT_PASSPHRASE`,
+`OUTPUT_USER`, `OUTPUT_PASSWORD`, `RIST_PROFILE`, `OUTPUT_LATENCY`; always `OUTPUT_VCODEC`, `OUTPUT_SIZE`,
+`OUTPUT_FPS` and the destination's bitrates. `EIRL_MANAGED_BY` = `eirl` only when the active one is the cloud's.
+
+**Applying** (`apply`, the web, the screen and the cloud alike): if the engine runs the mixer and only output keys
+changed (the destination, its bitrates and encoding settings, `EIRL_MANAGED_BY`; `OUTPUT` keeps its own `output`
+command), the app sends `{"cmd":"output_config"}`: the engine takes it **without restarting** (the output restarts
+only if it was on air) and rewrites `CONF_SHA`, so nothing stays pending. On `unknown_command` (an older engine),
+`restart_required`, `invalid_config` or any error: the restart of today. `/status` gains `protocol` and `codec`
+(the engine's output state when it says them, else the saved ones); `transport` carries the protocol, and the
+uplinks and modems logic stays SRTLA-only.
+
 ### Service and preview
 
 | Method and route | What |
@@ -373,7 +448,9 @@ is, [`SETUP.md`](SETUP.md) §3). **No session or CSRF**: the
   | `GET /network/wifi`, `PUT /network/wifi`, `GET /network/wifi/scan`, `POST /network/wifi/connect`, `POST /network/wifi/forget` | Same as in the web (WIFI.md §5). The password typed on the screen goes through here, directly: never through the engine's socket nor its state |
   | `POST /cameras`, `PATCH /cameras/{id}`, `DELETE /cameras/{id}` | Same as in the web (Oct 14); the answers carry the camera's URLs with its key |
   | `GET /destination`, `PUT /destination` | Same as in the web (Oct 14): `GET` masks the key |
-  | `GET /destination/secrets` | **Only on the socket** (the web answers `404`): `200 {"streamId": "…", "passphrase": "…"}` in clear, as saved (`""` when unset), also with `managedBy: eirl`. `Cache-Control: no-store`; never logged |
+  | `GET /destination/secrets` | **Only on the socket** (the web answers `404`): `200 {"streamId", "passphrase", "key", "password"}` of the active destination in clear, as saved (`""` when unset), also with `managedBy: eirl`. `Cache-Control: no-store`; never logged |
+  | `GET/POST /destinations`, `PUT/DELETE /destinations/{id}`, `POST /destinations/{id}/activate` | Same as in the web (Oct 15): the saved destinations, masked |
+  | `GET /destinations/{id}/secrets` | **Only on the socket**: that destination's four secrets in clear, `no-store`, never logged |
   | `GET /status` | Same as in the web (Oct 14): the SSE snapshot, without secrets |
   | `PUT /uplinks/{interface}`, `PUT /input`, `GET /sources` | Same as in the web (Oct 14) |
   | `GET /modems`, `PUT /modems/{id}`, `POST /modems/{id}/{pin,reset,subnet}` | Same as in the web ([`MODEMS.md`](MODEMS.md) §7). The PIN typed on the screen comes here directly, never through the engine's socket nor its state |
@@ -712,10 +789,23 @@ The contract (routes, messages, close codes, configuration) is `devops/docs/acti
 - **Linking**: `POST /encoders/pairing` → the web shows `XXXX-XXXX` and `<-cloud-app>/encoders/link?pairing=XXXX-XXXX`
   → polling `/token` every `interval` until approved, denied (reason in `lastError`), `410` or 10 min.
   A `429` while polling doubles the interval (max. 30 s).
-- **Who manages the destination** (`managedBy`): the link decides it (`cloud.json`), not the
-  `EIRL_MANAGED_BY` key of the `.env` (`config.Store.ManagedBy`). That way linking or unlinking does not rewrite the
-  `.env` and the web does not warn of "unapplied changes" that do not exist. Linked: `PUT /destination` → `409`
-  (HDMI input, rehearsal mode and uplinks can still be changed locally).
+- **Who manages the destination** (`managedBy`, Oct 15): `eirl` only while the **active** saved destination is the
+  cloud's (id `eirl`, §3 "Saved destinations"); linking alone changes nothing. The cloud's destination cannot be edited
+  or deleted locally (`409 managed`) but can be activated, and the device's own ones stay usable while linked (HDMI
+  input, output and uplinks as always).
+- **Saved destinations** ([`OUTPUTS.md`](OUTPUTS.md) §10): `config.set` manages only the `eirl` destination: created
+  and made active the first time, updated later without changing which one is active, removed with
+  `destination: null` (if it was active, nothing is: output off). `destination.videoCodec` (`h264|h265`, optional)
+  sets its codec (H.265 when created); its bitrates are the wire's. Output and EDID stay global: `start`/`stop`
+  stream to the **active** destination, whichever it is. Unlinking removes the `eirl` destination (if active: nothing
+  active, output off). The reported `destination` is the cloud's when it is the active one, in the shape the cloud
+  already parses (`host`, `port`, `transport` `srt|srtla`, `latencyMs`, `streamIdSet`, plus `kind`, `protocol`,
+  `codec`), and `null` otherwise: the cloud refuses the **whole** report for anything else. The new
+  `activeDestination` (`kind` `eirl|local`, `protocol`, `codec`) says which one is active; of a local one nothing
+  else. `video`/`audio` report the cloud destination's (else the active one's). Capabilities add `rtmp`, `rtmps`,
+  `udp`, `h265`, `destinations` and `rist` (if `ristsender` is installed), after the ones the cloud knows (it keeps
+  the first 16 before filtering); reasons `tls_failed` and `clock_not_synced` pass to the cloud, which maps the ones it
+  does not know to `internal`.
 - **Channel**: `wss://<apiBase>/encoders/connect`, `Authorization: Bearer`, subprotocol `eirl-encoder.v1`,
   library `github.com/coder/websocket` (pure Go, no dependencies: the binary stays static,
   10.6 → 11.5 MB). Reconnection 1 → 60 s with ±30 % jitter, from 1 s again after 60 s connected; after

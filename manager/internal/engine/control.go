@@ -215,6 +215,8 @@ func (e *Engine) command(cmd string, msg map[string]any) (bool, string) {
 			return false, "bad_request"
 		}
 		return e.setPreview(on)
+	case "output_config":
+		return e.reloadOutput()
 	case "output", "lock":
 		on, ok := msg["on"].(bool)
 		if !ok {
@@ -366,6 +368,7 @@ func (e *Engine) outputState() OutputState {
 	i := e.out.Info()
 	o.Mode, o.State, o.Reason, o.Detail = i.Mode, i.State, i.Reason, i.Detail
 	o.Kbps, o.InFPS, o.EncFPS, o.EncMbps, o.SentKbps, o.RTTMs = i.Kbps, i.InFPS, i.EncFPS, i.EncMbps, i.SentKbps, i.RTTMs
+	o.Protocol, o.Codec, o.Size, o.FPS = i.Protocol, i.Codec, i.Size, i.FPS
 	return o
 }
 

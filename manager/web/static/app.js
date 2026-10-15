@@ -466,9 +466,13 @@ function renderStatus(st) {
     setStat('st-audio', au[0], au[1], au[2]);
   }
 
-  // SRT
+  // Connection: the output's protocol and codec (OUTPUTS.md §8-9) and the sender's statistics when it has them (every
+  // protocol but UDP). An older app has neither field: its transport (srt or srtla) is the protocol
   const mode = state.dest ? state.dest.mode : '';
   const reason = (r) => (REASONS.includes(r) ? t('reason.' + r) : r);
+  const mo = (st.mixer && st.mixer.output) || {};
+  const proto = st.protocol || mo.protocol || st.transport || '';
+  const codec = codecLabel(st.codec || mo.codec);
   if (st.output === 'off' && running) {
     setStat('st-srt', t('srt.off'), t('srt.offSub'), '');
   } else if (os.state === 'error' || (os.state === 'connecting' && os.reason)) {
@@ -479,8 +483,13 @@ function renderStatus(st) {
     // With the adaptive bitrate, the encoder's right now (below the maximum = the network gives no more)
     const br = st.bitrate ? ' · ' + t('srt.video', { cur: num(st.bitrate.kbps / 1000, 1), max: num(st.bitrate.maxKbps / 1000, 1) }) : '';
     const low = st.bitrate && st.bitrate.kbps < st.bitrate.maxKbps;
-    setStat('st-srt', st.transport === 'srtla' ? t('srt.connectedSrtla') : t('srt.connected'),
-      t('srt.stats', { rtt: num(s.rttMs, 0), mbps: num(s.sendMbps, 1) }) + loss + br, 'ok', s.lossPct > 1 || low ? 'warn' : '');
+    const re = s.pktRetrans > 0 ? ' · ' + t('conn.retrans', { n: s.pktRetrans }) : '';
+    setStat('st-srt', proto ? t('conn.connected', { proto: protoLabel(proto) }) : t('srt.connected'),
+      (codec ? codec + ' · ' : '') + t('srt.stats', { rtt: num(s.rttMs, 0), mbps: num(s.sendMbps, 1) }) + re + loss + br, 'ok', s.lossPct > 1 || low ? 'warn' : '');
+  } else if (os.state === 'on' && proto === 'udp') {
+    // UDP: no connection and no statistics, only what the encoder sends
+    const kbps = mo.kbps > 0 ? t('unit.mbps', { v: num(mo.kbps / 1000, 1) }) : '';
+    setStat('st-srt', t('conn.sending', { proto: protoLabel(proto) }), [codec, kbps].filter(Boolean).join(' · '), 'ok');
   } else if (svc.phase === 'streaming' && st.pendingRestart) {
     // the saved mode is not the running one yet: cannot tell whether it waits for a client or the relay
     setStat('st-srt', t('phase.noConnection'), t('srt.pending'), '');
@@ -507,6 +516,7 @@ function renderStatus(st) {
   setStat('st-sys', temp ? t('board.temp', { c: num(temp, 0) }) : '—', sub, temp >= 80 ? 'bad' : temp >= 70 ? 'warn' : '', subCls);
 
   renderUplinks(st, running);
+  maybeReloadDests();
   renderWiFi(st.network || null, st.wifi || null);
   renderCameras(st.network || null);
   for (const fn of hooks.status) fn(st);
@@ -520,17 +530,14 @@ function renderStatus(st) {
   }
 }
 
-const REASONS = ['no_destination', 'no_uplinks', 'relay_unreachable', 'rejected', 'connection_lost', 'encoder_error', 'internal'];
+const REASONS = ['no_destination', 'no_uplinks', 'relay_unreachable', 'rejected', 'tls_failed', 'clock_not_synced', 'connection_lost', 'encoder_error', 'internal'];
 
 // One button: Go live ↔ Stop streaming (the preview always goes on). With the mixer the engine's mode
 // counts (output.mode, the same as status.output): Go live from the encoder's screen shows at once,
 // without waiting for the 2 s poll
 function renderLiveBtn() {
-  const st = state.status;
-  if (!st) return;
-  const running = st.service.state === 'active' || st.service.state === 'activating';
-  const mo = state.mixer && state.mixer.output;
-  const emitting = running && (mo ? mo.mode : st.output) === 'on';
+  if (!state.status) return;
+  const emitting = outputOn();
   const live = $('btn-live');
   live.textContent = emitting ? t('live.stop') : t('live.start');
   live.dataset.action = emitting ? 'off' : 'on';
@@ -1255,7 +1262,10 @@ function renderUplinks(st, running) {
   card.hidden = !mods.length && (!st.uplinks || (!srtla && list.length < 2));
   if (card.hidden) return;
   const live = srtla && running && st.output === 'on';
-  $('uplinks-mode').textContent = srtla ? 'SRTLA' : t('uplinks.noSrtla');
+  // RIST bonds the checked links like SRTLA; RTMP leaves through the healthiest one (OUTPUTS.md §4, §6)
+  const tr = st.transport;
+  $('uplinks-mode').textContent = srtla ? 'SRTLA' : tr === 'rist' ? 'RIST'
+    : tr === 'rtmp' || tr === 'rtmps' ? t('uplinks.single1', { proto: tr.toUpperCase() }) : t('uplinks.noSrtla');
   const used = list.filter((u) => (live ? u.inUse : !u.disabled && !u.conflict && !u.noInternet)).length;
   const conflict = list.some((u) => u.conflict);
   const warn = $('uplinks-warn');
@@ -1660,8 +1670,18 @@ function toast(msg, isError) {
   toast.timer = setTimeout(() => { el.hidden = true; }, isError ? 8000 : 4000);
 }
 
-// Someone is receiving: only then a confirmation is asked before cutting
-const onAir = () => !!(state.status && state.status.service.phase === 'streaming' && state.status.srt);
+// Someone is receiving: only then a confirmation is asked before cutting. UDP has no statistics: its output's state
+const onAir = () => !!(state.status && state.status.service.phase === 'streaming' &&
+  (state.status.srt || (state.status.outputState && state.status.outputState.state === 'on')));
+
+// The output is on, or trying to be (Go live pressed): switching or applying a destination restarts it
+function outputOn() {
+  const st = state.status;
+  if (!st) return false;
+  const running = st.service.state === 'active' || st.service.state === 'activating';
+  const mo = state.mixer && state.mixer.output;
+  return running && (mo ? mo.mode : st.output) === 'on';
+}
 
 async function setOutput(output) {
   if (output === 'off' && onAir() && !confirm(t('live.stopConfirm'))) return;
@@ -1816,7 +1836,14 @@ $('cloud-unlink').addEventListener('click', () => cloudUnlink(true));
 
 // --- Destination -----------------------------------------------------------------------------
 
+// The active destination (GET /destination: also the EDID and the output saved) and, with an app that has them, the
+// saved destinations
 async function loadDestination() {
+  loadDestinations();
+  loadActiveDest();
+}
+
+async function loadActiveDest() {
   try { renderDest(await api('GET', '/destination')); } catch (_) { /* retried when saving */ }
 }
 
@@ -1840,7 +1867,7 @@ function renderDest(d) {
     const dd = document.createElement('dd'); dd.textContent = v;
     return [dt, dd];
   }));
-  $('dest-edit').hidden = d.managedBy === 'eirl' || !$('dest-form').hidden;
+  $('dest-edit').hidden = d.managedBy === 'eirl' || !$('dest-form').hidden || !!state.dl;
 }
 
 function destPlaceholders() {
@@ -1874,7 +1901,7 @@ function closeForm() {
   f.reset(); // also wipes what was typed in the secret fields
   f.hidden = true;
   $('dest-view').hidden = false;
-  $('dest-edit').hidden = state.dest && state.dest.managedBy === 'eirl';
+  $('dest-edit').hidden = (state.dest && state.dest.managedBy === 'eirl') || !!state.dl;
 }
 
 function clearErrors() {
@@ -1935,6 +1962,543 @@ $('dest-form').addEventListener('submit', async (ev) => {
     }
   }
 });
+
+// --- Saved destinations (OUTPUTS.md §9.3, §11) ---------------------------------------------------
+// Several destinations, one active (what engine.env holds). The list replaces the single destination's card when
+// the app has GET /destinations; an older app answers 404 and the card stays as it was (state.dl = null). Secrets
+// never come in clear: a set one shows masked, an empty field leaves it as it is and «Remove» clears it.
+
+const PROTOS = ['srt', 'srtla', 'rtmp', 'rtmps', 'rist', 'udp'];
+const PROTO_LABELS = { srt: 'SRT', srtla: 'SRTLA', rtmp: 'RTMP', rtmps: 'RTMPS', rist: 'RIST', udp: 'UDP/RTP' };
+const protoLabel = (p) => PROTO_LABELS[p] || String(p || '').toUpperCase();
+const CODEC_LABELS = { h264: 'H.264', h265: 'H.265' };
+const codecLabel = (c) => CODEC_LABELS[c] || '';
+// The platforms' names are brands, the same in every language; «Custom» is translated
+const TPL_NAMES = { eirl: 'EnhancedIRL', twitch: 'Twitch', youtube: 'YouTube', kick: 'Kick', facebook: 'Facebook' };
+const tplName = (id) => (id === 'custom' ? t('dests.tplCustom') : TPL_NAMES[id] || id);
+const DESTS_MAX = 16;
+// A new destination's latency by protocol (the app's defaults: SRT 200 ms, SRTLA 2000, the RIST buffer 1000)
+const LATENCY_DEFAULT = { srt: 200, srtla: 2000, rist: 1000 };
+// Protocols that share a server and differ in the scheme (srt ↔ srtla, rtmp ↔ rtmps)
+const family = (p) => (p === 'srtla' ? 'srt' : p === 'rtmps' ? 'rtmp' : p);
+const enc = encodeURIComponent;
+
+async function loadDestinations() {
+  state.dlAt = Date.now();
+  let r;
+  try {
+    r = await api('GET', '/destinations', undefined, { quiet: true });
+  } catch (e) {
+    if (e.status === 404) destsMode(false); // an older app: the single destination
+    else if (e.status === 401) showLogin();
+    return;
+  }
+  renderDests(r);
+}
+
+// List mode (true) or the single destination of an older app (false)
+function destsMode(on) {
+  if (!on) state.dl = null;
+  $('dests').hidden = !on;
+  if (on) {
+    $('dest-view').hidden = true;
+    $('dest-form').hidden = true;
+    $('dest-edit').hidden = true;
+  } else {
+    $('dests-add').hidden = true;
+    if ($('dest-form').hidden) {
+      $('dest-view').hidden = false;
+      $('dest-edit').hidden = !!(state.dest && state.dest.managedBy === 'eirl');
+    }
+  }
+}
+
+// force: repaint even if nothing changed (a language change). Without it, the rows are only rebuilt when the list
+// changes: a refresh must not move a button under the finger
+function renderDests(r, force) {
+  const key = JSON.stringify(r);
+  const same = !force && state.dl && state.dlKey === key;
+  state.dl = r;
+  state.dlKey = key;
+  destsMode(true);
+  const list = r.destinations || [];
+  const busy = !$('dd-form').hidden || !$('dests-pick').hidden;
+  $('dests-add').hidden = busy || list.length >= DESTS_MAX;
+  $('dests-list').hidden = !$('dd-form').hidden;
+  $('dests-empty').hidden = list.length > 0 || !$('dd-form').hidden;
+  if (same) return;
+  $('dests-list').replaceChildren(...list.map(destRow));
+}
+
+function smallBtn(label, cls, fn) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'btn small' + (cls ? ' ' + cls : '');
+  b.textContent = label;
+  b.addEventListener('click', () => fn(b));
+  return b;
+}
+
+// The server as a row shows it: without the scheme (the protocol is beside it)
+function destServer(d) {
+  if (d.urlInvalid) return t('dest.urlInvalid');
+  if (!d.url) return t('dests.noServer');
+  if (d.mode === 'listener') return t('dests.listening', { port: d.url.replace(/^.*:/, '') });
+  return d.url.replace(/^[a-z]+:\/\//i, '');
+}
+
+function destRow(d) {
+  const li = document.createElement('li');
+  li.className = d.active ? 'on' : '';
+  const mark = document.createElement('i');
+  mark.className = 'dmark';
+  const info = document.createElement('div');
+  const head = document.createElement('div');
+  head.className = 'dname';
+  const name = document.createElement('span');
+  name.className = 'name';
+  name.textContent = d.name;
+  head.append(name);
+  if (d.active) {
+    const b = document.createElement('span');
+    b.className = 'dbadge';
+    b.textContent = t('dests.active');
+    head.append(b);
+  }
+  const meta = document.createElement('span');
+  meta.className = 'meta';
+  meta.textContent = [protoLabel(d.protocol), codecLabel(d.videoCodec), destServer(d)].filter(Boolean).join(' · ');
+  info.append(head, meta);
+  if (d.managed) {
+    const m = document.createElement('span');
+    m.className = 'dmanaged';
+    m.textContent = t('dests.managed');
+    info.append(m);
+  }
+  const acts = document.createElement('div');
+  acts.className = 'acts';
+  if (!d.active) acts.append(smallBtn(t('dests.use'), '', (b) => activateDest(d, b)));
+  if (!d.managed) acts.append(smallBtn(t('common.edit'), 'ghost', () => openDestForm(d)));
+  li.append(mark, info, acts);
+  return li;
+}
+
+// A question in the page instead of confirm(): the box's text and its two buttons, true on «yes». A new question
+// answers the one before with false
+function askInline(box, text, yesLabel, danger) {
+  if (box.done) box.done(false);
+  box.querySelector('p').textContent = text;
+  const yes = box.querySelector('[data-ask="yes"]');
+  yes.textContent = yesLabel;
+  yes.className = 'btn small ' + (danger ? 'danger' : 'primary');
+  box.hidden = false;
+  box.scrollIntoView({ block: 'nearest' });
+  yes.focus();
+  return new Promise((resolve) => {
+    box.done = (v) => {
+      box.hidden = true;
+      box.done = null;
+      box.onclick = null;
+      resolve(v);
+    };
+    box.onclick = (ev) => {
+      const a = ev.target.closest('[data-ask]');
+      if (a) box.done(a.dataset.ask === 'yes');
+    };
+  });
+}
+
+function closeAsk(box) {
+  if (box.done) box.done(false);
+}
+
+// Activating while on air restarts the output (1-2 s): asked first, in the page. asked: the form already asked
+async function activateDest(d, b, asked) {
+  if (!asked && outputOn() && !(await askInline($('dests-ask'), t('dests.switchConfirm', { name: d.name }), t('dests.switch')))) return;
+  if (b) b.disabled = true;
+  try {
+    const r = await api('POST', `/destinations/${enc(d.id)}/activate`, { apply: true });
+    renderDests(r);
+    toast(r.restarted ? t('dests.switchedRestart', { name: d.name }) : t('dests.switched', { name: d.name }));
+    loadActiveDest();
+    refreshStatus();
+  } catch (e) {
+    toast(e.message, true);
+    loadDestinations();
+  } finally {
+    if (b) b.disabled = false;
+  }
+}
+
+// «Add»: first the template (its protocols, server, codecs and maximum), then its form. The cloud's own destination
+// is not added by hand while there is one
+function openPicker() {
+  const r = state.dl;
+  if (!r) return;
+  const managed = (r.destinations || []).some((d) => d.managed);
+  const tpls = (r.templates || []).filter((x) => !(managed && x.id === 'eirl'));
+  $('dests-tpls').replaceChildren(...tpls.map((x) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn';
+    const n = document.createElement('span');
+    n.textContent = tplName(x.id);
+    const s = document.createElement('small');
+    s.textContent = (x.protocols || []).map(protoLabel).join(' · ');
+    b.append(n, s);
+    b.addEventListener('click', () => openDestForm(null, x.id));
+    return b;
+  }));
+  closeAsk($('dests-ask'));
+  $('dests-pick').hidden = false;
+  $('dests-add').hidden = true;
+  const first = $('dests-tpls').querySelector('button');
+  if (first) first.focus();
+}
+
+function closePicker() {
+  $('dests-pick').hidden = true;
+  if (state.dl) renderDests(state.dl);
+}
+
+// A template by id; an unknown one (a newer app) allows everything, like «custom»
+function tplOf(id) {
+  const x = ((state.dl && state.dl.templates) || []).find((v) => v.id === id);
+  return x || { id: id || 'custom', protocols: PROTOS, url: '', codecs: ['h264', 'h265'], maxVideoKbps: 20000, keyRequired: false };
+}
+
+// The other protocol of the same server: the scheme changes, and an explicit default port goes (RTMP 1935, RTMPS 443)
+function swapScheme(url, p) {
+  const m = /^([a-z]+):\/\/(.*)$/i.exec(url || '');
+  if (!m || m[1].toLowerCase() === p) return url;
+  let rest = m[2];
+  if (family(p) === 'rtmp') rest = rest.replace(/^([^/?#]*?):(443|1935)(?=[/?#]|$)/, '$1');
+  return `${p}://${rest}`;
+}
+
+// The template's server for a protocol: its own (urls, e.g. YouTube's RTMP and RTMPS hosts differ), else its
+// default one with the protocol's scheme
+function tplURL(tpl, p) {
+  if (tpl.urls && tpl.urls[p]) return tpl.urls[p];
+  return tpl.url ? swapScheme(tpl.url, p) : '';
+}
+
+// A name not used yet: «Twitch», «Twitch 2»…
+function freeName(base) {
+  const used = new Set(((state.dl && state.dl.destinations) || []).map((d) => d.name));
+  if (!used.has(base)) return base;
+  for (let i = 2; ; i++) if (!used.has(`${base} ${i}`)) return `${base} ${i}`.slice(0, 32);
+}
+
+// d: the destination to edit, or null with tplId for a new one
+function openDestForm(d, tplId) {
+  const tpl = tplOf(d ? d.template : tplId);
+  const protos = tpl.protocols && tpl.protocols.length ? tpl.protocols.filter((p) => PROTOS.includes(p)) : PROTOS.slice();
+  if (d && d.protocol && !protos.includes(d.protocol)) protos.push(d.protocol);
+  const codecs = tpl.codecs && tpl.codecs.length ? tpl.codecs.slice() : ['h264', 'h265'];
+  if (d && d.videoCodec && !codecs.includes(d.videoCodec)) codecs.push(d.videoCodec);
+  const max = tpl.maxVideoKbps || 20000;
+  state.dd = { d, tpl, protos, codecs, max, proto: '', locked: false };
+  const f = $('dd-form');
+  f.reset();
+  clearDestErrors();
+  $('dd-proto').replaceChildren(...protos.map((p) => option(p, protoLabel(p))));
+  $('dd-codec').replaceChildren(...codecs.map((c) => option(c, codecLabel(c) || c)));
+  $('dd-vbr').max = max;
+  $('dd-vmin').max = max;
+  const p = d ? d.protocol : protos[0];
+  $('dd-proto').value = p;
+  $('dd-name').value = d ? d.name : freeName(tplName(tpl.id));
+  $('dd-url').value = d ? (d.urlInvalid ? '' : d.url || '') : tplURL(tpl, p);
+  $('dd-mode').value = d && d.mode === 'listener' ? 'listener' : 'caller';
+  $('dd-lat').value = (d && d.latencyMs) || LATENCY_DEFAULT[p] || '';
+  $('dd-rprof').value = d && d.ristProfile === 'simple' ? 'simple' : 'main';
+  $('dd-user').value = (d && d.username) || '';
+  $('dd-codec').value = d && d.videoCodec ? d.videoCodec : codecs[0];
+  $('dd-vbr').value = d ? d.videoBitrateKbps : Math.min(6000, max);
+  $('dd-vmin').value = d ? d.videoMinBitrateKbps : 1000;
+  $('dd-adaptive').checked = d ? !!d.adaptiveBitrate : true;
+  $('dd-abr').value = String((d && d.audioBitrateKbps) || 128);
+  $('dd-size').value = (d && d.outputSize) || '';
+  $('dd-fps').value = d && d.outputFps === 'half' ? 'half' : 'full';
+  state.dd.proto = p;
+  // The template's server is kept as it is unless the user asks to change it (Kick and custom have none: free)
+  state.dd.locked = !!tplURL(tpl, p) && $('dd-url').value === tplURL(tpl, p);
+  closeAsk($('dests-ask'));
+  $('dests-pick').hidden = true;
+  f.hidden = false;
+  destLayout();
+  renderDests(state.dl);
+  f.scrollIntoView({ block: 'nearest' });
+  $('dd-name').focus();
+}
+
+function closeDestForm() {
+  const f = $('dd-form');
+  closeAsk($('dd-ask'));
+  f.reset(); // also wipes what was typed in the secret fields
+  f.hidden = true;
+  state.dd = null;
+  if (state.dl) renderDests(state.dl);
+}
+
+// The secret fields: a set one is shown masked as the placeholder and can be removed; an empty field is not sent
+function secretField(input, clearRow, view, placeholder, canClear) {
+  const set = !!(view && view.set);
+  $(input).placeholder = set ? t('dest.unchanged', { v: view.masked || '••••••' }) : placeholder;
+  $(clearRow).hidden = !set || !canClear;
+}
+
+// Everything that depends on the protocol (and the language): which fields, their labels, hints and notes
+function destLayout() {
+  const dd = state.dd;
+  if (!dd) return;
+  const p = $('dd-proto').value;
+  const fam = family(p);
+  const d = dd.d;
+  const name = tplName(dd.tpl.id);
+  for (const g of document.querySelectorAll('#dd-form .dd-g')) g.hidden = !g.dataset.protos.split(' ').includes(p);
+  // The passphrase and SRP (user and password) are RIST's main profile only (OUTPUTS.md §6)
+  const ristSimple = p === 'rist' && $('dd-rprof').value !== 'main';
+  $('dd-srp').hidden = p !== 'rist' || ristSimple;
+  if (ristSimple) $('dd-pass-g').hidden = true;
+  $('dd-head').textContent = d ? t('dests.editTitle', { name: d.name }) : t('dests.newTitle', { name });
+  // The server
+  const url = $('dd-url');
+  const label = { srt: 'dest.url', rtmp: 'dests.server', rist: 'dests.server', udp: 'dests.address' }[fam] || 'dests.server';
+  $('dd-url-label').textContent = t(label);
+  url.placeholder = { srt: t('dest.urlPlaceholder'), rtmp: `${p}://live.example.com/app`, rist: 'rist://192.168.1.50:5000', udp: 'udp://192.168.1.50:5000' }[fam] || '';
+  url.readOnly = dd.locked;
+  $('dd-url-unlock').hidden = !dd.locked;
+  const hint = { srt: 'dest.urlHint', rtmp: 'dests.urlRtmpHint', rist: 'dests.urlRistHint', udp: 'dests.urlUdpHint' }[fam];
+  const urlHint = $('dd-url-hint');
+  if (dd.locked) urlHint.textContent = t('dests.urlLocked', { name });
+  else urlHint.replaceChildren(...(hint ? tNodes(hint) : []));
+  // Latency (SRT) or buffer (RIST)
+  const rist = p === 'rist';
+  $('dd-lat-label').textContent = rist ? t('dests.buffer') : t('dest.latency');
+  $('dd-lat-hint').textContent = rist ? t('dests.bufferHint') : t('dest.latencyHint');
+  $('dd-lat').min = rist ? 50 : 20;
+  // Secrets
+  secretField('dd-sid', 'dd-sid-clear-row', d && d.streamId, t('dest.streamIdPlaceholder'), true);
+  secretField('dd-key', 'dd-key-clear-row', d && d.key, dd.tpl.keyRequired ? t('dests.keyPlaceholder') : t('common.optional'), !dd.tpl.keyRequired);
+  secretField('dd-pass', 'dd-pass-clear-row', d && d.passphrase, t('common.optional'), true);
+  secretField('dd-pw', 'dd-pw-clear-row', d && d.password, t('common.optional'), true);
+  // Video: what the template takes
+  const only = dd.codecs.length === 1;
+  $('dd-codec').disabled = only;
+  $('dd-codec-hint').hidden = !only || dd.tpl.id === 'custom';
+  $('dd-codec-hint').textContent = only ? t('dests.codecOnly', { name, codec: codecLabel(dd.codecs[0]) }) : '';
+  $('dd-max-hint').hidden = dd.max >= 20000;
+  $('dd-max-hint').textContent = t('dests.maxKbps', { name, max: dd.max });
+  $('dd-vmin-row').hidden = !$('dd-adaptive').checked;
+  // Buttons: the active one saves and applies; another one saves and becomes the active one. The cloud's and the
+  // active one are not deleted
+  const active = !!(d && d.active);
+  $('dd-delete').hidden = !d || active || d.managed;
+  $('dd-apply').textContent = active ? t('common.saveApply') : t('dests.saveUse');
+  $('dd-apply-hint').hidden = !active;
+  destSingleNote();
+}
+
+// RTMP, RTMPS and RIST go over one connection: with more than one internet link, say that they do not bond
+function destSingleNote() {
+  if (!state.dd) return;
+  const p = $('dd-proto').value;
+  const links = ((state.status && state.status.uplinks) || []).filter((u) => !u.disabled && !u.conflict && !u.noInternet).length;
+  const note = $('dd-single');
+  note.hidden = !['rtmp', 'rtmps'].includes(p) || links < 2; // RIST bonds the links (OUTPUTS.md §6)
+  if (!note.hidden) note.textContent = t('dests.singleLink', { proto: protoLabel(p) });
+}
+
+// A protocol picked (or implied by a pasted URL). Same family: the server stays with the new scheme; another one:
+// the template's server, or empty. SRTLA (mobile networks) brings its latency and the adaptive bitrate in sight
+function switchProto(p, fromUrl) {
+  const dd = state.dd;
+  const prev = dd.proto;
+  if (p === prev) return;
+  dd.proto = p;
+  $('dd-proto').value = p;
+  const url = $('dd-url');
+  if (!fromUrl) {
+    const own = url.value.trim() && url.value.trim() !== tplURL(dd.tpl, prev);
+    if (family(p) === family(prev) && own) url.value = swapScheme(url.value.trim(), p);
+    else url.value = tplURL(dd.tpl, p);
+    dd.locked = !!tplURL(dd.tpl, p) && url.value === tplURL(dd.tpl, p);
+  }
+  const lat = $('dd-lat');
+  const n = Number(lat.value);
+  if (p === 'srtla') {
+    if (!(fromUrl && /[?&]latency=/i.test(url.value)) && n < LATENCY_DEFAULT.srtla) lat.value = LATENCY_DEFAULT.srtla;
+    $('dd-adaptive').checked = true;
+  } else if (LATENCY_DEFAULT[p] && (!n || family(p) !== family(prev))) {
+    lat.value = LATENCY_DEFAULT[p];
+  }
+  destLayout();
+}
+
+// A pasted URL: its scheme says the protocol (when the template has it); an SRT one carries its latency and mode
+// in the query (the app also takes its stream ID and passphrase from it)
+function destUrlInput() {
+  const dd = state.dd;
+  if (!dd || dd.locked) return;
+  const v = $('dd-url').value.trim();
+  const m = /^([a-z]+):\/\/([^/?#]*)/i.exec(v);
+  if (!m) return;
+  const scheme = m[1].toLowerCase();
+  const p = scheme === 'rtp' ? 'udp' : scheme;
+  if (dd.protos.includes(p)) switchProto(p, true);
+  if (family(dd.proto) !== 'srt') return;
+  const q = new URLSearchParams(v.includes('?') ? v.slice(v.indexOf('?') + 1) : '');
+  const lat = Number(q.get('latency'));
+  if (lat > 0) $('dd-lat').value = lat;
+  const mode = q.get('mode');
+  if (mode === 'caller' || mode === 'listener') $('dd-mode').value = mode;
+  else if (dd.proto === 'srt' && /^:\d+$/.test(m[2])) $('dd-mode').value = 'listener';
+  else if (dd.proto === 'srt' && m[2] && !m[2].startsWith(':')) $('dd-mode').value = 'caller';
+}
+
+// The patch (OUTPUTS.md §9.3): the protocol's fields only. Secrets: absent = unchanged, null = removed
+function destBody() {
+  const p = $('dd-proto').value;
+  const b = {
+    name: $('dd-name').value.trim(), protocol: p, url: $('dd-url').value.trim(),
+    videoCodec: $('dd-codec').value, videoBitrateKbps: Number($('dd-vbr').value), adaptiveBitrate: $('dd-adaptive').checked,
+    videoMinBitrateKbps: Number($('dd-vmin').value), audioBitrateKbps: Number($('dd-abr').value),
+    outputSize: $('dd-size').value, outputFps: $('dd-fps').value,
+  };
+  // UDP has no statistics for the adaptive bitrate to read: a fixed bitrate
+  if (p === 'udp') b.adaptiveBitrate = false;
+  const secret = (input, clear, key) => {
+    if ($(clear).checked) b[key] = null;
+    else if ($(input).value.trim()) b[key] = $(input).value.trim();
+  };
+  const fam = family(p);
+  if (fam === 'srt') {
+    b.latencyMs = Number($('dd-lat').value);
+    b.mode = p === 'srtla' ? 'caller' : $('dd-mode').value;
+    secret('dd-sid', 'dd-sid-clear', 'streamId');
+    secret('dd-pass', 'dd-pass-clear', 'passphrase');
+  } else if (fam === 'rtmp') {
+    secret('dd-key', 'dd-key-clear', 'key');
+  } else if (p === 'rist') {
+    b.latencyMs = Number($('dd-lat').value);
+    b.ristProfile = $('dd-rprof').value;
+    if (b.ristProfile === 'main') {
+      secret('dd-pass', 'dd-pass-clear', 'passphrase');
+      b.username = $('dd-user').value.trim();
+      secret('dd-pw', 'dd-pw-clear', 'password');
+    } else {
+      // The simple profile has no passphrase nor user: the saved ones go (the app refuses them with it)
+      b.username = '';
+      const d = state.dd.d;
+      if (d && d.password && d.password.set) b.password = null;
+      if (d && d.passphrase && d.passphrase.set) b.passphrase = null;
+    }
+  }
+  return b;
+}
+
+function clearDestErrors() {
+  for (const p of document.querySelectorAll('#dd-form .err')) p.hidden = true;
+  for (const i of document.querySelectorAll('#dd-form .invalid')) i.classList.remove('invalid');
+}
+
+// 400 with fields: each message next to its input (the ones without an input, together below)
+function showDestErrors(e) {
+  const rest = [];
+  if (e.status === 400 && e.data && e.data.fields) {
+    for (const [k, msg] of Object.entries(e.data.fields)) {
+      const p = document.querySelector(`#dd-form .err[data-for="${k}"]`);
+      const input = document.querySelector(`#dd-form [name="${k}"]`);
+      if (input) input.classList.add('invalid');
+      if (p && !p.parentElement.closest('[hidden]')) { p.textContent = msg; p.hidden = false; } else rest.push(msg);
+    }
+  } else {
+    rest.push(e.message);
+  }
+  $('dd-err').textContent = rest.join(' ');
+  $('dd-err').hidden = !rest.length;
+  const first = document.querySelector('#dd-form .err:not([hidden])');
+  if (first) first.scrollIntoView({ block: 'nearest' });
+}
+
+async function saveDest(ev) {
+  ev.preventDefault();
+  const dd = state.dd;
+  if (!dd) return;
+  const d = dd.d;
+  const go = !!(ev.submitter && ev.submitter.value === 'apply');
+  const active = !!(d && d.active);
+  const name = $('dd-name').value.trim() || (d && d.name) || tplName(dd.tpl.id);
+  // On air, applying the active one or switching to this one restarts the output (1-2 s)
+  if (go && outputOn() && !(await askInline($('dd-ask'), active ? t('dests.applyConfirm') : t('dests.switchConfirm', { name }),
+    active ? t('dests.apply') : t('dests.switch')))) return;
+  clearDestErrors();
+  const body = destBody();
+  let v;
+  try {
+    if (d) v = await api('PUT', `/destinations/${enc(d.id)}`, { ...body, apply: go && active });
+    else v = await api('POST', '/destinations', { ...body, template: dd.tpl.id });
+  } catch (e) {
+    showDestErrors(e);
+    return;
+  }
+  closeDestForm();
+  if (go && !active) {
+    activateDest(v, null, true);
+    return;
+  }
+  if (active) {
+    savedToast(v, go);
+    loadActiveDest();
+  } else {
+    toast(t('dests.saved', { name: v.name || name }));
+  }
+  loadDestinations();
+}
+
+async function deleteDest() {
+  const d = state.dd && state.dd.d;
+  if (!d) return;
+  if (!(await askInline($('dd-ask'), t('dests.deleteConfirm', { name: d.name }), t('dests.delete'), true))) return;
+  try {
+    await api('DELETE', `/destinations/${enc(d.id)}`);
+  } catch (e) {
+    showDestErrors(e);
+    return;
+  }
+  closeDestForm();
+  toast(t('dests.deleted', { name: d.name }));
+  loadDestinations();
+}
+
+$('dests-add').addEventListener('click', openPicker);
+$('dests-pick-cancel').addEventListener('click', closePicker);
+$('dd-cancel').addEventListener('click', closeDestForm);
+$('dd-form').addEventListener('submit', saveDest);
+$('dd-delete').addEventListener('click', deleteDest);
+$('dd-proto').addEventListener('change', () => switchProto($('dd-proto').value, false));
+$('dd-rprof').addEventListener('change', destLayout);
+$('dd-adaptive').addEventListener('change', () => { $('dd-vmin-row').hidden = !$('dd-adaptive').checked; });
+$('dd-url').addEventListener('input', destUrlInput);
+$('dd-url-unlock').addEventListener('click', () => {
+  if (!state.dd) return;
+  state.dd.locked = false;
+  destLayout();
+  $('dd-url').focus();
+});
+// A secret being typed and «Remove» at once: typing wins
+for (const [input, clear] of [['dd-sid', 'dd-sid-clear'], ['dd-key', 'dd-key-clear'], ['dd-pass', 'dd-pass-clear'], ['dd-pw', 'dd-pw-clear']]) {
+  $(input).addEventListener('input', () => { if ($(input).value) $(clear).checked = false; });
+}
+
+// The active destination can change from the encoder's screen: the list is read again every 20 s while the page
+// is live (on each status) and the form is closed
+function maybeReloadDests() {
+  if (state.dl && $('dd-form').hidden && Date.now() - (state.dlAt || 0) > 20000) loadDestinations();
+  destSingleNote();
+}
 
 // --- Input (sources) -------------------------------------------------------------------------
 // The catalogue (GET /sources) says what is connected and which modes each source supports: the same
@@ -2828,6 +3392,9 @@ onLangChange(() => {
   if (state.mixer) renderMixer(state.mixer);
   renderLiveBtn();
   if (state.dest) { renderDest(state.dest); destPlaceholders(); }
+  if (state.dl) renderDests(state.dl, true);
+  if (!$('dests-pick').hidden) openPicker();
+  destLayout();
   if (state.cloud) renderCloud(state.cloud);
   if (state.catalog) { if (!state.inputDirty) fillInputForm(); else { renderModeOptions(); renderSourceInfo(); } }
   if ($('wifi-nets').open && !$('wifi-nets-body').querySelector('form')) loadNets();

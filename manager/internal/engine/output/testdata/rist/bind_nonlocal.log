@@ -1,0 +1,49 @@
+1792051250.955445|0.0|[INFO] Starting ristsender version: 30 libRIST library: 0.2.20 API version: 4.13.0
+1792051250.956104|0.0|[INFO] Assigning stream-id 0 to this input
+1792051250.956748|0.0|[INFO] Starting in Main Profile Mode
+1792051250.956928|0.0|[INFO] RIST Sender Library 0.2.20
+1792051250.958901|0.0|[INFO] Link configured with maxrate=100000 bufmin=1000 bufmax=1000 reorder=15 rttmin=5 rttmax=500 congestion_control=1 min_retries=6 max_retries=20
+1792051250.959050|0.281473766928400|[INFO] Encryption is disabled for this peer
+1792051250.959405|0.281473766928400|[INFO] URL parsed successfully: Host 127.0.0.1, Port 8000
+1792051250.959554|0.281473766928400|[INFO] Starting in URL connect mode (3)
+1792051250.959716|0.281473766928400|[INFO] Binding socket to 10.9.9.9
+1792051250.959855|0.281473766928400|[ERROR] Couldn't bind to 10.9.9.9:0: Cannot assign requested address
+1792051250.959964|0.281473766928400|[INFO] Configured the starting socket receive buffer size to 419430 Bytes.
+1792051250.960067|0.281473766928400|[INFO] Configured the starting socket send buffer size to 419430 Bytes.
+1792051250.960173|0.281473766928400|[INFO] Peer cname is f480b708427e
+1792051250.960265|0.281473766928400|[INFO] rtt_min is too small (5) for the buffer size, using 1000/20 = 50ms instead
+1792051250.960359|0.281473766928400|[INFO] Setting max nacks per cycle to 88
+1792051250.960453|0.281473766928400|[INFO] Setting buffer size to 1100ms (Max buffer size + 2 * Min RTT, 1000+2*50)
+1792051250.960548|0.281473766928400|[INFO] Advertising flow_id  1937775268 and peer_id 1, 32768/1969
+1792051250.960648|0.281473766928400|[INFO] Initialized Sender Peer, connecting to receiver ...
+1792051250.960748|0.281473766928400|[INFO] Active Peer Information, IP:Port => 0.0.0.0:8000 (0), id: 1, ports: 32768->1969
+1792051250.960836|0.281473766928400|[INFO] Enabling keepalive for peer 1
+1792051250.961007|0.281473766928400|[INFO] Successfully Authenticated peer 1
+1792051250.961147|0.0|[INFO] URL parsed successfully: Host 127.0.0.1, Port 6100
+1792051250.961381|0.0|[INFO] Input socket is open and bound 127.0.0.1:6100
+1792051250.961862|0.281473766928400|[INFO] Starting master sender loop at 5 ms max jitter
+1792051250.967708|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":1937775268,"id":1,"cname":"","type":"data","profile":1,"profile_name":"main","advanced_active":false,"miface":"10.9.9.9","stats":{"quality":100,"sent":4,"ts_null":0,"received":0,"retransmitted":0,"sent_bytes":268,"retransmitted_bytes":0,"bandwidth":0,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0,"avg_rtt":50,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":0,"bytesize":0,"time_length":0,"packets_per_second":0}}}
+
+1792051250.967779|0.281473766928400|[INFO] New keepalive received. MAC: fa:ae:ad:58:65:f7 X: 0 R: 0 B: 1 A: 0 P: 0 E: 1 L: 0: N: 1 D: 1 T: 0 V: 0: J: 1 F: 0
+1792051250.967813|0.281473766928400|[INFO] Peer 1 receiver name is now: f480b708427e@127.0.0.1:8000
+1792051250.967842|0.281473766928400|[INFO] Peer 1 receiver with name f480b708427e@127.0.0.1:8000 reconnected
+1792051250.967873|0.0|[INFO] Connection Status changed for Peer 187651696247360, new status is 0, peer connected count is 1
+1792051250.967919|0.0|[INFO] Out-of-band api data received: auth,127.0.0.1:60200,127.0.0.1:8000
+1792051251.962676|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":1937775268,"id":1,"cname":"f480b708427e@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"miface":"10.9.9.9","stats":{"quality":100,"sent":199,"ts_null":0,"received":23,"retransmitted":0,"sent_bytes":219468,"retransmitted_bytes":0,"bandwidth":1285873,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0.468499990803189,"avg_rtt":13.28446793071984,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":179,"bytesize":212816,"time_length":866,"packets_per_second":206}}}
+
+1792051252.965392|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":1937775268,"id":1,"cname":"f480b708427e@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"miface":"10.9.9.9","stats":{"quality":100,"sent":227,"ts_null":0,"received":20,"retransmitted":0,"sent_bytes":254844,"retransmitted_bytes":0,"bandwidth":1692980,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":5.2072914646375628,"avg_rtt":7.7530905068653615,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":231,"bytesize":275420,"time_length":1129,"packets_per_second":204}}}
+
+1792051253.962494|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":1937775268,"id":1,"cname":"f480b708427e@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"miface":"10.9.9.9","stats":{"quality":100,"sent":217,"ts_null":0,"received":20,"retransmitted":0,"sent_bytes":243472,"retransmitted_bytes":0,"bandwidth":1965072,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":5.2641664068664555,"avg_rtt":5.9670262309349527,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":230,"bytesize":274668,"time_length":1134,"packets_per_second":202}}}
+
+1792051254.962558|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":1937775268,"id":1,"cname":"f480b708427e@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"miface":"10.9.9.9","stats":{"quality":100,"sent":199,"ts_null":0,"received":18,"retransmitted":0,"sent_bytes":223120,"retransmitted_bytes":0,"bandwidth":1861622,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":5.958083496334198,"avg_rtt":5.9526115974814244,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":222,"bytesize":265832,"time_length":1168,"packets_per_second":190}}}
+
+1792051255.966727|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":1937775268,"id":1,"cname":"f480b708427e@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"miface":"10.9.9.9","stats":{"quality":100,"sent":198,"ts_null":0,"received":20,"retransmitted":0,"sent_bytes":221884,"retransmitted_bytes":0,"bandwidth":1831339,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":5.7913343688088874,"avg_rtt":4.89666489288509,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":207,"bytesize":250604,"time_length":1167,"packets_per_second":177}}}
+
+1792051256.964541|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":1937775268,"id":1,"cname":"f480b708427e@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"miface":"10.9.9.9","stats":{"quality":100,"sent":201,"ts_null":0,"received":20,"retransmitted":0,"sent_bytes":223472,"retransmitted_bytes":0,"bandwidth":1767717,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":6.16695844228838,"avg_rtt":5.2853632228140519,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":215,"bytesize":257748,"time_length":1133,"packets_per_second":189}}}
+
+1792051257.962475|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":1937775268,"id":1,"cname":"f480b708427e@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"miface":"10.9.9.9","stats":{"quality":100,"sent":198,"ts_null":0,"received":18,"retransmitted":0,"sent_bytes":222716,"retransmitted_bytes":0,"bandwidth":1797486,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":6.46395862878574,"avg_rtt":5.5912896420391585,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":207,"bytesize":247972,"time_length":1132,"packets_per_second":182}}}
+
+1792051258.964008|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":1937775268,"id":1,"cname":"f480b708427e@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"miface":"10.9.9.9","stats":{"quality":100,"sent":200,"ts_null":0,"received":20,"retransmitted":0,"sent_bytes":216676,"retransmitted_bytes":0,"bandwidth":1645571,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":0.46137513978570732,"avg_rtt":4.7531193196595,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":213,"bytesize":248724,"time_length":1165,"packets_per_second":182}}}
+
+1792051259.966915|0.0|[INFO] {"schema_version":5,"sender-stats":{"peers":[{"flow_id":1937775268,"id":1,"cname":"f480b708427e@127.0.0.1:8000","type":"data","profile":1,"profile_name":"main","advanced_active":false,"miface":"10.9.9.9","stats":{"quality":100,"sent":197,"ts_null":0,"received":20,"retransmitted":0,"sent_bytes":218284,"retransmitted_bytes":0,"bandwidth":1766648,"retry_bandwidth":0,"ts_nulls_bandwidth":0,"bandwidth_skipped":0,"bloat_skipped":0,"retransmit_skipped":0,"rtt":7.0841675849895935,"avg_rtt":5.8609909284518364,"retry_buffer_size":1,"cooldown_time":0,"rtt_muted":false,"rtt_mute_events":0}}],"incoming_queue":{"size":204,"bytesize":243272,"time_length":1100,"packets_per_second":185}}}
+

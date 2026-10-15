@@ -130,8 +130,27 @@ func runLocal(ctx context.Context, o localOpts, log *slog.Logger) error {
 	if _, err := srv.Network.EnsureNetwork(); err != nil {
 		log.Warn("access point: could not write its name and password", "err", err)
 	}
-	// The run state the API reads: the mixer is on (live output, slots)
-	os.WriteFile(srv.RunStatePath, []byte("OUTPUT=off\nSOURCE=hdmi\nMIXER=1\nTRANSPORT=srt\n"), 0o644)
+	// The run state the API reads: the mixer is on (live output, slots). TRANSPORT carries the protocol; the engine
+	// rewrites it on output_config (OUTPUTS.md §8), here at each reading of the output configuration
+	writeRunState := func(protocol string) {
+		if protocol == "" {
+			protocol = config.ProtoSRT
+		}
+		os.WriteFile(srv.RunStatePath, []byte("OUTPUT=off\nSOURCE=hdmi\nMIXER=1\nTRANSPORT="+protocol+"\n"), 0o644)
+	}
+	writeRunState("")
+	eng.outputConfig = func() (string, string, string, float64) {
+		cfg, err := srv.Config.Load()
+		if err != nil {
+			return "", "", "", 0
+		}
+		fps := 30.0 // the simulated program is 1080p30
+		if cfg.OutputFPS == "half" {
+			fps = 15
+		}
+		writeRunState(cfg.EffectiveProtocol())
+		return cfg.EffectiveProtocol(), cfg.Codec(), cfg.OutputSize, fps
+	}
 	// A restart of the "stream" makes the engine take OUTPUT from what is saved, like the real one at start
 	unit.onStart = func() {
 		if cfg, err := srv.Config.Load(); err == nil {

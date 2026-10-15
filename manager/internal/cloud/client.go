@@ -126,6 +126,17 @@ func (c *Client) ManagedBy() string {
 	return "local"
 }
 
+// Linked: the device is linked now (CloudDevice checks it before writing a config.set).
+func (c *Client) Linked() bool { return c.linked.Load() }
+
+// CloudDestination: the destination on disk was set by the cloud (cloud.json). Only the migration to saved
+// destinations reads it (config.Store.CloudOwned); after it, the cloud's destination is the one with id eirl.
+func (c *Client) CloudDestination() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.linked.Load() && c.st.CloudDestination
+}
+
 // View: what the local web shows (GET /api/v1/cloud).
 type View struct {
 	State        string     `json:"state"` // unlinked | pairing | linked

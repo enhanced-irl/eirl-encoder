@@ -1,15 +1,17 @@
 // Package output is the encoder's hot output (MIXER.md §9, F3): emitting is hooking the output onto the
 // program while it runs, and stopping is letting it go, without touching the program.
 //
-//	program ─ tee vt ─▶ appsink outv ┐  bridges   ┌─▶ FIFO ─▶ srt-live-transmit ─▶ SRT
-//	audio   ─ tee at ─▶ appsink outa ┘──(C)──▶ [output pipeline]   (─▶ srtla_send ─▶ uplinks)
-//	                                       appsrc ov/oa ─▶ NVENC + AAC ─▶ mpegtsmux
+//	program ─ tee vt ─▶ appsink outv ┐  bridges   ┌─▶ FIFO ─▶ srt-live-transmit ─▶ SRT   (─▶ srtla_send ─▶ uplinks)
+//	audio   ─ tee at ─▶ appsink outa ┘──(C)──▶ [output pipeline] ├─▶ FIFO ─▶ eirl-send ─▶ RTMP / RTMPS
+//	                                       appsrc ov/oa ─▶       ├─▶ UDP ─▶ ristsender ─▶ RIST
+//	                                       NVENC + AAC ─▶ TS     └─▶ UDP / RTP to the network
 //
 // The output pipeline runs on the program's clock and base_time: buffers arrive with their timestamps
 // as they are, and audio and video stay together. Frames cross in C (gst.BridgePass); Go only opens,
-// watches and closes. The processes (srt-live-transmit, srtla_send with its uplinks), the statistics for
-// the app and the adaptive bitrate start and end with each emission. If the relay does not answer or
-// goes away, the output retries by itself; the program and the preview never notice.
+// watches and closes. The pipeline (codec, size, rate), the sender of the protocol (OUTPUTS.md §4), the
+// statistics for the app and the adaptive bitrate start and end with each emission, with the
+// configuration of that moment: a new one (SetConfig) only restarts the session. If the destination does
+// not answer or goes away, the output retries by itself; the program and the preview never notice.
 //
 // It is a port of scripts/engine_output.py (and the Controller of engine-run.py), which is the
 // reference: the state machine, reasons, details, retry plans and timings are the same.
@@ -78,8 +80,11 @@ type Options struct {
 	// Program is the program pipeline, with the appsinks outv and outa. Its base_time must be set (it
 	// is PLAYING) before the first session.
 	Program gst.Pipeline
-	// Desc is the output pipeline (pipeline.Platform.Output), with pipeline.FIFOPlaceholder.
-	Desc string
+	// Desc builds the output pipeline of a session for its configuration and sink
+	// (pipeline.Platform.Output); a fifo sink carries pipeline.FIFOPlaceholder.
+	Desc func(c *config.Config, sink pipeline.Sink) string
+	// Width, Height and FPS are the program's: the output's size and rate derive from them.
+	Width, Height, FPS int
 	// RunDir is where the FIFO and the run files go: RUN_DIR, or /tmp when it is not usable (the
 	// launcher passed --run-dir only when it was a writable directory).
 	RunDir string
@@ -101,6 +106,12 @@ type Info struct {
 	EncMbps  *float64 `json:"encMbps,omitempty"`
 	SentKbps *int     `json:"sentKbps,omitempty"`
 	RTTMs    *int     `json:"rttMs,omitempty"`
+	// OUTPUTS.md §8: the protocol and codec of the configuration (also while off), the size and rate
+	// while on
+	Protocol string `json:"protocol,omitempty"`
+	Codec    string `json:"codec,omitempty"`
+	Size     string `json:"size,omitempty"`
+	FPS      *int   `json:"fps,omitempty"`
 }
 
 // failure is why a session ended: a reason of the contract and a detail for the user (Spanish, as the
@@ -121,13 +132,21 @@ type rates struct{ inFPS, encFPS, encMbps float64 }
 // Output is the hot output. One goroutine runs it (opens, watches, retries, closes): at most one live
 // session at a time. Set from any goroutine.
 type Output struct {
-	cfg      *config.Config
 	media    gst.Media
 	pgm      gst.Pipeline
-	desc     string
+	desc     func(*config.Config, pipeline.Sink) string
+	width    int // the program's
+	height   int
+	fps      int
 	runDir   string
 	onChange func()
-	secrets  []config.Secret // the stream id and the passphrase, to mask their values anywhere
+
+	// The configuration: each session takes the one of its start (snapshot); SetConfig swaps it and bumps
+	// gen, which ends a live session so that the next one takes it.
+	cfgMu   sync.Mutex
+	cfg     *config.Config
+	gen     int
+	secrets []config.Secret // the configuration's secrets, to mask their values anywhere
 
 	taps [2]gst.Element // outv, outa
 	// One bridge per tap for the output's whole life, retargeted to each session's appsrcs (SetDst).
@@ -165,6 +184,7 @@ type Output struct {
 func New(o Options) (*Output, error) {
 	out := &Output{
 		cfg: o.Config, media: o.Media, pgm: o.Program, desc: o.Desc, runDir: o.RunDir, onChange: o.OnChange,
+		width: o.Width, height: o.Height, fps: o.FPS, secrets: o.Config.Secrets(),
 		state: StateOff, kbps: o.Config.VBitrate, sent: newRateWindow(2),
 		wake: make(chan struct{}, 1), done: make(chan struct{}),
 	}
@@ -173,11 +193,6 @@ func New(o Options) (*Output, error) {
 	}
 	if out.runDir == "" {
 		out.runDir = "/tmp"
-	}
-	for _, s := range []config.Secret{o.Config.SRTStreamID, o.Config.SRTPassphrase} {
-		if !s.IsZero() {
-			out.secrets = append(out.secrets, s)
-		}
 	}
 	out.session = out.runSession
 	for i, name := range []string{"outv", "outa"} {
@@ -195,14 +210,57 @@ func New(o Options) (*Output, error) {
 	return out, nil
 }
 
-// mask hides the SRT secrets of a line: the stream id and passphrase parameters, and their values
-// wherever they appear.
+// mask hides the secrets of a line: the stream id and passphrase parameters, and the values of every
+// secret of the configuration (and of the previous one: a session may still log after a swap) wherever
+// they appear.
 func (o *Output) mask(s string) string {
-	s = mask(s)
-	for _, v := range o.secrets {
+	s = maskRIST(mask(s))
+	o.cfgMu.Lock()
+	secrets := o.secrets
+	o.cfgMu.Unlock()
+	for _, v := range secrets {
 		s = strings.ReplaceAll(s, v.Reveal(), "***")
 	}
 	return s
+}
+
+// Config is the output's configuration now.
+func (o *Output) Config() *config.Config {
+	o.cfgMu.Lock()
+	defer o.cfgMu.Unlock()
+	return o.cfg
+}
+
+// SetConfig takes a new configuration (output_config, OUTPUTS.md §8): the next session uses it, and a live
+// one ends at once to restart with it. From any goroutine.
+func (o *Output) SetConfig(c *config.Config) {
+	o.cfgMu.Lock()
+	// The old secrets stay masked too: a session still running logs with them until it ends
+	o.secrets = append(c.Secrets(), o.cfg.Secrets()...)
+	o.cfg = c
+	o.gen++
+	o.cfgMu.Unlock()
+	o.mu.Lock()
+	if o.state != StateOn {
+		o.kbps = c.VBitrate
+	}
+	o.mu.Unlock()
+	elog.Event("engine", "output_config", "protocol", c.Transport, "codec", c.VCodec)
+	o.onChange()
+	o.poke()
+}
+
+// config is the configuration and its generation, for a session's start.
+func (o *Output) config() (*config.Config, int) {
+	o.cfgMu.Lock()
+	defer o.cfgMu.Unlock()
+	return o.cfg, o.gen
+}
+
+func (o *Output) genNow() int {
+	o.cfgMu.Lock()
+	defer o.cfgMu.Unlock()
+	return o.gen
 }
 
 // --- state ---
@@ -228,8 +286,21 @@ func (o *Output) Info() Info {
 	if o.want {
 		i.Mode = "on"
 	}
+	cfg := o.Config()
+	i.Protocol, i.Codec = cfg.Transport, cfg.VCodec
 	if o.state != StateOn {
 		return i
+	}
+	w, h := cfg.OutputDims(o.width, o.height)
+	if w > 0 && h > 0 {
+		i.Size = strconv.Itoa(w) + "x" + strconv.Itoa(h)
+	}
+	if o.fps > 0 {
+		f := o.fps
+		if cfg.OutputHalf {
+			f = max(1, f/2)
+		}
+		i.FPS = &f
 	}
 	k := o.kbps
 	i.Kbps = &k
@@ -356,6 +427,14 @@ func (o *Output) run() {
 		}
 		t0 := mono()
 		err := o.safeSession()
+		if errors.Is(err, errReconfig) && o.running() {
+			// A new configuration: straight to the next session, which takes it (not a failure)
+			o.mu.Lock()
+			o.lastErr = nil
+			o.mu.Unlock()
+			fails = 0
+			continue
+		}
 		if !o.running() {
 			o.mu.Lock()
 			o.lastErr = nil
@@ -431,6 +510,9 @@ func round(x float64, n int) float64 {
 
 // --- a session ---
 
+// errReconfig ends a session whose configuration was replaced (SetConfig).
+var errReconfig = errors.New("output configuration replaced")
+
 // result is what the helpers of a session learnt: why it should end, when a process does.
 type result struct {
 	mu        sync.Mutex
@@ -484,6 +566,8 @@ func (r *result) why(c *child, isSRTLA bool) *failure {
 // session is one emission: its processes, its pipeline and the goroutines that read them.
 type session struct {
 	o       *Output
+	cfg     *config.Config // the configuration of its start
+	gen     int
 	res     *result
 	procs   []*child
 	slt     *child
@@ -498,9 +582,12 @@ type session struct {
 }
 
 func (o *Output) runSession() error {
-	target := o.cfg.SRTTarget()
-	if target.IsZero() {
-		return fail(ReasonNoDestination, "falta el destino SRT")
+	cfg, gen := o.config()
+	if !cfg.HasDestination() {
+		if cfg.Transport == config.ProtoSRT || cfg.Transport == config.ProtoSRTLA {
+			return fail(ReasonNoDestination, "falta el destino SRT")
+		}
+		return fail(ReasonNoDestination, "falta el destino")
 	}
 	o.mu.Lock()
 	prev := o.lastErr
@@ -510,42 +597,70 @@ func (o *Output) runSession() error {
 	} else {
 		o.setState(StateConnecting, "", "")
 	}
-	s := &session{o: o, res: &result{}}
+	s := &session{o: o, cfg: cfg, gen: gen, res: &result{}}
 	defer s.teardown()
-	return s.run(target)
+	switch cfg.Transport {
+	case config.ProtoRTMP, config.ProtoRTMPS:
+		return s.runSend()
+	case config.ProtoRIST:
+		return s.runRIST()
+	case config.ProtoUDP:
+		return s.runUDP()
+	}
+	return s.run(cfg.SRTTarget())
+}
+
+// fifo makes the session's FIFO and opens it O_RDWR: opening a FIFO like this waits for nobody, and the
+// sender never sees EOF from a writer that has not arrived yet. The caller keeps the descriptor open until
+// the filesink has opened the FIFO for writing: if the sender died at once, that open would wait for ever.
+func (s *session) fifo() (string, *os.File, error) {
+	fifo := filepath.Join(s.o.runDir, fmt.Sprintf("eirl-engine-out.%d.ts", os.Getpid()))
+	_ = os.Remove(fifo)
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		return "", nil, fail(ReasonInternal, "mkfifo: "+err.Error())
+	}
+	s.files = append(s.files, fifo)
+	fd, err := os.OpenFile(fifo, os.O_RDWR, 0)
+	if err != nil {
+		return "", nil, fail(ReasonInternal, "fifo: "+err.Error())
+	}
+	return fifo, fd, nil
+}
+
+// statsPipe is a pipe for a sender's statistics (its fd 3), when someone wants them: the app (SRT_STATS)
+// or the ABR. The read end goes to readStats; the caller closes the write end once the child has it.
+func (s *session) statsPipe() (r, w *os.File, err error) {
+	if s.cfg.SRTStats == "" && !s.cfg.ABR {
+		return nil, nil, nil
+	}
+	r, w, err = os.Pipe()
+	if err != nil {
+		return nil, nil, fail(ReasonInternal, "pipe: "+err.Error())
+	}
+	return r, w, nil
 }
 
 func (s *session) run(target config.Secret) error {
-	o, cfg := s.o, s.o.cfg
-	if cfg.Transport == "srtla" {
+	o, cfg := s.o, s.cfg
+	if cfg.Transport == config.ProtoSRTLA {
 		if err := s.startSRTLA(); err != nil {
 			return err
 		}
 	}
-	fifo := filepath.Join(o.runDir, fmt.Sprintf("eirl-engine-out.%d.ts", os.Getpid()))
-	_ = os.Remove(fifo)
-	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		return fail(ReasonInternal, "mkfifo: "+err.Error())
-	}
-	s.files = append(s.files, fifo)
-	// O_RDWR: opening a FIFO like this waits for nobody, and srt-live-transmit never sees EOF from a
-	// writer that has not arrived yet. The engine keeps its end open until the filesink has opened the
-	// FIFO for writing: if srt-live-transmit died at once, that open would wait for ever
-	fd, err := os.OpenFile(fifo, os.O_RDWR, 0)
+	fifo, fd, err := s.fifo()
 	if err != nil {
-		return fail(ReasonInternal, "fifo: "+err.Error())
+		return err
 	}
 	defer fd.Close()
 	args := []string{"-chunk:1316"}
 	var extra []*os.File
-	var statsR *os.File
-	if cfg.SRTStats != "" || cfg.ABR {
-		r, w, err := os.Pipe()
-		if err != nil {
-			return fail(ReasonInternal, "pipe: "+err.Error())
-		}
-		defer w.Close()
-		statsR, extra = r, []*os.File{w}
+	statsR, statsW, err := s.statsPipe()
+	if err != nil {
+		return err
+	}
+	if statsW != nil {
+		defer statsW.Close()
+		extra = []*os.File{statsW}
 		kbps, perSecond := cfg.VBitrate, 1
 		if cfg.ABR {
 			kbps, perSecond = cfg.VBitrateMin, 4
@@ -556,7 +671,7 @@ func (s *session) run(target config.Secret) error {
 	// The target holds the stream id and the passphrase: it goes to srt-live-transmit's argv because it
 	// has no other way to take it (as with the Python engine), and nowhere else
 	args = append(args, "file://con", target.Reveal())
-	slt, stderr, err := startChild("srt-live-transmit", sltBin, args, fd, false, extra)
+	slt, stderr, err := startChild("srt-live-transmit", sltBin, args, fd, false, extra, nil)
 	if err != nil {
 		if statsR != nil {
 			statsR.Close()
@@ -570,9 +685,9 @@ func (s *session) run(target config.Secret) error {
 	s.procs = append(s.procs, slt)
 	s.goRead(func() { o.readSLT(stderr, s.res) }, stderr)
 	if statsR != nil {
-		s.goRead(func() { o.readStats(statsR) }, statsR)
+		s.goRead(func() { o.readStats(cfg, statsR) }, statsR)
 	}
-	if err := s.startPipeline(fifo); err != nil {
+	if err := s.startPipeline(pipeline.Sink{}, fifo); err != nil {
 		return err
 	}
 	fd.Close()
@@ -596,6 +711,9 @@ func (s *session) watch() error {
 	t0 := mono()
 	tMeas := t0
 	for o.running() {
+		if o.genNow() != s.gen {
+			return errReconfig
+		}
 		if now := mono(); now-tMeas >= measureEvery.Seconds() {
 			on := s.measure(now - tMeas)
 			tMeas = mono()
@@ -662,9 +780,10 @@ func (s *session) measure(dt float64) bool {
 	return stuck
 }
 
-func (s *session) startPipeline(fifo string) error {
-	o, cfg := s.o, s.o.cfg
-	p, err := o.media.Parse("output", strings.ReplaceAll(o.desc, pipeline.FIFOPlaceholder, fifo))
+// startPipeline builds and plays the session's pipeline, sending to sink (fifo: to the FIFO's path).
+func (s *session) startPipeline(sink pipeline.Sink, fifo string) error {
+	o, cfg := s.o, s.cfg
+	p, err := o.media.Parse("output", strings.ReplaceAll(o.desc(cfg, sink), pipeline.FIFOPlaceholder, fifo))
 	if err != nil {
 		return fail(ReasonEncoderError, "no se puede construir la salida: "+err.Error())
 	}
@@ -688,6 +807,11 @@ func (s *session) startPipeline(fifo string) error {
 	}
 	// The frames count across sessions: this one's start from here
 	s.frames = o.bridges[0].Stats(false, false).Frames
+	every := 1
+	if cfg.OutputHalf {
+		every = 2 // half the program's rate (OUTPUTS.md §7): the bridge drops one frame of two
+	}
+	o.bridges[0].SetEvery(every)
 	for i, name := range []string{"ov", "oa"} {
 		o.bridges[i].SetDst(p.ByName(name)) // nil (no such appsrc) drops
 	}
@@ -798,62 +922,79 @@ func sltEvent(line string) string {
 	return "srt_log"
 }
 
-// readStats reads srt-live-transmit's JSON statistics: the last one for the app (SRT_STATS, through a
-// rename, at most every 0.5 s), the real bitrate and the RTT for the state and, with ABR, the adaptive
-// bitrate.
-func (o *Output) readStats(r io.Reader) {
-	cfg := o.cfg
-	var ctl *controller
-	if cfg.ABR {
-		ctl = newController(cfg.VBitrateMin, cfg.VBitrate, cfg.SRTLatencyMs)
-		o.mu.Lock()
-		o.kbps = ctl.kbps
-		o.mu.Unlock()
-		o.writeABR(ctl)
-	}
-	lastOut := -1e9
-	logged := map[string]float64{"severe": -1e9, "congestion": -1e9}
+// readStats reads a sender's JSON statistics (srt-live-transmit's shape, OUTPUTS.md §4) and hands each
+// one to the session's statistics.
+func (o *Output) readStats(cfg *config.Config, r io.Reader) {
+	st := o.newStats(cfg)
 	br := bufio.NewReader(r)
 	for {
 		line, err := br.ReadString('\n')
 		if line == "" && err != nil {
 			return
 		}
-		now := mono()
-		if cfg.SRTStats != "" && now-lastOut >= statsEvery {
-			if sysx.WriteAtomic(cfg.SRTStats, []byte(line), 0o644) == nil {
-				lastOut = now
-			}
-		}
 		smp, ok := parseSample(line)
-		if !ok || !smp.hasBytes {
-			continue
-		}
+		st.take([]byte(line), smp, ok)
+	}
+}
+
+// stats is a session's statistics: the last line for the app (SRT_STATS, through a rename, at most every
+// 0.5 s), the real bitrate and the RTT for the state and, with ABR, the adaptive bitrate.
+type stats struct {
+	o       *Output
+	cfg     *config.Config
+	ctl     *controller
+	lastOut float64
+	logged  map[string]float64
+}
+
+func (o *Output) newStats(cfg *config.Config) *stats {
+	st := &stats{o: o, cfg: cfg, lastOut: -1e9, logged: map[string]float64{"severe": -1e9, "congestion": -1e9}}
+	if cfg.ABR {
+		st.ctl = newController(cfg.VBitrateMin, cfg.VBitrate, cfg.ABRLatencyMs())
 		o.mu.Lock()
-		o.sent.add(now, smp.bytes)
-		o.rtt, o.rttAt, o.hasRTT = smp.rtt, now, true
+		o.kbps = st.ctl.kbps
 		o.mu.Unlock()
-		if ctl == nil {
-			continue
+		o.writeABR(st.ctl)
+	}
+	return st
+}
+
+// take is one statistic: line is what goes to SRT_STATS, smp what it says (ok false: nothing usable).
+func (st *stats) take(line []byte, smp sample, ok bool) {
+	o, cfg, ctl := st.o, st.cfg, st.ctl
+	now := mono()
+	if cfg.SRTStats != "" && now-st.lastOut >= statsEvery {
+		if sysx.WriteAtomic(cfg.SRTStats, line, 0o644) == nil {
+			st.lastOut = now
 		}
-		prev := ctl.kbps
-		next, changed := ctl.update(now, smp.rtt, smp.bufMs, smp.dropped)
-		if !changed {
-			continue
-		}
-		o.setBitrate(next, ctl)
-		why := ctl.lastReason
-		every := 30.0
-		if why.Kind == "severe" {
-			every = 10
-		}
-		if next < prev && now-logged[why.Kind] >= every {
-			elog.Event("abr", "abr_down", "from_kbps", prev, "to_kbps", next, "cause", why.Kind,
-				"buffer_ms", int(why.BufMs), "rtt_ms", int(why.RTTMs), "base_ms", int(why.BaseMs), "dropped", why.Dropped)
-			logged[why.Kind] = now
-		} else if next == ctl.max && prev < next {
-			elog.Event("abr", "abr_max", "kbps", next)
-		}
+	}
+	if !ok || !smp.hasBytes {
+		return
+	}
+	o.mu.Lock()
+	o.sent.add(now, smp.bytes)
+	o.rtt, o.rttAt, o.hasRTT = smp.rtt, now, true
+	o.mu.Unlock()
+	if ctl == nil {
+		return
+	}
+	prev := ctl.kbps
+	next, changed := ctl.update(now, smp.rtt, smp.bufMs, smp.dropped)
+	if !changed {
+		return
+	}
+	o.setBitrate(next, ctl)
+	why := ctl.lastReason
+	every := 30.0
+	if why.Kind == "severe" {
+		every = 10
+	}
+	if next < prev && now-st.logged[why.Kind] >= every {
+		elog.Event("abr", "abr_down", "from_kbps", prev, "to_kbps", next, "cause", why.Kind,
+			"buffer_ms", int(why.BufMs), "rtt_ms", int(why.RTTMs), "base_ms", int(why.BaseMs), "dropped", why.Dropped)
+		st.logged[why.Kind] = now
+	} else if next == ctl.max && prev < next {
+		elog.Event("abr", "abr_max", "kbps", next)
 	}
 }
 
@@ -878,28 +1019,28 @@ func (o *Output) writeABR(ctl *controller) {
 		[]byte(fmt.Sprintf("KBPS=%d\nMIN=%d\nMAX=%d\n", ctl.kbps, ctl.min, ctl.max)), 0o644)
 }
 
-// LinkInfo is what the header says of the link, for the screen to word in its language: the transport ("srt"
-// or "srtla") and, with SRTLA, the uplinks the output would use now (without the disabled ones nor the wifi
-// without internet; 0 with SRT, which does not count them). From any goroutine.
+// LinkInfo is what the header says of the link, for the screen to word in its language: the protocol (srt,
+// srtla, rtmp, rtmps, rist, udp) and, with SRTLA, the uplinks the output would use now (without the disabled
+// ones nor the wifi without internet; 0 for the others, which do not bond). From any goroutine.
 func (o *Output) LinkInfo() (transport string, links int) {
-	if o.cfg.Transport != "srtla" {
-		return "srt", 0
+	cfg := o.Config()
+	if cfg.Transport != config.ProtoSRTLA {
+		return cfg.Transport, 0
 	}
-	return "srtla", len(o.uplinkFiles().current())
+	return config.ProtoSRTLA, len(o.uplinkFiles(cfg).current())
 }
 
 // --- SRTLA ---
 
-func (o *Output) uplinkFiles() uplinkFiles {
-	c := o.cfg
+func (o *Output) uplinkFiles(c *config.Config) uplinkFiles {
 	return uplinkFiles{runDir: o.runDir, available: c.UplinksFile, disabled: c.UplinksDisabled, nonet: c.UplinksNoInternet}
 }
 
 // startSRTLA starts srtla_send with the uplinks of now (waiting for one, up to UPLINK_WAIT) and a
 // goroutine that passes it those that come or go with SIGHUP, without cutting.
 func (s *session) startSRTLA() error {
-	o, cfg := s.o, s.o.cfg
-	uf := o.uplinkFiles()
+	o, cfg := s.o, s.cfg
+	uf := o.uplinkFiles(cfg)
 	sel := uf.current()
 	if len(sel) == 0 {
 		elog.Event("engine", "srtla_waiting_uplink", "file", cfg.UplinksFile, "wait_s", cfg.UplinkWait)
@@ -920,7 +1061,7 @@ func (s *session) startSRTLA() error {
 	}
 	argv := append(append([]string{}, stdbufArgv...), cfg.SRTLABin, strconv.Itoa(cfg.SRTLALocalPort),
 		cfg.SRTLAHost(), strconv.Itoa(cfg.SRTLAPort()), uf.ipsPath())
-	p, out, err := startChild("srtla_send", argv[0], argv[1:], nil, true, nil)
+	p, out, err := startChild("srtla_send", argv[0], argv[1:], nil, true, nil, nil)
 	if err != nil {
 		return fail(ReasonInternal, err.Error())
 	}

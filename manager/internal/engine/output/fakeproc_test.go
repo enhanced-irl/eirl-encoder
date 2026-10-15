@@ -19,6 +19,7 @@ const (
 	fakeSLTMode  = "EIRL_OUTPUT_FAKE_SLT"
 	fakeSRTLA    = "EIRL_OUTPUT_FAKE_SRTLA"
 	fakeStatsEnv = "EIRL_OUTPUT_FAKE_STATS" // the JSON line the fake srt-live-transmit repeats
+	fakeSend     = "EIRL_OUTPUT_FAKE_SEND"  // the fake eirl-send: publish (default) | reject | tls
 )
 
 func TestMain(m *testing.M) {
@@ -31,17 +32,72 @@ func TestMain(m *testing.M) {
 
 func fakeMain(dir string, args []string) {
 	role := "srtla"
-	if strings.HasPrefix(args[0], "-chunk") {
+	switch {
+	case strings.HasPrefix(args[0], "-chunk"):
 		role = "slt"
+	case args[0] == "rtmp":
+		role = "send"
+	case args[0] == "-i":
+		role = "rist"
 	}
 	_ = os.WriteFile(filepath.Join(dir, role+".args"), []byte(strings.Join(args, "\n")), 0o644)
 	_ = os.WriteFile(filepath.Join(dir, role+".env"), []byte(strings.Join(os.Environ(), "\n")), 0o644)
 	_ = os.WriteFile(filepath.Join(dir, role+".pid"), []byte(fmt.Sprint(os.Getpid())), 0o644)
-	if role == "slt" {
+	switch role {
+	case "slt":
 		fakeSLT(args)
-	} else {
+	case "send":
+		fakeSendMain(args)
+	case "rist":
+		fakeRISTMain()
+	default:
 		fakeSRTLAMain(dir)
 	}
+}
+
+// fakeRISTMain plays ristsender with a real capture (testdata/rist/normal.log): its log and statistics on
+// stderr, again and again.
+func fakeRISTMain() {
+	b, _ := os.ReadFile(os.Getenv("EIRL_OUTPUT_FAKE_RIST_LOG"))
+	for {
+		for _, l := range strings.Split(string(b), "\n") {
+			if l != "" {
+				fmt.Fprintln(os.Stderr, l)
+			}
+			if strings.Contains(l, "sender-stats") {
+				time.Sleep(20 * time.Millisecond)
+			}
+		}
+	}
+}
+
+// fakeSendMain plays eirl-send (OUTPUTS.md §5): its events on stderr, its statistics on fd 3.
+func fakeSendMain(args []string) {
+	say := func(s string) { fmt.Fprintln(os.Stderr, s) }
+	say("event=connecting host=127.0.0.1 port=1935 tls=false bind=")
+	switch os.Getenv(fakeSend) {
+	case "reject":
+		say(`event=failed reason=rejected detail="NetStream.Publish.BadName"`)
+		os.Exit(1)
+	case "tls":
+		say(`event=failed reason=tls_failed detail="x509: certificate signed by unknown authority"`)
+		os.Exit(1)
+	}
+	say("event=connected")
+	say("event=publishing codec=h265")
+	for i, a := range args {
+		if a == "-stats-fd" && i+1 < len(args) && args[i+1] == "3" {
+			stats := os.NewFile(3, "stats")
+			go func() {
+				for {
+					fmt.Fprintln(stats, `{"link":{"rtt":33},"send":{"bytes":40000,"msBuf":120,"packetsDropped":0,"mbitRate":1.2}}`)
+					time.Sleep(20 * time.Millisecond)
+				}
+			}()
+		}
+	}
+	_, _ = io.Copy(io.Discard, os.Stdin)
+	say("event=eof")
 }
 
 func fakeSLT(args []string) {

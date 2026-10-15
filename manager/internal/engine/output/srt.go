@@ -17,11 +17,14 @@ const (
 	ReasonConnectionLost   = "connection_lost"
 	ReasonEncoderError     = "encoder_error"
 	ReasonInternal         = "internal"
+	// OUTPUTS.md §8: RTMPS's TLS, and a certificate not valid yet because the device's clock is behind
+	ReasonTLSFailed      = "tls_failed"
+	ReasonClockNotSynced = "clock_not_synced"
 )
 
-// Reasons is every reason, in the order of engine_output.REASONS.
+// Reasons is every reason, in the order of engine_output.REASONS, then the output protocols' (OUTPUTS.md §8).
 var Reasons = []string{ReasonNoDestination, ReasonNoUplinks, ReasonRelayUnreachable, ReasonRejected,
-	ReasonConnectionLost, ReasonEncoderError, ReasonInternal}
+	ReasonConnectionLost, ReasonEncoderError, ReasonInternal, ReasonTLSFailed, ReasonClockNotSynced}
 
 // States of the state's output.state.
 const (
@@ -34,7 +37,8 @@ const (
 // transient are the reasons the output retries by itself, quickly: while it waits it stays in
 // «connecting» with the reason (srtla_send gives up after ~11 s; when the relay is back it reconnects in
 // seconds). «error» is for what retrying does not fix (ENCODER_CLOUD §13.3).
-var transient = map[string]bool{ReasonRelayUnreachable: true, ReasonConnectionLost: true, ReasonNoUplinks: true}
+var transient = map[string]bool{ReasonRelayUnreachable: true, ReasonConnectionLost: true, ReasonNoUplinks: true,
+	ReasonClockNotSynced: true}
 
 var (
 	retryWaits          = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 15 * time.Second, 30 * time.Second}

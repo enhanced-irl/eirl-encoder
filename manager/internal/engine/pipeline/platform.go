@@ -15,6 +15,7 @@ type Platform struct {
 	Convert    string // converter/scaler between memory types and formats (the VIC)
 	Compositor string
 	H264Enc    string
+	H265Enc    string
 	MJPEGDec   string // hardware JPEG decoder, as a full element with its properties
 	Decoder    string // hardware H.264/H.265 decoder
 	CSICapture string // capture element that delivers into GPU memory
@@ -28,6 +29,7 @@ var Tegra = Platform{
 	Convert:    "nvvidconv",
 	Compositor: "nvcompositor",
 	H264Enc:    "nvv4l2h264enc",
+	H265Enc:    "nvv4l2h265enc",
 	MJPEGDec:   "nvv4l2decoder mjpeg=1", // never nvjpegdec (MIXER.md §3, trap 8)
 	Decoder:    "nvv4l2decoder",
 	CSICapture: "nvv4l2camerasrc",

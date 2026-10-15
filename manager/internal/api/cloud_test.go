@@ -77,16 +77,20 @@ func TestCloudEndpoints(t *testing.T) {
 	}
 }
 
-// Linked (managedBy = eirl): the destination is read-only in the local web; the HDMI input and
-// rehearsal mode are not.
+// The cloud's destination active (managedBy = eirl): read-only in the local web; the HDMI input and the output are
+// not. Another saved destination can be activated, and then managedBy is local.
 func TestManagedDestinationIsReadOnly(t *testing.T) {
 	e := setup(t, true)
 	tok := e.login(t)
-	e.srv.Config.ManagedBy = func() string { return "eirl" }
+	e.setManaged(t, true)
 	if w := e.do("PUT", "/api/v1/destination", `{"latencyMs":300}`, tok); w.Code != 409 {
-		t.Errorf("PUT /destination while linked: %d %s", w.Code, w.Body)
+		t.Errorf("PUT /destination while the cloud's is active: %d %s", w.Code, w.Body)
 	}
-	if w := e.do("GET", "/api/v1/destination", "", tok); !strings.Contains(w.Body.String(), `"managedBy":"eirl"`) {
+	if w := e.do("PUT", "/api/v1/destinations/eirl", `{"latencyMs":300}`, tok); w.Code != 409 || !strings.Contains(w.Body.String(), `"error":"managed"`) {
+		t.Errorf("PUT /destinations/eirl: %d %s", w.Code, w.Body)
+	}
+	if w := e.do("GET", "/api/v1/destination", "", tok); !strings.Contains(w.Body.String(), `"managedBy":"eirl"`) ||
+		!strings.Contains(w.Body.String(), `"id":"eirl"`) {
 		t.Errorf("GET /destination: %s", w.Body)
 	}
 	if w := e.do("PUT", "/api/v1/input", `{"edidPreferred":"1080p50"}`, tok); w.Code != 200 {
@@ -95,15 +99,19 @@ func TestManagedDestinationIsReadOnly(t *testing.T) {
 	if w := e.do("PUT", "/api/v1/output", `{"output":"off"}`, tok); w.Code != 200 {
 		t.Errorf("PUT /output while linked: %d", w.Code)
 	}
-	// Linking does not rewrite the file: no “unapplied changes” just because of linking
-	e.do("PUT", "/api/v1/output", `{"output":"on"}`, tok)
-	h := e.srv.Config.Hash()
-	e.srv.Config.ManagedBy = func() string { return "local" }
-	if e.srv.Config.Hash() != h {
-		t.Error("the fingerprint does not depend on who manages the destination")
+	// A local destination, activated: managedBy local and editable
+	w := e.do("POST", "/api/v1/destinations", `{"template":"twitch","protocol":"rtmp","key":"live_123456789_abcdefghij"}`, tok)
+	var created struct{ ID string }
+	json.Unmarshal(w.Body.Bytes(), &created)
+	if w.Code != 201 {
+		t.Fatalf("POST: %d %s", w.Code, w.Body)
 	}
-	if w := e.do("PUT", "/api/v1/destination", `{"latencyMs":300}`, tok); w.Code != 200 {
-		t.Errorf("unlinked, PUT /destination: %d", w.Code)
+	if w := e.do("POST", "/api/v1/destinations/"+created.ID+"/activate", `{"apply":false}`, tok); w.Code != 200 ||
+		!strings.Contains(w.Body.String(), `"managedBy":"local"`) {
+		t.Errorf("activate: %d %s", w.Code, w.Body)
+	}
+	if w := e.do("PUT", "/api/v1/destination", `{"videoBitrateKbps":4500}`, tok); w.Code != 200 || !strings.Contains(w.Body.String(), `"videoBitrateKbps":4500`) {
+		t.Errorf("a local one active, PUT /destination: %d %s", w.Code, w.Body)
 	}
 }
 
@@ -149,7 +157,6 @@ func TestCloudDeviceReportedAPPolicy(t *testing.T) {
 
 func TestCloudDeviceApplyConfig(t *testing.T) {
 	e := setup(t, true)
-	e.srv.Config.ManagedBy = func() string { return "eirl" }
 	e.srv.Uplinks = &uplinks.Reader{Available: filepath.Join(e.dir, "available"), Disabled: filepath.Join(e.dir, "uplinks-disabled"), SysNet: e.dir}
 	d := &CloudDevice{Srv: e.srv}
 	ctx := context.Background()
@@ -188,8 +195,23 @@ func TestCloudDeviceApplyConfig(t *testing.T) {
 		t.Errorf("stopped: %+v %v", res, e.unit.actions)
 	}
 	rep, _ := d.Reported()
-	if rep.Destination == nil || rep.Destination.Host != "eu2.relay.enhancedirl.com" || !rep.Destination.StreamIDSet || rep.Uplinks.Disabled[0] != "usb0" {
+	if rep.Destination == nil || rep.Destination.Host != "eu2.relay.enhancedirl.com" || rep.Destination.Kind != "eirl" ||
+		!rep.Destination.StreamIDSet || rep.Uplinks.Disabled[0] != "usb0" {
 		t.Errorf("Reported: %+v", rep)
+	}
+	// The cloud's destination is saved next to the device's own one (migrated), and it is the active one
+	ds, _, _ := e.srv.Config.Destinations()
+	if len(ds.Destinations) != 2 || ds.Active != config.CloudID {
+		t.Errorf("saved destinations: %+v", ds)
+	}
+	// Unlinked meanwhile: nothing is written
+	d.Linked = func() bool { return false }
+	before, _ = os.ReadFile(e.srv.Config.AppPath)
+	if _, err := d.ApplyConfig(ctx, cloudWire(t, "srt://eu3.relay.enhancedirl.com:5000"), true); !errors.Is(err, errUnlinked) {
+		t.Errorf("unlinked: %v", err)
+	}
+	if after, _ := os.ReadFile(e.srv.Config.AppPath); string(after) != string(before) {
+		t.Error("unlinked: the .env must not change")
 	}
 }
 
@@ -260,9 +282,9 @@ func TestCloudDeviceActions(t *testing.T) {
 		t.Errorf("login with the new one: %d", w.Code)
 	}
 	// Without a destination, start fails with a clear reason
-	e.srv.Config.Update(func(cur config.Settings) (config.Settings, error) {
-		cur.URL, cur.StreamID, cur.Passphrase, cur.Output = "", "", "", "off"
-		return cur, nil
+	e.srv.Config.UpdateDestinations(func(ds *config.Destinations, cur *config.Settings) error {
+		ds.Active, cur.Output = "", "off"
+		return nil
 	})
 	if err := d.Action(ctx, "start", ""); !errors.As(err, &ae) || ae.Code != "no_destination" {
 		t.Errorf("start without destination: %v", err)
@@ -273,18 +295,25 @@ func TestCloudDeviceUnlinked(t *testing.T) {
 	e := setup(t, true)
 	d := &CloudDevice{Srv: e.srv}
 	ctx := context.Background()
+	// Only the device's own destination: left alone
 	if err := d.Unlinked(ctx, false); err != nil || len(e.unit.actions) != 0 {
 		t.Errorf("local destination: left alone: %v %v", err, e.unit.actions)
 	}
 	if cfg, _ := e.srv.Config.Load(); cfg.URL == "" {
 		t.Error("the local destination is kept")
 	}
+	// The cloud's, active: removed, nothing active and not streaming
+	if _, err := d.ApplyConfig(ctx, cloudWire(t, "srt://eu1.relay.enhancedirl.com:5000"), false); err != nil {
+		t.Fatal(err)
+	}
 	if err := d.Unlinked(ctx, true); err != nil {
 		t.Fatal(err)
 	}
 	cfg, _ := e.srv.Config.Load()
-	if cfg.URL != "" || cfg.StreamID != "" || cfg.Passphrase != "" || cfg.Output != "off" || strings.Join(e.unit.actions, ",") != "restart" {
-		t.Errorf("cloud destination cleared and back to rehearsal: %+v %v", cfg, e.unit.actions)
+	ds, _, _ := e.srv.Config.Destinations()
+	if cfg.URL != "" || cfg.StreamID != "" || cfg.Passphrase != "" || cfg.Output != "off" || strings.Join(e.unit.actions, ",") != "restart" ||
+		ds.Active != "" || len(ds.Destinations) != 1 {
+		t.Errorf("cloud destination removed and not streaming: %+v %v %+v", cfg, e.unit.actions, ds)
 	}
 }
 

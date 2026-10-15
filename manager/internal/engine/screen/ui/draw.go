@@ -376,10 +376,18 @@ func (u *UI) draw(c *Canvas, now time.Time) {
 	if live && out.RTTMs != nil {
 		rtt = sprintf(tx.RTTF, *out.RTTMs)
 	}
+	// The codec with the rate («H.265 · 4,2 Mbps», OUTPUTS.md §11): it goes before the rate itself when space is short
+	rate := mbps
+	if c := CodecNames[out.Codec]; c != "" && mbps != "" {
+		rate = c + tx.Sep + mbps
+	}
 	link, transport := "", ""
 	if u.LinkInfo != nil {
 		var n int
 		transport, n = u.LinkInfo()
+		if transport == "" {
+			transport = out.Protocol
+		}
 		link = u.linkText(transport, n)
 	}
 	x0, x1 := leftEdge+2*m, rightEdge-2*m
@@ -391,7 +399,7 @@ func (u *UI) draw(c *Canvas, now time.Time) {
 		hwText := strings.Join(hw, tx.Sep)
 		size := 13 * s
 		var netText string
-		for _, parts := range [][]string{{mbps, link, rtt}, {mbps, link}, {mbps}, {}} {
+		for _, parts := range [][]string{{rate, link, rtt}, {rate, link}, {rate}, {mbps}, {}} {
 			netText = joinNonEmpty(parts, tx.Sep)
 			if d.advance(joinNonEmpty([]string{netText, hwText}, tx.Sep), size, false) <= x1-x0 {
 				break
@@ -415,7 +423,7 @@ func (u *UI) draw(c *Canvas, now time.Time) {
 			last = []string{mbps}
 		}
 		var netText string
-		for _, parts := range [][]string{{mbps, link, rtt}, {mbps, link}, last} {
+		for _, parts := range [][]string{{rate, link, rtt}, {rate, link}, {rate}, last} {
 			netText = joinNonEmpty(parts, tx.Sep)
 			if d.advance(netText, 16*s, false) <= x1-x0 {
 				break
@@ -1066,14 +1074,24 @@ func (u *UI) kbCount() string {
 
 func newRGBA(w, h int) *image.RGBA { return image.NewRGBA(image.Rect(0, 0, w, h)) }
 
-// linkText is the header's link in the screen's language: «SRT», «SRTLA · 1 link», «SRTLA · 2 links».
+// linkText is the header's link in the screen's language: the protocol («SRT», «RTMPS», «RIST»…) and, with SRTLA,
+// its links («SRTLA · 1 link», «SRTLA · 2 links»).
 func (u *UI) linkText(transport string, links int) string {
 	tx := u.Tx
 	switch {
-	case transport != "srtla":
-		return tx.LinkSRT
-	case links == 1:
+	case transport == "srtla" && links == 1:
 		return tx.LinkSRTLAOne
+	case transport == "srtla":
+		return sprintf(tx.LinkSRTLAF, links)
+	case ProtocolNames[transport] != "":
+		return ProtocolNames[transport]
 	}
-	return sprintf(tx.LinkSRTLAF, links)
+	return tx.LinkSRT
 }
+
+// ProtocolNames are the output protocols by their names (never translated, OUTPUTS.md §1).
+var ProtocolNames = map[string]string{"srt": "SRT", "srtla": "SRTLA", "rtmp": "RTMP", "rtmps": "RTMPS", "rist": "RIST",
+	"udp": "UDP"}
+
+// CodecNames are the video codecs by their names (never translated).
+var CodecNames = map[string]string{"h264": "H.264", "h265": "H.265"}
