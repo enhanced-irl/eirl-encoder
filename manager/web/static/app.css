@@ -630,6 +630,29 @@ select {
 .slot-fields > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 @container zone (min-width: 330px) { .slot-fields { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); } }
 .slot-now { margin-top: 6px; }
+
+/* Camera image (SOURCES.md §7): the camera picker, then one group per kind of setting with a row per control. A
+   slider has its name and value on top and the track below; on one line when there is room */
+.camera-intro { margin: -4px 0 12px; }
+.camera-pick { display: flex; flex-wrap: wrap; max-width: 100%; margin: 0 0 14px; }
+.camera-pick .btn { min-width: 0; max-width: 100%; }
+.camera-pick .btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cam-group + .cam-group { margin-top: 16px; }
+.cam-group .sub-title { margin-bottom: 2px; }
+.cam-row { padding: 6px 0; border-top: 1px solid var(--gray-800); min-width: 0; }
+.cam-group .sub-title + .cam-row { border-top: 0; }
+.cam-int { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name val" "range range"; align-items: center; gap: 0 12px; }
+.cam-int label, .cam-name { font-size: .85rem; color: var(--gray-200); }
+.cam-int label { grid-area: name; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cam-int output { grid-area: val; font-size: .85rem; font-weight: 600; color: var(--gray-50); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cam-int input { grid-area: range; }
+.cam-int input:disabled { opacity: .45; cursor: default; }
+.cam-int.inactive output { color: var(--gray-400); font-weight: 500; }
+.cam-menu { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.cam-menu .seg { flex-wrap: wrap; }
+@container zone (min-width: 540px) {
+  .cam-int { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) 5.5em; grid-template-areas: "name range val"; }
+}
 select.invalid { border-color: var(--error); box-shadow: 0 0 0 3px var(--error-a); }
 
 /* Updates: a new version in the header banner (brand colours), its notes and the progress */

@@ -14,8 +14,9 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/mixer"
 )
 
-// simEngine: a mixer engine on a Unix socket, enough for the web: a catalogue of four sources, the slots command
-// (with the on_air rule), take/secondary/layout/output, and the state in mixer.json and to subscribers. Other commands
+// simEngine: a mixer engine on a Unix socket, enough for the web: a catalogue of five sources (the fifth, a capture
+// card, without a slot until one is given to it), the slots command (with the on_air rule), take/secondary/hide/layout/
+// output, the USB cameras' image settings (camera.go), and the state in mixer.json and to subscribers. Other commands
 // are accepted and change nothing.
 type simEngine struct {
 	sock, statePath string
@@ -27,19 +28,22 @@ type simEngine struct {
 	secondary string
 	layout    string
 	output    bool
+	hidden    map[string]bool
+	cams      map[string][]mixer.Control // source id → its image settings, as the camera has them now
 	subs      map[chan []byte]struct{}
 }
 
 var simCatalog = []mixer.CatalogEntry{
 	{ID: "hdmi", Name: "HDMI (board)", Kind: "hdmi-csi"},
-	{ID: "/dev/v4l/by-id/usb-Elgato_Cam_Link_4K_0005AB12-video-index0", Name: "Cam Link 4K", Kind: "usb"},
+	{ID: simLogi, Name: "Logi 4K Stream Edition", Kind: "usb"},
 	{ID: "net:cam1", Name: "Phone", Kind: "network"},
 	{ID: "test", Name: "Test pattern", Kind: "test"},
+	{ID: simMS2109, Name: "USB Video (MS2109)", Kind: "usb"},
 }
 
 func startSimEngine(ctx context.Context, dir string, log *slog.Logger) (*simEngine, error) {
 	e := &simEngine{sock: filepath.Join(dir, "mixer.sock"), statePath: filepath.Join(dir, "mixer.json"), log: log,
-		main: "hdmi", layout: "full", subs: map[chan []byte]struct{}{}}
+		main: "hdmi", layout: "full", hidden: map[string]bool{}, cams: simCameras(), subs: map[chan []byte]struct{}{}}
 	for i := 1; i <= mixer.MaxSlots; i++ {
 		e.slots = append(e.slots, mixer.SlotAssign{Slot: i, Assign: mixer.AssignAuto})
 	}
@@ -130,7 +134,13 @@ func (e *simEngine) stateLocked() mixer.State {
 		if p := placed[i]; p != nil {
 			src := mixer.Source{ID: p.ID, Slot: c.Slot, Kind: p.Kind, Name: p.Name, Alias: c.Alias,
 				State: "live", Format: "NV12", Mode: "1920x1080@30", FPS: 30}
-			if p.Kind == "network" {
+			switch {
+			case e.hidden[p.ID]:
+				src.State, src.Format, src.Mode, src.FPS = "hidden", "", "", 0
+				st.Program.Hidden = append(st.Program.Hidden, p.ID)
+			case e.cams[p.ID] != nil:
+				src.Controls = slices.Clone(e.cams[p.ID]) // marshalled under the lock: the options are not copied
+			case p.Kind == "network":
 				// A phone streaming a codec the engine cannot decode: a detail code with arguments (ENGINE_GO.md §13)
 				src.State, src.Format, src.Mode, src.FPS = "no_signal", "", "", 0
 				src.Detail = "la cámara no manda H.264 ni H.265 (MPEG-4)"
@@ -144,7 +154,7 @@ func (e *simEngine) stateLocked() mixer.State {
 	return st
 }
 
-// simAudio: the board HDMI's audio playing, the capture card's silent (a detail code with arguments) and the screen
+// simAudio: the board HDMI's audio playing, the camera's silent (a detail code with arguments) and the screen
 // headphones waiting for a screen, so the interfaces can show the engine's detail codes (ENGINE_GO.md §13).
 func simAudio(slotOf map[string]int) *mixer.Audio {
 	main, follow, peak := "i2s", false, -18.0
@@ -157,9 +167,8 @@ func simAudio(slotOf map[string]int) *mixer.Audio {
 	return &mixer.Audio{Main: &main, Mode: "single", Follow: &follow,
 		Sources: []mixer.AudioInput{
 			{ID: "i2s", Kind: "i2s", Name: "HDMI de la placa", State: "live", PeakDb: &peak, VideoSlot: slot("hdmi")},
-			{ID: "alsa:C4K", Kind: "usb", Name: "Cam Link 4K", State: "no_signal", Detail: "sin muestras 3 s",
-				DetailCode: "no_samples", DetailArgs: map[string]string{"seconds": "3"},
-				VideoSlot: slot("/dev/v4l/by-id/usb-Elgato_Cam_Link_4K_0005AB12-video-index0")},
+			{ID: "alsa:Edition", Kind: "usb", Name: "Logi 4K Stream Edition", State: "no_signal", Detail: "sin muestras 3 s",
+				DetailCode: "no_samples", DetailArgs: map[string]string{"seconds": "3"}, VideoSlot: slot(simLogi)},
 		},
 		Phones: &mixer.Phones{On: true, GainDb: -12, State: "waiting", Detail: "Esperando a la pantalla",
 			DetailCode: "phones_waiting_screen"},
@@ -252,17 +261,39 @@ func (e *simEngine) command(c mixer.Command) string {
 	code := ""
 	switch c.Cmd {
 	case "take", "secondary":
-		found := false
-		for _, s := range e.stateLocked().Sources {
-			found = found || s.ID == c.Source
-		}
 		switch {
-		case !found:
+		case !e.inSlot(c.Source):
 			code = "unknown_source"
+		case e.hidden[c.Source]:
+			code = "hidden_source"
 		case c.Cmd == "take":
 			e.main = c.Source
 		default:
 			e.secondary = c.Source
+		}
+	case "hide":
+		switch {
+		case !e.inSlot(c.Source):
+			code = "unknown_source"
+		case *c.Hidden && (c.Source == e.main || e.layout != "full" && c.Source == e.secondary):
+			code = "on_air"
+		case *c.Hidden:
+			e.hidden[c.Source] = true
+		default:
+			delete(e.hidden, c.Source)
+		}
+	case "camera_control", "camera_reset":
+		// SOURCES.md §7.3: a source with a slot that has image settings now (a hidden one has none)
+		list := e.cams[c.Source]
+		switch {
+		case !e.inSlot(c.Source):
+			code = "unknown_source"
+		case list == nil || e.hidden[c.Source]:
+			code = "unsupported"
+		case c.Cmd == "camera_reset":
+			cameraReset(list)
+		default:
+			code = cameraControl(list, c.Control, *c.Value)
 		}
 	case "layout":
 		e.layout = c.Layout
@@ -292,6 +323,16 @@ func (e *simEngine) command(c mixer.Command) string {
 		e.publish()
 	}
 	return code
+}
+
+// inSlot: the source sits in a slot now
+func (e *simEngine) inSlot(id string) bool {
+	for _, p := range place(e.slots) {
+		if p != nil && p.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // displacesOnAir: the new configuration would move or switch off the main source (or the secondary in pip/side).

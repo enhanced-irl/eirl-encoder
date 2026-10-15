@@ -1,0 +1,2 @@
+- Las cámaras USB con ajustes de imagen se ajustan desde el codificador: en la pantalla táctil (Ajustes › Fuentes › Imagen) y en la tarjeta «Imagen de las cámaras» de la web. Cada cámara enseña los ajustes que tiene: brillo, contraste, saturación, nitidez, exposición, ganancia, balance de blancos, enfoque, zoom, encuadre y antiparpadeo (50/60 Hz).
+- Los cambios se aplican al momento, también emitiendo, y el codificador los recuerda: vuelven solos cada vez que la cámara se conecta. «Valores de fábrica» la deja como venía.

@@ -249,23 +249,7 @@ func (u *UI) rowDot(d *dc, key, icon, title string, rs RowState, dot string, liv
 	u.icon(c, icon, ix, rmid, 12*s, max(2.0, 2.4*s), ic)
 	rightX := float64(r.X+r.W) - 2*m
 	if rs.Knob != KnobNone {
-		sw, shh := 64*s, 34*s
-		sx, sy := rightX-sw, rmid-shh/2
-		kc := cLine
-		if rs.Knob == KnobOn {
-			kc = cGood
-		}
-		a := 1.0
-		if rs.Busy {
-			a = 0.5
-		}
-		c.FillRR(RR{sx, sy, sw, shh, shh / 2}, kc.WithAlpha(a))
-		kx := sx + shh/2
-		if rs.Knob == KnobOn {
-			kx = sx + sw - shh/2
-		}
-		c.FillCircle(kx, rmid, shh/2-4*s, cInk)
-		rightX = sx - m
+		rightX = d.knob(rightX, rmid, rs.Knob, rs.Busy) - m
 	}
 	if rightX0 > 0 {
 		rightX = min(rightX, rightX0)
@@ -273,6 +257,28 @@ func (u *UI) rowDot(d *dc, key, icon, title string, rs RowState, dot string, liv
 	tone := map[string]Color{"good": cGood, "warn": cWarn, "bad": cBad, "quiet": cQuiet}
 	d.text(tx0, rmid-2*s, title, 19*s, textOpt{col: cInk, bold: true, width: rightX - tx0})
 	d.text(tx0, rmid+17*s, rs.Sub, 14*s, textOpt{col: tone[rs.Tone], bold: rs.Tone == "warn" || rs.Tone == "bad", width: rightX - tx0})
+}
+
+// knob draws a row's switch ending at rightX, centred on mid (half-transparent while busy); it returns its left.
+func (d *dc) knob(rightX, mid float64, k Knob, busy bool) float64 {
+	c, s := d.c, d.s
+	sw, shh := 64*s, 34*s
+	sx, sy := rightX-sw, mid-shh/2
+	kc := cLine
+	if k == KnobOn {
+		kc = cGood
+	}
+	a := 1.0
+	if busy {
+		a = 0.5
+	}
+	c.FillRR(RR{sx, sy, sw, shh, shh / 2}, kc.WithAlpha(a))
+	kx := sx + shh/2
+	if k == KnobOn {
+		kx = sx + sw - shh/2
+	}
+	c.FillCircle(kx, mid, shh/2-4*s, cInk)
+	return sx
 }
 
 // healthDot: the colour of a connection's dot (MODEMS.md §5), the same green, amber and red as the meters.

@@ -1,0 +1,2 @@
+- USB cameras with image settings can be adjusted from the encoder: on the touch screen (Settings › Sources › Image) and in the «Camera image» card of the web page. Each camera shows the settings it has: brightness, contrast, saturation, sharpness, exposure, gain, white balance, focus, zoom, framing and anti-flicker (50/60 Hz).
+- Changes apply at once, also while streaming, and the encoder remembers them: they come back by themselves every time the camera is plugged in. «Factory settings» puts it back as it came.

@@ -516,3 +516,149 @@ func TestCleanSlotsAndCatalog(t *testing.T) {
 		t.Errorf("older engine: %+v %v", st, err)
 	}
 }
+
+// The cameras' image settings (SOURCES.md §7.3): a control of the table with an integer value, or a reset; a source
+// id of the catalogue and nothing from other commands
+func TestValidateCamera(t *testing.T) {
+	cam := "/dev/v4l/by-id/usb-046d_Logi_4K_Stream_Edition_0000ABCD-video-index0"
+	v := func(n int) *int { return &n }
+	yes := true
+	ok := []Command{
+		{Cmd: "camera_control", Source: cam, Control: "brightness", Value: v(140)},
+		{Cmd: "camera_control", Source: cam, Control: "exposure_auto", Value: v(0)},
+		{Cmd: "camera_control", Source: cam, Control: "pan", Value: v(-36000)},
+		{Cmd: "camera_control", Source: cam, Control: "wb_temperature", Value: v(9999)}, // the engine brings it into range
+		{Cmd: "camera_control", Source: "net:cam1", Control: "zoom", Value: v(100)},     // the engine answers unsupported
+		{Cmd: "camera_reset", Source: cam}, {Cmd: "camera_reset", Source: "hdmi"},
+	}
+	for id := range ControlIDs {
+		ok = append(ok, Command{Cmd: "camera_control", Source: cam, Control: id, Value: v(1)})
+	}
+	for _, c := range ok {
+		if err := c.Validate(); err != nil {
+			t.Errorf("%+v: %v", c, err)
+		}
+	}
+	bad := []Command{
+		{Cmd: "camera_control", Source: cam, Control: "brightness"}, // no value
+		{Cmd: "camera_control", Source: cam, Value: v(1)},           // no control
+		{Cmd: "camera_control", Control: "brightness", Value: v(1)}, // no source
+		{Cmd: "camera_control", Source: "/dev/video0", Control: "brightness", Value: v(1)},
+		{Cmd: "camera_control", Source: cam, Control: "exposure_auto_priority", Value: v(1)}, // kept by the engine, not shown
+		{Cmd: "camera_control", Source: cam, Control: "Brightness", Value: v(1)},
+		{Cmd: "camera_control", Source: cam, Control: "brightness;rm", Value: v(1)},
+		{Cmd: "camera_control", Source: cam, Control: "brightness", Value: v(1 << 31)},
+		{Cmd: "camera_control", Source: cam, Control: "brightness", Value: v(-1<<31 - 1)},
+		{Cmd: "camera_control", Source: cam, Control: "brightness", Value: v(1), On: &yes},
+		{Cmd: "camera_reset"}, {Cmd: "camera_reset", Source: "/etc/passwd"},
+		{Cmd: "camera_reset", Source: cam, Control: "brightness"}, {Cmd: "camera_reset", Source: cam, Value: v(0)},
+		// control and value only in camera_control
+		{Cmd: "take", Source: cam, Control: "brightness"}, {Cmd: "audio_delay", Source: "i2s", Ms: v(0), Value: v(0)},
+	}
+	for _, c := range bad {
+		if c.Validate() == nil {
+			t.Errorf("%+v: should be rejected", c)
+		}
+	}
+	// The value 0 reaches the engine (it is not dropped as empty)
+	var got map[string]any
+	sock := fakeEngine(t, func(req map[string]any) []string { got = req; return []string{`{"id":1,"ok":true}`} })
+	if err := (&Client{Sock: sock}).Do(context.Background(), Command{Cmd: "camera_control", Source: cam, Control: "gain", Value: v(0)}); err != nil ||
+		got["control"] != "gain" || got["value"] != 0.0 || got["source"] != cam {
+		t.Errorf("value 0: %v %v", err, got)
+	}
+}
+
+// The controls of each source reach the web bounded: ids of the table once, groups and types from their lists, a
+// sound range with the value and the default inside it, bools 0…1 and menus with their options
+func TestCleanControls(t *testing.T) {
+	ctl := func(id, group, typ string, lo, hi, step, def, val int, opts ...int) Control {
+		return Control{ID: id, Group: group, Type: typ, Min: lo, Max: hi, Step: step, Default: def, Value: val, Options: opts}
+	}
+	in := []Control{
+		ctl("brightness", "image", "int", 0, 255, 1, 128, 140),
+		ctl("brightness", "image", "int", 0, 255, 1, 128, 10),                   // twice: the first one stays
+		ctl("exposure_auto_priority", "exposure", "bool", 0, 1, 1, 0, 0),        // not in the table
+		ctl("contrast", "colour", "int", 0, 255, 1, 128, 128),                   // unknown group
+		ctl("saturation", "image", "float", 0, 255, 1, 128, 128),                // unknown type
+		ctl("hue", "image", "int", 10, -10, 1, 0, 0),                            // min > max
+		ctl("sharpness", "image", "int", 0, 255, 0, 999, -5),                    // step 0, default and value out of range
+		ctl("exposure_auto", "exposure", "bool", 0, 1, 1, 1, 7),                 // bool value out of range
+		ctl("backlight", "exposure", "bool", 0, 2, 1, 1, 1),                     // a bool that is not 0…1
+		ctl("gain", "exposure", "int", 0, 255, 1, 0, 0, 1, 2),                   // options only on a menu
+		ctl("power_line", "exposure", "menu", 0, 3, 1, 2, 1, 0, 1, 1, 2, 9, -1), // duplicates and out of range dropped
+		ctl("wb_auto", "white_balance", "menu", 0, 3, 1, 0, 0),                  // a menu without options
+		ctl("focus", "framing", "int", 0, 255, 5, 0, 30),
+	}
+	in[len(in)-1].Inactive = true
+	st := clean(&State{Sources: []Source{{ID: "cam", Controls: in}, {ID: "hdmi"}}})
+	got := map[string]Control{}
+	var ids []string
+	for _, c := range st.Sources[0].Controls {
+		got[c.ID] = c
+		ids = append(ids, c.ID)
+	}
+	if strings.Join(ids, ",") != "brightness,sharpness,exposure_auto,gain,power_line,focus" {
+		t.Fatalf("controls kept: %v", ids)
+	}
+	if c := got["brightness"]; c.Value != 140 {
+		t.Errorf("brightness: %+v", c)
+	}
+	if c := got["sharpness"]; c.Step != 1 || c.Default != 255 || c.Value != 0 {
+		t.Errorf("sharpness not bounded: %+v", c)
+	}
+	if c := got["exposure_auto"]; c.Value != 1 {
+		t.Errorf("bool not bounded: %+v", c)
+	}
+	if c := got["gain"]; c.Options != nil {
+		t.Errorf("options on an int: %+v", c)
+	}
+	if c := got["power_line"]; fmt.Sprint(c.Options) != "[0 1 2]" {
+		t.Errorf("menu options: %v", c.Options)
+	}
+	if c := got["focus"]; !c.Inactive || c.Step != 5 {
+		t.Errorf("focus: %+v", c)
+	}
+	// At most 8 options and 24 controls
+	many := ctl("power_line", "exposure", "menu", 0, 100, 1, 0, 0)
+	for i := range 20 {
+		many.Options = append(many.Options, i)
+	}
+	long := make([]Control, 30)
+	for i := range long {
+		long[i] = ctl("zoom", "framing", "int", 100, 500, 1, 100, 100)
+	}
+	long[25] = ctl("tilt", "framing", "int", -36000, 36000, 3600, 0, 0) // beyond the 24th: not read
+	st = clean(&State{Sources: []Source{{ID: "a", Controls: []Control{many}}, {ID: "b", Controls: long}}})
+	if n := len(st.Sources[0].Controls[0].Options); n != MaxMenuOptions {
+		t.Errorf("menu options: %d", n)
+	}
+	if c := st.Sources[1].Controls; len(c) != 1 || c[0].ID != "zoom" {
+		t.Errorf("long list: %+v", c)
+	}
+	// Nothing valid, or nothing sent: the key is absent (the web hides the card)
+	st = clean(&State{Sources: []Source{{ID: "a", Controls: []Control{ctl("x", "image", "int", 0, 1, 1, 0, 0)}}, {ID: "b"}}})
+	b, _ := json.Marshal(st.Sources)
+	if strings.Contains(string(b), `"controls"`) {
+		t.Errorf("controls present: %s", b)
+	}
+	// Through the state file, as the engine writes it: inactive only when true, options only on the menu
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mixer.json")
+	os.WriteFile(path, []byte(`{"v":1,"program":{},"slots":1,"screen":{},"sources":[{"id":"/dev/v4l/by-id/usb-x-video-index0","slot":1,`+
+		`"kind":"usb","name":"Logi","state":"live","controls":[{"id":"power_line","group":"exposure","type":"menu","min":0,"max":2,`+
+		`"step":1,"default":2,"value":1,"options":[0,1,2]},{"id":"wb_temperature","group":"white_balance","type":"int","min":2000,`+
+		`"max":7500,"step":10,"default":4000,"value":3320,"inactive":true},{"id":"gain","group":"exposure","type":"int","min":0,`+
+		`"max":255,"step":1,"default":0,"value":0}]}]}`), 0o644)
+	rd, err := (&Client{StatePath: path}).Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ = json.Marshal(rd.Sources[0].Controls)
+	want := `[{"id":"power_line","group":"exposure","type":"menu","min":0,"max":2,"step":1,"default":2,"value":1,"options":[0,1,2]},` +
+		`{"id":"wb_temperature","group":"white_balance","type":"int","min":2000,"max":7500,"step":10,"default":4000,"value":3320,"inactive":true},` +
+		`{"id":"gain","group":"exposure","type":"int","min":0,"max":255,"step":1,"default":0,"value":0}]`
+	if string(b) != want {
+		t.Errorf("controls:\n%s\nwant\n%s", b, want)
+	}
+}

@@ -13,7 +13,7 @@ type SettingsGroup struct {
 // can hit). A list entry is s_page_<group>; a tab, s_tab_<page>. A group of one page has the page's id.
 var SettingsGroups = []SettingsGroup{
 	{"stream", []string{"dest", "uplinks", "pause"}},
-	{"sources", []string{"sources", "input"}},
+	{"sources", []string{"sources", "input", "camera"}},
 	{"wifi", []string{"wifi"}},
 	{"cams", []string{"cams"}},
 	{"cloud", []string{"cloud"}},

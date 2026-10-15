@@ -126,6 +126,8 @@ type Layout struct {
 	Strips []Strip
 	// ASet is the audio view's settings (audioset.go)
 	ASet AudioSetLayout
+	// Cam is the Image tab (camera.go)
+	Cam CameraLayout
 }
 
 // NewLayout is Layout(dw, dh, nslots).

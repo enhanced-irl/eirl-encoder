@@ -1,0 +1,2 @@
+- Les caméras USB qui ont des réglages d'image se règlent depuis l'encodeur : sur l'écran tactile (Réglages › Sources › Image) et dans la carte « Image des caméras » de la page web. Chaque caméra affiche les réglages qu'elle a : luminosité, contraste, saturation, netteté, exposition, gain, balance des blancs, mise au point, zoom, cadrage et anti-scintillement (50/60 Hz).
+- Les changements s'appliquent tout de suite, même en diffusion, et l'encodeur les garde : ils reviennent tout seuls chaque fois que la caméra est branchée. « Réglages d'usine » la remet comme à l'origine.

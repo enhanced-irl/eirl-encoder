@@ -1,4 +1,4 @@
-> **Status:** IN PROGRESS — **in `main` (MR !5)**, phase 0 measured (1080p60 over USB fits), installed and tested on the board on Oct 12 (hot unplugging too). Still missing: per-source A/V sync and a long test
+> **Status:** IN PROGRESS — **in `main` (MR !5)**, phase 0 measured (1080p60 over USB fits), installed and tested on the board on Oct 12 (hot unplugging too). Still missing: per-source A/V sync and a long test. Camera image settings (§7): in a branch, Oct 14
 > **Updated:** 2026-10-14
 
 # Encoder video sources (board HDMI, capture cards and USB cameras)
@@ -214,3 +214,119 @@ manager/build.sh` (which now also installs `/etc/udev/rules.d/70-eirl-capture.ru
 on capture cards: it hooks onto the appearance of the video node and waits 1 s, because uvcvideo enables
 autosuspend at the end of its probe and kernel 4.9 does not emit `bind` events). Back to HDMI: `SOURCE=hdmi` from the app. Undo the rule:
 `sudo rm /etc/udev/rules.d/70-eirl-capture.rules && sudo udevadm control --reload`.
+
+## 7. Camera image settings (UVC controls)
+
+Asked for on Oct 14: the settings a USB camera offers (brightness, exposure, white balance, focus, zoom…),
+**detected from the camera** and changed from Settings on the screen and on the web, while streaming too.
+
+### 7.1 What a camera offers
+
+- **Standard controls.** UVC defines a fixed list (its Camera Terminal and Processing Unit) that `uvcvideo`
+  turns into standard V4L2 controls, with their minimum, maximum, step, default and current value. Any
+  camera can be asked which ones it has without knowing its model; each one has only some of them.
+- **Proprietary controls** live in *Extension Units*: a vendor GUID and opaque bytes, undocumented, that
+  Linux only exposes if someone maps them by hand. **They are not exposed**: some are firmware or factory
+  controls, and writing them blind can break the camera.
+- **Only the controls in the table below are shown** (a whitelist of standard ones, with their meaning known and
+  their names translated). A camera that brings another standard control gets it shown by adding it to the table.
+- Read on the board on Oct 14 (read only, output off):
+
+  | Source | Controls |
+  |---|---|
+  | Logi 4K Stream Edition (046d:086b) | brightness, contrast, saturation, sharpness, gain, backlight compensation (0-1), power line (50/60 Hz), white balance auto + 2000-7500 K, exposure auto (manual / aperture priority) + 3-2047, `exposure_auto_priority`, focus auto + 0-255, zoom 100-500, pan/tilt ±36000 (digital). Plus 7 Logitech extension units (~63 controls) |
+  | MS2109 capture card (534d:2109) | brightness (−128…127, default −11), contrast (default 148), saturation (default 180), hue. Its defaults are not neutral |
+  | Board HDMI (TC358743) | none (the bridge passes the signal through) |
+  | Cam Link 4K | not read yet (unplugged); a capture card takes the camera's picture as it is |
+  | Network cameras | none: they are set on the phone or the camera |
+
+- `uvcvideo` 1.1.1 (L4T 4.9) answers `VIDIOC_QUERYCTRL`, `VIDIOC_QUERY_EXT_CTRL`, `VIDIOC_QUERYMENU`,
+  `VIDIOC_G_CTRL` and `VIDIOC_S_CTRL`. Querying a control's range is cached by the driver after the first time;
+  reading its value and writing it are USB control requests to the camera.
+
+### 7.2 The controls (ids, groups, order)
+
+The engine queries each one by its V4L2 id and reports those the camera has, in this order. Read-only or disabled
+ones are left out.
+
+| Group (`group`) | Control (`id`) | V4L2 | Type | Notes |
+|---|---|---|---|---|
+| `image` | `brightness` · `contrast` · `saturation` · `hue` · `gamma` · `sharpness` | 0x980900-03, 0x980910, 0x98091b | int | |
+| `exposure` | `exposure_auto` | 0x9a0901 | bool | The V4L2 menu as a switch: 1 = the camera's automatic mode (aperture priority, else auto, else shutter priority), 0 = manual. Left out if the camera lacks manual or every automatic mode |
+| `exposure` | `exposure` | 0x9a0902 | int | Units of 100 µs (UVC): the UIs show ms. Inactive while `exposure_auto` is 1 |
+| `exposure` | `gain` · `backlight` | 0x980913, 0x98091c | int | |
+| `exposure` | `power_line` | 0x980918 | menu | `options`: the values the camera has: 0 off, 1 50 Hz, 2 60 Hz, 3 auto |
+| `white_balance` | `wb_auto` | 0x98090c | bool | |
+| `white_balance` | `wb_temperature` | 0x98091a | int | Kelvin. Inactive while `wb_auto` is 1 |
+| `framing` | `focus_auto` | 0x9a090c | bool | |
+| `framing` | `focus` | 0x9a090a | int | Inactive while `focus_auto` is 1 |
+| `framing` | `zoom` · `pan` · `tilt` | 0x9a090d, 0x9a0908, 0x9a0909 | int | `pan`/`tilt` in arc seconds (UVC): the UIs show degrees (÷ 3600) |
+
+- An integer control whose range is exactly 0-1 (the Logi's backlight compensation) is reported as `bool`.
+- `exposure_auto_priority` is **not** shown: the engine keeps it at 0 on every camera (with little light the camera
+  would lower its fps), as it did before.
+
+### 7.3 Contract (MIXER.md §5, additive)
+
+State: each USB source of `sources[]` whose camera has at least one of those controls carries `controls`; other
+sources, a hidden source and one that is gone carry none (the key is absent).
+
+```json
+"controls": [
+  {"id": "brightness", "group": "image", "type": "int", "min": 0, "max": 255, "step": 1, "default": 128, "value": 140},
+  {"id": "exposure_auto", "group": "exposure", "type": "bool", "min": 0, "max": 1, "step": 1, "default": 1, "value": 0},
+  {"id": "exposure", "group": "exposure", "type": "int", "min": 3, "max": 2047, "step": 1, "default": 250, "value": 78},
+  {"id": "power_line", "group": "exposure", "type": "menu", "min": 0, "max": 2, "step": 1, "default": 2, "value": 1, "options": [0, 1, 2]},
+  {"id": "wb_temperature", "group": "white_balance", "type": "int", "min": 2000, "max": 7500, "step": 10, "default": 4000, "value": 3320, "inactive": true}
+]
+```
+
+- `value` and `default` are always integers (a `bool` is 0 or 1). `inactive`: its automatic is on, the camera
+  ignores a manual value now (the UIs show it as automatic and do not let it change). `options` only on `menu`.
+- The values are read when the camera opens (after putting the saved ones back) and after each command: the engine
+  does not poll the camera. A value the camera moves by itself (the exposure while it is automatic) is not followed.
+
+| Command | Fields | Errors |
+|---|---|---|
+| `camera_control` | `source`: a USB source id; `control`: an `id` of the table; `value`: integer. An `int` is brought inside `min…max` and to its `step`; a `bool` takes 0 or 1; a `menu`, one of its `options` | `unknown_source`, `unsupported` (the source has no `controls` now), `unknown_control`, `bad_request` (no value, not an integer, outside a bool's or a menu's values), `inactive` (its automatic is on), `busy`, `camera_error` (the camera refused it or did not answer) |
+| `camera_reset` | `source`. Every control back to its default (the automatics first) and the camera's saved values forgotten | `unknown_source`, `unsupported`, `busy`, `camera_error` |
+
+- `ok: true` once the camera took it; the state already carries the new values when the reply arrives. A command
+  that changes nothing is `ok: true` too.
+- Allowed while streaming: that is what it is for (the exposure or the focus mid-stream). The UIs ask for a second tap
+  before `camera_reset`.
+- An older engine answers `unknown_command`; the UIs only show the settings of a source that has `controls`.
+
+### 7.4 Saved per camera
+
+- `/var/lib/eirl-engine/cameras.json` (the engine's): per source id, the values set by the user that differ from
+  the camera's default, and when they were last changed. At most 16 cameras: the one changed longest ago goes.
+  Written at most once a second, and when the engine stops.
+- **Put back every time the engine opens the camera**: at start, after unplugging and plugging it back, after a
+  `-71` reset, after showing a hidden source. The automatics first, then the values (a manual value whose automatic
+  is on is not written). A saved value outside the camera's range now is brought inside it; a control the camera no
+  longer has is ignored (and kept).
+- `camera_reset` forgets them, also when the camera refused some default (it answers `camera_error`): what was
+  saved would come back at the next opening.
+
+### 7.5 Where it lives and how to try it
+
+- `manager/internal/engine/camera`: the table, the reading and writing over the V4L2 ioctls (`List`, `Set`,
+  `Reset`, `Apply`), and `Store` (`cameras.json`). Its tests use a fake camera with the Logi's controls.
+- `manager/internal/engine/camctl.go`: the two commands. The actor only checks a command against the controls last
+  read and queues it (at most 8 per camera, then `busy`); each USB source has its own goroutine for the camera, so a
+  camera that stops answering (the driver's timeout on each request) never holds the actor. The reply comes from
+  there, after the new state is published. A command is checked against the controls the previous one left (no
+  full read before writing) and reads them back after it. A camera that fails twice while being read, or takes
+  more than 1.5 s, is left without settings in the state (capturing goes on); the screen waits for a camera command
+  at most 2 s, like the socket, so its next command is never left behind a camera that hardly answers.
+- A source waits for its camera command in flight before it ends: a source that takes its place (another slot, a
+  restart) never opens the camera in the middle of a write, and the engine saves `cameras.json` after it.
+- The source puts the saved values back in `prepareUSB`, where it used to run `v4l2-ctl -c exposure_auto_priority=0`
+  (now done with the same ioctl, in `Apply`). Hidden or gone: its `controls` leave the state.
+- The screen: Settings › Sources › Image (MIXER.md §21). The web: the «Camera image» card, through `POST /mixer`
+  (MANAGER.md §3).
+- On the board: `eirl-enginectl camera 2` (the controls of the source in slot 2, as JSON),
+  `eirl-enginectl camera 2 brightness 140`, `eirl-enginectl camera-reset 2`.
+- Undo: `sudo rm /var/lib/eirl-engine/cameras.json` and restart the engine (the cameras keep the values they have
+  until they are unplugged or reset).

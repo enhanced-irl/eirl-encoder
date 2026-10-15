@@ -4,9 +4,11 @@ import (
 	"time"
 
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/appapi"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/camera"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/phones"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/screen"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/screen/ui"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/server"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/gst"
 )
 
@@ -47,6 +49,10 @@ func (h screenHost) Command(cmd string, msg map[string]any) (bool, string) {
 	}
 	ch := make(chan res, 1)
 	h.e.post(func() {
+		if camera.IsCommand(cmd) {
+			h.e.cameraCommand(cmd, msg, func(ok bool, code string) { ch <- res{ok, code} })
+			return
+		}
 		if cmd == "output" {
 			on, ok := msg["on"].(bool)
 			if !ok {
@@ -60,9 +66,19 @@ func (h screenHost) Command(cmd string, msg map[string]any) (bool, string) {
 		r1, r2 := h.e.command(cmd, msg)
 		ch <- res{r1, r2}
 	})
+	// A camera answers once it has taken the setting: never longer than the socket waits, so the screen's next
+	// command (stop streaming, take) is not left behind a camera that hardly answers
+	var late <-chan time.Time
+	if camera.IsCommand(cmd) {
+		t := time.NewTimer(server.CommandTimeout)
+		defer t.Stop()
+		late = t.C
+	}
 	select {
 	case r := <-ch:
 		return r.ok, r.code
+	case <-late:
+		return false, server.ErrTimeout
 	case <-h.e.stopped:
 		return false, "unsupported"
 	}

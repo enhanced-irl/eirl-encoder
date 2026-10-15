@@ -84,7 +84,47 @@ type Source struct {
 	Format     string            `json:"format"`
 	Mode       string            `json:"mode"`
 	FPS        float64           `json:"fps"`
+	// Controls: the camera's image settings (SOURCES.md §7), in the engine's order. Absent on a source without
+	// them (not a USB camera, hidden or gone) and with an older engine (the web hides the card)
+	Controls []Control `json:"controls,omitempty"`
 }
+
+// Control: one standard UVC setting a USB camera has (SOURCES.md §7.2), with its range and its value. Type int,
+// bool (0/1) or menu (Options: the values the camera has). Inactive: its automatic is on, the camera ignores a
+// manual value now
+type Control struct {
+	ID       string `json:"id"`
+	Group    string `json:"group"` // image | exposure | white_balance | framing
+	Type     string `json:"type"`  // int | bool | menu
+	Min      int    `json:"min"`
+	Max      int    `json:"max"`
+	Step     int    `json:"step"`
+	Default  int    `json:"default"`
+	Value    int    `json:"value"`
+	Inactive bool   `json:"inactive,omitempty"`
+	Options  []int  `json:"options,omitempty"`
+}
+
+// ControlIDs: the controls of the table of SOURCES.md §7.2, the only ones forwarded and accepted in camera_control
+var ControlIDs = map[string]bool{
+	"brightness": true, "contrast": true, "saturation": true, "hue": true, "gamma": true, "sharpness": true,
+	"exposure_auto": true, "exposure": true, "gain": true, "backlight": true, "power_line": true,
+	"wb_auto": true, "wb_temperature": true,
+	"focus_auto": true, "focus": true, "zoom": true, "pan": true, "tilt": true,
+}
+
+// controlGroups and controlTypes: the closed lists of Control.Group and Control.Type
+var (
+	controlGroups = map[string]bool{"image": true, "exposure": true, "white_balance": true, "framing": true}
+	controlTypes  = map[string]bool{"int": true, "bool": true, "menu": true}
+)
+
+const (
+	// MaxControls: the controls of one source at most
+	MaxControls = 24
+	// MaxMenuOptions: the values of one menu at most
+	MaxMenuOptions = 8
+)
 
 type Screen struct {
 	State  string `json:"state"` // off | waiting | on | error
@@ -272,10 +312,12 @@ type Command struct {
 	Size       *int     `json:"size,omitempty"`
 	Text       *string  `json:"text,omitempty"`
 	Mute       *bool    `json:"mute,omitempty"`
-	Video      string   `json:"video,omitempty"` // audio_link: the video source; source, the audio that goes with it
-	Ms         *int     `json:"ms,omitempty"`    // audio_delay
-	Mode       string   `json:"mode,omitempty"`  // audio_mode: single | mix
-	Gain       *float64 `json:"gain,omitempty"`  // audio_mix and phones, in dB; on = in or out of the mix, or headphones on
+	Video      string   `json:"video,omitempty"`   // audio_link: the video source; source, the audio that goes with it
+	Ms         *int     `json:"ms,omitempty"`      // audio_delay
+	Mode       string   `json:"mode,omitempty"`    // audio_mode: single | mix
+	Gain       *float64 `json:"gain,omitempty"`    // audio_mix and phones, in dB; on = in or out of the mix, or headphones on
+	Control    string   `json:"control,omitempty"` // camera_control: an id of ControlIDs; source, the USB camera
+	Value      *int     `json:"value,omitempty"`   // camera_control: the engine brings it into the control's range
 	// Slots: the slots command (every slot, as in slots.json). The API sends it after saving the file
 	Slots []SlotAssign `json:"slots,omitempty"`
 }
@@ -299,6 +341,8 @@ var fields = map[string][]string{
 	"preview": {"on"}, // the WebRTC preview: the app stops it while nobody watches (FollowPreview)
 	"phones":  {"on", "gain"},
 	"slots":   {"slots"}, // the source slots (PUT /sources/slots writes slots.json and then sends it)
+	// A USB camera's image settings (SOURCES.md §7.3): one control, or all back to the camera's defaults
+	"camera_control": {"source", "control", "value"}, "camera_reset": {"source"},
 }
 
 // present: the fields the command carries
@@ -307,7 +351,7 @@ func (c Command) present() []string {
 	for name, set := range map[string]bool{"source": c.Source != "", "layout": c.Layout != "",
 		"transition": c.Transition != "", "hidden": c.Hidden != nil, "on": c.On != nil, "corner": c.Corner != "",
 		"size": c.Size != nil, "text": c.Text != nil, "mute": c.Mute != nil, "video": c.Video != "", "ms": c.Ms != nil,
-		"mode": c.Mode != "", "gain": c.Gain != nil, "slots": c.Slots != nil} {
+		"mode": c.Mode != "", "gain": c.Gain != nil, "slots": c.Slots != nil, "control": c.Control != "", "value": c.Value != nil} {
 		if set {
 			out = append(out, name)
 		}
@@ -413,6 +457,23 @@ func (c Command) Validate() error {
 		if !validSlots(c.Slots) {
 			return i18n.E("mixer.bad_slots")
 		}
+	case "camera_control":
+		needSource = true
+		if c.Control == "" {
+			return i18n.E("mixer.cmd_missing", "control")
+		}
+		if !ControlIDs[c.Control] {
+			return i18n.E("mixer.bad_control")
+		}
+		if c.Value == nil {
+			return i18n.E("mixer.cmd_missing", "value")
+		}
+		// A V4L2 control is an int32: anything beyond it is not a value of any camera
+		if *c.Value < math.MinInt32 || *c.Value > math.MaxInt32 {
+			return i18n.E("mixer.bad_control_value")
+		}
+	case "camera_reset":
+		needSource = true
 	}
 	if needSource && !reSource.MatchString(c.Source) {
 		return i18n.E("mixer.bad_source")
@@ -526,6 +587,7 @@ func clean(st *State) *State {
 			st.Sources[i].Alias = ""
 		}
 		cleanDetail(&st.Sources[i].DetailCode, &st.Sources[i].DetailArgs)
+		st.Sources[i].Controls = cleanControls(st.Sources[i].Controls)
 	}
 	st.SlotConfig = cleanSlotConfig(st.SlotConfig)
 	st.Catalog = cleanCatalog(st.Catalog)
@@ -639,6 +701,48 @@ func cleanDetail(code *string, args *map[string]string) {
 		out[k] = v
 	}
 	*args = out
+}
+
+// cleanControls: at most MaxControls, each id of ControlIDs once, group and type from their lists, min ≤ max, step ≥ 1,
+// value and default inside min…max; a bool is 0…1 and a menu carries 1…MaxMenuOptions distinct options inside its
+// range (options only on a menu). A control that does not fit is dropped; none left = nil (the key is absent).
+func cleanControls(in []Control) []Control {
+	if len(in) > MaxControls {
+		in = in[:MaxControls]
+	}
+	var out []Control
+	seen := map[string]bool{}
+	for _, c := range in {
+		if !ControlIDs[c.ID] || seen[c.ID] || !controlGroups[c.Group] || !controlTypes[c.Type] || c.Min > c.Max {
+			continue
+		}
+		if c.Type == "bool" && (c.Min != 0 || c.Max != 1) {
+			continue
+		}
+		c.Step = max(c.Step, 1)
+		c.Value = min(max(c.Value, c.Min), c.Max)
+		c.Default = min(max(c.Default, c.Min), c.Max)
+		if c.Type == "menu" {
+			var opts []int
+			for _, o := range c.Options {
+				if len(opts) == MaxMenuOptions {
+					break
+				}
+				if o >= c.Min && o <= c.Max && !slices.Contains(opts, o) {
+					opts = append(opts, o)
+				}
+			}
+			if len(opts) == 0 {
+				continue
+			}
+			c.Options = opts
+		} else {
+			c.Options = nil
+		}
+		seen[c.ID] = true
+		out = append(out, c)
+	}
+	return out
 }
 
 // cleanSlotConfig: at most 8 slots, each once, within 1…8, with a valid assign; a bad alias becomes "".

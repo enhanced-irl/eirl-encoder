@@ -439,6 +439,17 @@ sudo systemctl restart eirl-encoderd</pre>
         </form>
       </section>
 
+      <!-- The USB cameras' image settings (SOURCES.md §7): what each camera offers, from the mixer state. Only with a
+           source that has them; controls built by settings.js -->
+      <section id="camera-card" class="card" aria-labelledby="camera-title" hidden>
+        <div class="card-head"><h3 id="camera-title" class="card-title" data-i18n="camera.title"></h3><span id="camera-src" class="sub"></span></div>
+        <p class="hint camera-intro" data-i18n="camera.intro"></p>
+        <div id="camera-pick" class="seg camera-pick" role="group" data-i18n-attr="aria-label:camera.pickAria" hidden></div>
+        <div id="camera-ctls"></div>
+        <p id="camera-err" class="err" role="alert" hidden></p>
+        <div class="form-actions"><button id="camera-reset" class="btn small" type="button" data-i18n="camera.reset"></button></div>
+      </section>
+
       <!-- The board's Wi-Fi (WIFI.md): «Create my Wi-Fi» (W-A) and «Connect to a Wi-Fi» (W-B) -->
       <section id="wifi-card" class="card" aria-labelledby="wifi-title" hidden>
         <div class="card-head"><h3 id="wifi-title" class="card-title" data-i18n="wifi.title"></h3></div>

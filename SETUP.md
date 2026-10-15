@@ -1,4 +1,4 @@
-> **Status:** IN PROGRESS · **Updated:** 2026-10-14
+> **Status:** IN PROGRESS · **Updated:** 2026-10-15
 >
 > Device settings, first-boot wizard, source slots and the languages of the API messages, app side
 > (`eirl-encoderd`). The screen and the web build on this API; the engine side of the slots is in
@@ -283,7 +283,9 @@ data directory with a fake `eirl-netsetup` that writes the state the real one wo
 (generated at start from `-hardware-id`, otherwise from `-data`; `-fresh` clears it), channel and password work in the
 web, the wizard and over the socket; no camera ever connects (no MediaMTX), and there is no Wi-Fi client.
 
-The simulator's engine has a catalogue of four sources (HDMI, a USB capture, a network camera, the test pattern),
+The simulator's engine has a catalogue of five sources (HDMI, a USB camera, a network camera, the test pattern and,
+without a slot until one is given to it, a USB capture card); the two USB ones carry image settings
+(SOURCES.md §7) with `camera_control`/`camera_reset` and the engine's rules. It hides and shows sources and
 applies slots with the on_air rule and starts streaming with `PUT /output {"output":"on","apply":true}` (a test
 destination is preset). Linking gives code `SIMX-2345`, approved after 30 s. `/update`: check → `available` 0.2.0
 (1.5 s) → `downloading` (3 s) → `ready` (8 s); install → `installing` (6 s) → `idle` on 0.2.0; `409 streaming` /

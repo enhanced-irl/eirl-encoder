@@ -4,6 +4,7 @@ import (
 	"math"
 
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/audio"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/camera"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/scene"
 )
 
@@ -55,6 +56,8 @@ type SourceState struct {
 	Format     string            `json:"format"`
 	Mode       string            `json:"mode"`
 	FPS        float64           `json:"fps"`
+	// Controls: a USB camera's image settings (SOURCES.md §7.3); absent without any
+	Controls []camera.Control `json:"controls,omitempty"`
 }
 
 // SlotState is a slot's configuration and whether a source is in it now.

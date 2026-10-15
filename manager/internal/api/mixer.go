@@ -30,6 +30,29 @@ var mixerErrors = map[string]string{
 	"unsupported":    "mixer.unsupported",
 	// an engine older than the command (e.g. pip, pause or lock)
 	"unknown_command": "mixer.unsupported",
+	// the cameras' image settings (SOURCES.md §7.3)
+	"unknown_control": "mixer.unknown_control",
+	"inactive":        "mixer.control_inactive",
+	"busy":            "mixer.busy",
+	"camera_error":    "mixer.camera_error",
+}
+
+// mixerCmdErrors: a code that means something else in one command. unsupported, for the camera commands, is the
+// source that has no image settings now (an older engine answers unknown_command)
+var mixerCmdErrors = map[string]map[string]string{
+	"camera_control": {"unsupported": "mixer.camera_unsupported"},
+	"camera_reset":   {"unsupported": "mixer.camera_unsupported"},
+}
+
+// mixerErrorKey: the catalog key of an engine error code in a command; mixer.rejected if unknown
+func mixerErrorKey(cmd, code string) string {
+	if key, ok := mixerCmdErrors[cmd][code]; ok {
+		return key
+	}
+	if key, ok := mixerErrors[code]; ok {
+		return key
+	}
+	return "mixer.rejected"
 }
 
 func (s *Server) getMixer(w http.ResponseWriter, r *http.Request) {
@@ -81,11 +104,7 @@ func (s *Server) postMixer(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, 409, "mixer_off", "mixer.off")
 		return
 	case errors.As(err, &ce):
-		key, ok := mixerErrors[ce.Code]
-		if !ok {
-			key = "mixer.rejected"
-		}
-		fail(w, r, 422, ce.Code, key)
+		fail(w, r, 422, ce.Code, mixerErrorKey(c.Cmd, ce.Code))
 		return
 	case err != nil:
 		s.Log.Error("mixer", "cmd", c.Cmd, "err", err)

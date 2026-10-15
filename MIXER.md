@@ -308,6 +308,8 @@ state is also copied to `/run/eirl-engine/mixer.json` (0644) on every change.
 | `lock` | `on`: bool. Lock the touch screen | `bad_request` |
 | `preview` | `on`: bool. The web's WebRTC preview: the app stops it while nobody is watching and repeats it every 30 s (§17). The state reports it in `preview.on` | `bad_request`, `unsupported` (no preview, `LIVE=0`) |
 | `phones` | `on`: bool and/or `gain`: integer dB from −40 (silence) to 0. The screen headphones: the program audio over the board's HDMI ([`HEADPHONES.md`](HEADPHONES.md)). At least one | `bad_request`, `unsupported` (pipeline without `phvalve`/`phtap`) |
+| `camera_control` | `source`: a USB source id, `control`: a control id, `value`: integer. A camera's image setting ([`SOURCES.md`](SOURCES.md) §7): answered once the camera took it, with the state already carrying it | `unknown_source`, `unsupported` (the source has no `controls`), `unknown_control`, `bad_request`, `inactive` (its automatic is on), `busy`, `camera_error` |
+| `camera_reset` | `source`. Every image setting of that camera back to its default, and its saved values forgotten | `unknown_source`, `unsupported`, `busy`, `camera_error` |
 | `get` | — | — |
 | `subscribe` | — (the state now and on every change, as `{"event": "state", "state": {…}}`) | — |
 
@@ -337,6 +339,10 @@ Since §15: `mode` (`single` · `mix`) and, on each input, `inMix` and `gainDb`.
 `phones` `{"on": true, "gainDb": -12, "state": "on"}`, with `state` `off` · `waiting` (no screen, or one that does not
 support audio: `detail` says which) · `on` · `error` (retrying; `detail` = the reason). It is saved with the scene
 (`audioSettings.phones`).
+
+Camera image settings ([`SOURCES.md`](SOURCES.md) §7.3): a USB source whose camera has some of the standard
+controls carries `controls` (`id`, `group`, `type` `int` · `bool` · `menu`, `min`, `max`, `step`, `default`, `value`,
+`inactive`, `options`); without any, the key is absent.
 
 Composition (§11): `program.pip` `{"corner": "br", "size": 33}`, `program.pause` `{"on": false,
 "text": "Be right back", "mute": true}`, `screen.locked` (bool) and, in `output`, `by` (`start` ·
@@ -1058,14 +1064,14 @@ audio delays and links, the EnhancedIRL link and the web password were only on t
 
 ### 21.1 Navigation: seven groups with tabs
 
-At 1024×600 the list on the left takes seven entries a finger can hit (≥ 48 px), and there are thirteen pages now.
+At 1024×600 the list on the left takes seven entries a finger can hit (≥ 48 px), and there are fourteen pages now.
 Chosen over a list with pages (▲▼): **seven groups**, and a group of several pages shows them as **tabs** in the page's
 title row (`SettingsGroups`, settings_layout.go; a list entry is `s_page_<group>`, a tab `s_tab_<page>`):
 
 | Group | Tabs (pages) |
 |---|---|
 | Stream | Destination (`dest`) · Uplinks (`uplinks`) · Pause (`pause`) |
-| Sources | Slots (`sources`) · Input (`input`) |
+| Sources | Slots (`sources`) · Input (`input`) · Image (`camera`) |
 | Wi-Fi | — (`wifi`) |
 | Network cameras | — (`cams`) |
 | EnhancedIRL | — (`cloud`) |
@@ -1085,7 +1091,7 @@ group's entry and on the tab. The wizard keeps using the pages by id, without ta
   in the page area, with pages; the option under the finger when it went down), `confirmTap` (a second tap within
   `ConfirmFor` for what cuts or deletes) and a page's own notice.
 - **Texts by area**: each area's table in its own file (`strings_<area>.go`: stream, input, net, cloud, account,
-  audio) reached as `Tx.<Area>`; the completeness and verbs tests walk into them.
+  audio, camera) reached as `Tx.<Area>`; the completeness and verbs tests walk into them.
 - **The keyboard** takes a spec (`kbSpec`: title, help, secret, max, min, starting layer, allowed keys, what OK and X
   do). Every secret keyboard (the Wi-Fi password, the web password, the stream key…) has an **eye** (`k_eye`) that
   shows what is typed in monospaced type; closed, only dots, as before.
@@ -1098,8 +1104,9 @@ group's entry and on the tab. The wizard keeps using the pages by id, without ta
   appapi/parity.go), each with its route's `{id}`, its JSON body and its **secret fields**, which `Do` copies, the
   body is built from without turning them into a string, and are wiped once sent. The app's side (the socket's
   whitelist and its two local-only routes): SETUP.md §8, MANAGER.md §3.
-- The engine's own settings (the pause card, a source hidden, an audio delay or link) go straight to the engine as
-  commands, like the mixer's; a refusal shows on the page (origins `page` and `audioset`).
+- The engine's own settings (the pause card, a source hidden, an audio delay or link, a camera's image settings) go
+  straight to the engine as commands, like the mixer's; a refusal shows on the page (origins `page`, `audioset` and
+  `camera`). A page's long press reads how long the finger was down (`UI.tapHeld`): `pageDef.touch` gets no duration.
 
 ### 21.3 Secrets
 
@@ -1139,6 +1146,17 @@ group's entry and on the tab. The wizard keeps using the pages by id, without ta
   draft; the source on air cannot be hidden).
 - **Input**: the main source, its capture mode (USB), the EDID (HDMI) and the start audio, as the web's card; a
   draft until «Save» / «Save and apply»; «Scan».
+- **Image (camera settings)** (`camera.go`, [`SOURCES.md`](SOURCES.md) §7): the USB cameras whose source carries
+  `controls`, by slot (chips with more than one; the chosen camera and group last while the page is on view), the
+  groups it has (chips: Image, Exposure, White balance, Focus & framing), and that group's settings as rows: an
+  integer is − value + (a tap moves ~2 % of its range, held ≥ `TapLong` ~10 %, whole steps; the exposure in ms, the
+  colour temperature in K, pan and tilt in degrees), a switch is the whole row, the anti-flicker is its choices side
+  by side. Each row says its factory value; an inactive one (its automatic on) is dimmed, «Auto», says which switch
+  frees it and sends nothing. «Factory settings» (a second tap) sends `camera_reset`. Live, also while streaming:
+  `camera_control` and `camera_reset` go straight to the engine; a burst of taps steps from the value just sent until
+  the state carries it (as the audio delays), and a refusal brings the state's value back. At least five rows fit (the
+  Logi's Exposure); a group with more is paged (‹ ›). Without a camera with settings (or with an older engine), a
+  message says which sources have none.
 - **Wi-Fi**: «Create my Wi-Fi»'s password with its eye, its 2.4 GHz channel (Auto, 1-11) and «New password» (a second
   tap: every camera has to join again). The access point is changed by two clients (NetState: its name and «Create my
   Wi-Fi»; the device client: its channel, password and the cameras' way over it): one change at a time across both.
@@ -1159,6 +1177,7 @@ group's entry and on the tab. The wizard keeps using the pages by id, without ta
   screen (a name set on the web with accents stays and shows).
 - The screen's previews: `eirl-ui-render settings-dest|dest-reveal|dest-edited|dest-managed|dest-pending|dest-error,
   settings-uplinks|uplinks-single|uplinks-none|uplinks-health, settings-pause, settings-input…, settings-sources-hidden,
+  settings-camera|camera-exposure|camera-framing|camera-reset|camera-two|camera-empty,
   settings-cloud|cloud-pairing|cloud-linked|cloud-unlink, settings-account|account-kb, audioset, audiosetpick` and the
   Wi-Fi and cameras ones (its file's header lists them all).
 

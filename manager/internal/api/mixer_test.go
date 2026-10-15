@@ -199,6 +199,130 @@ func TestMixerAPI(t *testing.T) {
 	}
 }
 
+// The cameras' image settings (SOURCES.md §7.3): they reach the engine as is (the value 0 too), what does not validate
+// does not, and the engine's codes come back with their message in the request language
+func TestMixerCamera(t *testing.T) {
+	e := setup(t, true)
+	cookie := e.login(t)
+	run := t.TempDir()
+	dir, err := os.MkdirTemp("", "mxc") // short path (Unix socket limit on macOS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	ln, err := net.Listen("unix", filepath.Join(dir, "s"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	// The engine's answer by control (camera_control) or by source (camera_reset)
+	codes := map[string]string{"focus": "inactive", "zoom": "busy", "pan": "camera_error", "tilt": "unknown_control",
+		"hue": "unsupported", "hdmi": "unsupported", "test": "unknown_source", "net:cam1": "unknown_command", "gamma": "unknown_command"}
+	var mu sync.Mutex
+	var cmds []string
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			sc := bufio.NewScanner(c)
+			for sc.Scan() {
+				var req map[string]any
+				json.Unmarshal(sc.Bytes(), &req)
+				mu.Lock()
+				cmds = append(cmds, sc.Text())
+				mu.Unlock()
+				key, _ := req["control"].(string)
+				if req["cmd"] == "camera_reset" {
+					key, _ = req["source"].(string)
+				}
+				if code := codes[key]; code != "" {
+					c.Write([]byte(`{"id":1,"ok":false,"error":"` + code + `"}` + "\n"))
+				} else {
+					c.Write([]byte(`{"id":1,"ok":true}` + "\n"))
+				}
+			}
+			c.Close()
+		}
+	}()
+	e.srv.Mixer = &mixer.Client{Sock: filepath.Join(dir, "s"), StatePath: filepath.Join(run, "mixer.json"), RunDir: run}
+	os.WriteFile(filepath.Join(run, "mixer.json"), []byte(mixerState), 0o644)
+	sent := func() []string { mu.Lock(); defer mu.Unlock(); return append([]string{}, cmds...) }
+	cam := "/dev/v4l/by-id/usb-046d_Logi_4K_Stream_Edition_0000ABCD-video-index0"
+	for body, want := range map[string]string{
+		`{"cmd":"camera_control","source":"` + cam + `","control":"brightness","value":140}`: `"cmd":"camera_control","source":"` + cam + `","control":"brightness","value":140}`,
+		`{"cmd":"camera_control","source":"` + cam + `","control":"gain","value":0}`:         `"control":"gain","value":0}`,
+		`{"cmd":"camera_reset","source":"` + cam + `"}`:                                      `"cmd":"camera_reset","source":"` + cam + `"}`,
+	} {
+		w := e.do("POST", "/api/v1/mixer", body, cookie)
+		if c := sent(); w.Code != 200 || len(c) == 0 || !strings.Contains(c[len(c)-1], want) {
+			t.Errorf("%s: %d %s, to the engine %v", body, w.Code, w.Body, c)
+		}
+	}
+	n := len(sent())
+	for _, body := range []string{
+		`{"cmd":"camera_control","source":"` + cam + `","control":"brightness"}`,
+		`{"cmd":"camera_control","source":"` + cam + `","control":"brightness","value":null}`,
+		`{"cmd":"camera_control","source":"` + cam + `","control":"brightness","value":1.5}`,
+		`{"cmd":"camera_control","source":"` + cam + `","control":"brightness","value":"1"}`,
+		`{"cmd":"camera_control","source":"` + cam + `","control":"brightness","value":true}`,
+		`{"cmd":"camera_control","source":"` + cam + `","control":"brightness","value":4294967296}`,
+		`{"cmd":"camera_control","source":"` + cam + `","control":"exposure_auto_priority","value":0}`,
+		`{"cmd":"camera_control","source":"` + cam + `","value":1}`,
+		`{"cmd":"camera_control","source":"/dev/video0","control":"brightness","value":1}`,
+		`{"cmd":"camera_control","source":"` + cam + `","control":"brightness","value":1,"on":true}`,
+		`{"cmd":"camera_reset"}`, `{"cmd":"camera_reset","source":"` + cam + `","control":"zoom"}`,
+		`{"cmd":"take","source":"hdmi","value":1}`,
+	} {
+		if w := e.do("POST", "/api/v1/mixer", body, cookie); w.Code != 400 {
+			t.Errorf("%s: %d %s", body, w.Code, w.Body)
+		}
+	}
+	if c := sent(); len(c) != n {
+		t.Errorf("invalid commands reached the engine: %v", c[n:])
+	}
+	// The engine's codes: the code as is, the message in the request language. unsupported, for these commands, is a
+	// source without image settings now; unknown_command, an engine older than them
+	ctl := func(id string) string {
+		return `{"cmd":"camera_control","source":"` + cam + `","control":"` + id + `","value":1}`
+	}
+	for _, c := range []struct{ body, code, msg string }{
+		{ctl("focus"), "inactive", "ese ajuste está en automático"},
+		{ctl("zoom"), "busy", "ocupado ahora mismo"},
+		{ctl("pan"), "camera_error", "la cámara no lo ha aceptado o no responde"},
+		{ctl("tilt"), "unknown_control", "esa cámara no tiene ese ajuste"},
+		{ctl("hue"), "unsupported", "esa fuente no tiene ajustes de imagen ahora"},
+		{ctl("gamma"), "unknown_command", "esta versión del codificador no lo admite"},
+		{`{"cmd":"camera_reset","source":"hdmi"}`, "unsupported", "esa fuente no tiene ajustes de imagen ahora"},
+		{`{"cmd":"camera_reset","source":"test"}`, "unknown_source", "esa fuente no está en el mezclador"},
+		{`{"cmd":"camera_reset","source":"net:cam1"}`, "unknown_command", "esta versión del codificador no lo admite"},
+	} {
+		w := e.do("POST", "/api/v1/mixer", c.body, cookie, "Accept-Language", "es-ES,es;q=0.9")
+		if w.Code != 422 || !strings.Contains(w.Body.String(), `"error":"`+c.code+`"`) || !strings.Contains(w.Body.String(), c.msg) {
+			t.Errorf("%s: %d %s", c.body, w.Code, w.Body)
+		}
+	}
+	if w := e.do("POST", "/api/v1/mixer", ctl("focus"), cookie, "Accept-Language", "fr"); !strings.Contains(w.Body.String(), "ce réglage est en automatique") {
+		t.Errorf("fr: %s", w.Body)
+	}
+}
+
+// Every engine code of a command has its message: unsupported keeps its old meaning outside the camera commands
+func TestMixerErrorKey(t *testing.T) {
+	for _, c := range []struct{ cmd, code, key string }{
+		{"take", "unsupported", "mixer.unsupported"}, {"camera_control", "unsupported", "mixer.camera_unsupported"},
+		{"camera_reset", "unsupported", "mixer.camera_unsupported"}, {"camera_reset", "unknown_command", "mixer.unsupported"},
+		{"camera_control", "inactive", "mixer.control_inactive"}, {"camera_control", "busy", "mixer.busy"},
+		{"camera_control", "camera_error", "mixer.camera_error"}, {"camera_control", "unknown_control", "mixer.unknown_control"},
+		{"take", "on_air", "mixer.on_air"}, {"take", "whatever", "mixer.rejected"},
+	} {
+		if got := mixerErrorKey(c.cmd, c.code); got != c.key {
+			t.Errorf("%s/%s: %s, want %s", c.cmd, c.code, got, c.key)
+		}
+	}
+}
+
 // F3: with the mixer, Stream and Stop streaming are hot: OUTPUT is saved, the command is sent to the
 // engine and eirl-engine is NOT restarted; nor does it show as an “unapplied change”
 func TestHotOutput(t *testing.T) {

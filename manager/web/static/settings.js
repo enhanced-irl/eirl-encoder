@@ -214,6 +214,263 @@ hooks.start.push(loadSlots);
 hooks.mixer.push(slotsFromMixer);
 onLangChange(() => { if (!slots.dirty) renderSlots(); });
 
+// --- Camera image (SOURCES.md §7) -----------------------------------------------------------
+// The settings each USB camera has (sources[].controls of the mixer state), changed hot with camera_control and
+// camera_reset (POST /mixer). The controls are built again only when the camera or its list changes (the state comes
+// several times a second); otherwise only their values, never one being dragged or with its command in flight.
+
+const cam = { sel: '', pickKey: '', key: '' };
+
+// The value as it is shown: exposure in 100 µs (UVC) as ms, the white balance in K, pan and tilt in arc seconds as degrees
+function cameraValue(c, v) {
+  if (c.inactive) return t('camera.auto');
+  switch (c.id) {
+    case 'exposure': return t('camera.ms', { v: fmtNum(v / 10, 1) });
+    case 'wb_temperature': return t('camera.kelvin', { v: fmtNum(v, 0) });
+    case 'pan': case 'tilt': {
+      const d = v / 3600;
+      return t('camera.degrees', { v: fmtNum(d, Number.isInteger(d) ? 0 : 1) });
+    }
+  }
+  return fmtNum(v, 0);
+}
+
+// The sources with settings now (the engine decides: also one that is not live)
+const cameraSources = (m) => (m ? m.sources.filter((s) => s.controls && s.controls.length) : []);
+
+function cameraFromMixer(m) {
+  const list = cameraSources(m);
+  $('camera-card').hidden = !list.length;
+  if (!list.length) {
+    // No state (the tab was hidden, the engine restarts) or no camera now: built again when they come back
+    cam.key = cam.pickKey = '';
+    return;
+  }
+  // The chosen camera while it is there (a gap without state does not forget it); otherwise the first one
+  if (!list.some((s) => s.id === cam.sel)) cam.sel = list[0].id;
+  const src = list.find((s) => s.id === cam.sel);
+  renderCameraPick(list);
+  $('camera-src').textContent = list.length === 1 ? srcName(src) : '';
+  const key = JSON.stringify([src.id, src.controls.map((c) => [c.id, c.group, c.type, c.min, c.max, c.step, c.default, c.options || null])]);
+  if (key !== cam.key) {
+    cam.key = key;
+    buildCamera(src);
+  }
+  for (const c of src.controls) updateCameraRow(c);
+}
+
+function renderCameraPick(list) {
+  const box = $('camera-pick');
+  box.hidden = list.length < 2;
+  const key = JSON.stringify(list.map((s) => [s.id, s.slot, srcName(s)]));
+  if (key !== cam.pickKey) {
+    cam.pickKey = key;
+    box.replaceChildren(...list.map((s) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn small';
+      b.dataset.id = s.id;
+      const span = document.createElement('span');
+      span.textContent = `${s.slot} · ${srcName(s)}`;
+      b.append(span);
+      b.title = span.textContent;
+      b.addEventListener('click', () => {
+        if (cam.sel === s.id) return;
+        cam.sel = s.id;
+        $('camera-err').hidden = true;
+        cameraFromMixer(state.mixer);
+      });
+      return b;
+    }));
+  }
+  for (const b of box.children) {
+    const on = b.dataset.id === cam.sel;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-pressed', String(on));
+  }
+}
+
+// One group per kind of setting, in the order they come
+function buildCamera(src) {
+  const groups = new Map();
+  for (const c of src.controls) {
+    let g = groups.get(c.group);
+    if (!g) {
+      g = document.createElement('div');
+      g.className = 'cam-group';
+      g.setAttribute('role', 'group');
+      g.setAttribute('aria-labelledby', `cam-g-${c.group}`);
+      const h = document.createElement('h4');
+      h.id = `cam-g-${c.group}`;
+      h.className = 'sub-title';
+      h.textContent = t('camera.group.' + c.group);
+      g.append(h);
+      groups.set(c.group, g);
+    }
+    g.append(cameraRow(src.id, c));
+  }
+  $('camera-ctls').replaceChildren(...groups.values());
+}
+
+function cameraRow(source, c) {
+  const id = `cam-${c.id}`;
+  const label = t('camera.ctl.' + c.id);
+  const row = document.createElement('div');
+  row.dataset.ctl = c.id;
+  if (c.type === 'bool') {
+    // The web's switch: the label wraps the box
+    row.className = 'cam-row';
+    row.innerHTML = '<label class="mx-follow"><input type="checkbox" role="switch"> <span></span></label>';
+    const cb = row.querySelector('input');
+    cb.id = id;
+    row.querySelector('span').textContent = label;
+    cb.addEventListener('change', async () => {
+      cb.dataset.busy = '1';
+      await cameraCmd({ cmd: 'camera_control', source, control: c.id, value: cb.checked ? 1 : 0 });
+      delete cb.dataset.busy;
+      rerenderCamera(); // if the camera refused it, back to what it says
+    });
+  } else if (c.type === 'menu') {
+    row.className = 'cam-row cam-menu';
+    const name = document.createElement('span');
+    name.id = `${id}-label`;
+    name.className = 'cam-name';
+    name.textContent = label;
+    const seg = document.createElement('span');
+    seg.className = 'seg';
+    seg.setAttribute('role', 'group');
+    seg.setAttribute('aria-labelledby', name.id);
+    for (const v of c.options) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn small';
+      b.dataset.value = v;
+      b.textContent = c.id === 'power_line' && v >= 0 && v <= 3 ? t('camera.powerLine.' + v) : String(v);
+      b.addEventListener('click', async () => {
+        if (seg.dataset.busy || b.classList.contains('active')) return;
+        seg.dataset.busy = '1';
+        await cameraCmd({ cmd: 'camera_control', source, control: c.id, value: v });
+        delete seg.dataset.busy;
+        rerenderCamera();
+      });
+      seg.append(b);
+    }
+    row.append(name, seg);
+  } else {
+    // A slider: the value shows while dragging and goes on release (change). The mark on the track is the factory value
+    row.className = 'cam-row cam-int';
+    row.innerHTML = '<label></label><output aria-hidden="true"></output><input type="range">';
+    const lab = row.querySelector('label');
+    lab.htmlFor = id;
+    lab.textContent = label;
+    const inp = row.querySelector('input');
+    Object.assign(inp, { id, min: c.min, max: c.max, step: c.step });
+    const span = c.max - c.min;
+    if (span > 0) inp.style.setProperty('--zero', String((c.default - c.min) / span));
+    else inp.style.background = 'none';
+    inp.addEventListener('input', () => {
+      inp.dataset.held = '1';
+      inp.dataset.dirty = '1';
+      // c is the control as the row was built: its automatic may have been turned off since (a slider that moves is not inactive)
+      showCameraValue(row, { ...c, inactive: false }, Number(inp.value));
+    });
+    // change does not come if released on the starting value: pointerup and blur end the drag too
+    const release = () => {
+      if (!inp.dataset.held) return;
+      delete inp.dataset.held;
+      sendCameraValue(inp, source, c);
+    };
+    for (const ev of ['change', 'pointerup', 'pointercancel', 'blur']) inp.addEventListener(ev, release);
+  }
+  return row;
+}
+
+function showCameraValue(row, c, v) {
+  const inp = row.querySelector('input');
+  const text = cameraValue(c, v);
+  row.querySelector('output').textContent = text;
+  inp.setAttribute('aria-valuetext', text);
+  inp.style.setProperty('--p', String(c.max > c.min ? (v - c.min) / (c.max - c.min) : 0));
+}
+
+async function sendCameraValue(inp, source, c) {
+  if (!inp.dataset.dirty || inp.dataset.busy) return;
+  delete inp.dataset.dirty;
+  const value = Number(inp.value);
+  const cur = cameraControlNow(source, c.id);
+  if (!cur || cur.value !== value) {
+    inp.dataset.busy = '1';
+    await cameraCmd({ cmd: 'camera_control', source, control: c.id, value });
+    delete inp.dataset.busy;
+    if (inp.dataset.dirty && !inp.dataset.held) { sendCameraValue(inp, source, c); return; } // moved again meanwhile
+  }
+  rerenderCamera();
+}
+
+function cameraControlNow(source, id) {
+  const s = cameraSources(state.mixer).find((x) => x.id === source);
+  return s && s.controls.find((x) => x.id === id);
+}
+
+// The values and the automatics from the state, except on a control the user holds or whose command is going
+function updateCameraRow(c) {
+  const row = $('camera-ctls').querySelector(`[data-ctl="${CSS.escape(c.id)}"]`);
+  if (!row) return;
+  if (c.type === 'bool') {
+    const cb = row.querySelector('input');
+    if (!cb.dataset.busy) cb.checked = c.value === 1;
+    cb.disabled = !!c.inactive;
+  } else if (c.type === 'menu') {
+    const seg = row.querySelector('.seg');
+    if (seg.dataset.busy) return;
+    for (const b of seg.children) {
+      const on = Number(b.dataset.value) === c.value;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', String(on));
+      b.disabled = !!c.inactive;
+    }
+  } else {
+    const inp = row.querySelector('input');
+    inp.disabled = !!c.inactive;
+    row.classList.toggle('inactive', !!c.inactive);
+    if (inp.dataset.held || inp.dataset.dirty || inp.dataset.busy) return;
+    inp.value = String(c.value);
+    showCameraValue(row, c, c.value);
+  }
+}
+
+const rerenderCamera = () => cameraFromMixer(state.mixer);
+
+// Errors go under the controls (not in a toast): what the camera refused stays next to it
+async function cameraCmd(body) {
+  const err = $('camera-err');
+  err.hidden = true;
+  try {
+    const r = await api('POST', '/mixer', body);
+    if (r && r.state) renderMixer(r.state);
+    return true;
+  } catch (e) {
+    err.textContent = e.message;
+    err.hidden = false;
+    return false;
+  }
+}
+
+$('camera-reset').addEventListener('click', async () => {
+  const src = cameraSources(state.mixer).find((s) => s.id === cam.sel);
+  if (!src || !confirm(t('camera.resetConfirm', { name: srcName(src) }))) return;
+  const btn = $('camera-reset');
+  btn.disabled = true;
+  if (await cameraCmd({ cmd: 'camera_reset', source: src.id })) toast(t('camera.resetDone'));
+  btn.disabled = false;
+});
+
+hooks.mixer.push(cameraFromMixer);
+onLangChange(() => {
+  cam.key = cam.pickKey = '';
+  rerenderCamera();
+});
+
 // --- Updates (OTA) ---------------------------------------------------------------------------
 // The app checks by itself (every ~6 h) and downloads; installing is only on a button press, never while
 // streaming, and a version that does not come up healthy is rolled back. Polled every 2 s while something

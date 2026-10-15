@@ -247,6 +247,7 @@ type Strings struct {
 	Cloud   CloudStrings   // EnhancedIRL
 	Account AccountStrings // Device: Name & password
 	AudioX  AudioStrings   // the audio view's settings: delay and each camera's audio
+	Camera  CameraStrings  // Sources: the Image tab (a USB camera's image settings)
 }
 
 // Languages are the screen's languages, in the order the Language page lists them.

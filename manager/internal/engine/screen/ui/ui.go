@@ -98,10 +98,13 @@ type UI struct {
 	// the screen locks
 	reveal map[string]bool
 	pnote  pageNote // a page's own notice (pageNoteText)
+	// tapHeld is how long the finger was down on the tap being handled: a page's long press (pageDef.touch)
+	tapHeld time.Duration
 	// The state of each area's pages (their own files)
 	inp  inputState
 	camp camsState
 	aset audioSetState
+	cam  cameraState
 	dst  destState
 	acct accountState
 	// the uplink being switched (its row's switch halfway meanwhile) and to what
@@ -314,6 +317,8 @@ func (u *UI) CommandDone(c Command, ok bool, code string) {
 		u.notePage(sprintf(u.Tx.CannotF, u.commandError(code)), true)
 	case originAudioSet: // the audio view's settings: that view says it could not
 		u.audioSetRefused(c, code)
+	case originCamera: // the Image tab: the page says it could not, and the value sent goes
+		u.cameraRefused(c, code)
 	default:
 		elog.Event("mixer", "touch_command_failed", "x", c.X, "y", c.Y, "cmd", cmd, "error", code)
 	}
@@ -337,6 +342,10 @@ func (u *UI) OnTouch(ev string, fx, fy float64, held time.Duration) {
 	}
 	now := u.now()
 	x, y := int(fx*float64(lay.DW)), int(fy*float64(lay.DH))
+	if ev == "up" {
+		u.tapHeld = held
+		defer func() { u.tapHeld = 0 }() // only for this tap: nothing read later sees it
+	}
 	if (u.settingsOpen || u.wizardOn()) && u.settingsView == "keyboard" {
 		u.Dirty = true
 		if u.powering == "" {

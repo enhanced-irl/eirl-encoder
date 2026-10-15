@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/camera"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/detail"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/elog"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/hdmi"
@@ -73,6 +75,15 @@ type Source struct {
 	choice    *probe.Result
 	usbDev    string    // USB: its device (1-2.1), to cut its port's power if it hangs
 	lastFrame time.Time // the last time it gave frames (usb_on_air's "recently live")
+	// USB: the camera's image settings as last read (SOURCES.md §7) and the node they were read from
+	controls []camera.Control
+	camNode  string
+
+	// USB: one request to the camera at a time (its opening's and the commands'); the commands wait in camJobs
+	// for the camera's own goroutine (cameraLoop)
+	camMu   sync.Mutex
+	camJobs chan camJob
+	camWG   sync.WaitGroup // cameraLoop: done waits for it, so a successor never opens the camera mid-command
 
 	// Only the goroutine
 	timings   pipeline.Timings
@@ -92,6 +103,7 @@ func newSource(e *Engine, slot int, id, kind, name, node string) *Source {
 	}
 	if kind == "usb" {
 		s.recovery = usbhub.NewRecovery(e.hubs)
+		s.camJobs = make(chan camJob, camQueue)
 	}
 	return s
 }
@@ -160,7 +172,7 @@ func (s *Source) Info() SourceState {
 	defer s.mu.Unlock()
 	return SourceState{ID: s.id, Slot: s.slot + 1, Kind: s.kind, Name: s.name, State: s.state, Detail: s.detail.Text,
 		DetailCode: s.detail.Code, DetailArgs: s.detail.Args,
-		Format: s.format, Mode: s.mode, FPS: round1(s.fps)}
+		Format: s.format, Mode: s.mode, FPS: round1(s.fps), Controls: slices.Clone(s.controls)}
 }
 
 func (s *Source) snapshot() (state string, since time.Time, aspect scene.Aspect) {
@@ -195,6 +207,8 @@ func (s *Source) stopping() bool { return s.wait(0) }
 
 func (s *Source) run() {
 	defer close(s.done)
+	// The camera's command in flight ends before done closes (deferred after it: runs first)
+	defer s.camWG.Wait()
 	for _, p := range s.prev { // read-only after newSource: whoever waits on it holds it, no more
 		select {
 		case <-p.done:
@@ -202,11 +216,19 @@ func (s *Source) run() {
 			return
 		}
 	}
+	if s.camJobs != nil {
+		s.camWG.Add(1)
+		go func() {
+			defer s.camWG.Done()
+			s.cameraLoop()
+		}()
+	}
 	fails := 0
 	for !s.stopping() {
 		if s.e.isHidden(s.id) {
 			// Hidden from the web: not captured (frees the USB bus and the VIC) until shown
 			s.setState(StateHidden, detail.D{})
+			s.clearControls()
 			if s.recovery != nil {
 				s.recovery.Forget()
 			}
@@ -327,6 +349,7 @@ func (s *Source) prepareCSI(w, h int) (string, error) {
 
 func (s *Source) prepareUSB(w, h int) (string, error) {
 	if _, err := os.Stat(s.id); err != nil {
+		s.clearControls()
 		return "", &notReady{StateGone, detail.New("gone"), time.Second}
 	}
 	p, err := s.e.chooseUSB(s.id)
@@ -357,8 +380,9 @@ func (s *Source) prepareUSB(w, h int) (string, error) {
 	if p.HasWarning("usb2") {
 		elog.Event("mixer", "usb2", "source", name)
 	}
-	// Webcams: auto exposure must not lower the fps with little light (like the launcher)
-	s.e.run(5*time.Second, "v4l2-ctl", "-d", s.node, "-c", "exposure_auto_priority=0")
+	// Webcams: auto exposure must not lower the fps with little light (like the launcher), and the settings the
+	// user gave this camera are put back
+	s.openCamera(s.node, name)
 	return s.e.plat.USB(p.Probe, w, h, s.jpegParse), nil
 }
 

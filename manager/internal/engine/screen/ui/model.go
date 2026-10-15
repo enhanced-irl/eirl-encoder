@@ -51,6 +51,24 @@ type SourceStatus struct {
 	DetailArgs map[string]string `json:"detailArgs,omitempty"`
 	Mode       string            `json:"mode"`
 	FPS        float64           `json:"fps"`
+	// Controls are the camera's image settings (SOURCES.md §7.3): only on a USB source whose camera has some
+	Controls []CameraControl `json:"controls,omitempty"`
+}
+
+// CameraControl is one image setting of a USB camera, as the engine publishes it (SOURCES.md §7.3): its id and
+// group (§7.2), its type (int | bool | menu), its range and step, its factory value and its value now.
+type CameraControl struct {
+	ID      string `json:"id"`
+	Group   string `json:"group"`
+	Type    string `json:"type"`
+	Min     int    `json:"min"`
+	Max     int    `json:"max"`
+	Step    int    `json:"step"`
+	Default int    `json:"default"`
+	Value   int    `json:"value"`
+	// Inactive: its automatic is on, the camera ignores a manual value now
+	Inactive bool  `json:"inactive,omitempty"`
+	Options  []int `json:"options,omitempty"` // a menu's values
 }
 
 type OutputStatus struct {

@@ -19,6 +19,7 @@ import (
 
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/appapi"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/audio"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/camera"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/config"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/elog"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/hdmi"
@@ -84,6 +85,7 @@ type Engine struct {
 	audio    *audio.Bus     // nil without audio slots
 	phones   *phones.Phones // nil without phtap
 	inALSA   string
+	cams     *camera.Store // the image settings given to each camera (SOURCES.md §7.4)
 
 	width, height, fps int
 	latency, sync      time.Duration
@@ -175,9 +177,12 @@ func New(o Options) *Engine {
 		inALSA:    o.InputALSA,
 	}
 	e.ctx, e.cancel = context.WithCancel(context.Background())
+	camFile := ""
 	if c.StateDir != "" && c.PrepareStateDir() {
 		e.sceneFile = filepath.Join(c.StateDir, scene.FileName)
+		camFile = filepath.Join(c.StateDir, camera.FileName)
 	}
+	e.cams = camera.NewStore(camFile)
 	if !c.RunDirUsable() {
 		e.runDir = ""
 	}
@@ -513,7 +518,11 @@ func (e *Engine) Run(ctx context.Context) error {
 		case err := <-e.fatal:
 			return err
 		case req := <-e.srv.Requests():
-			req.Run(e.command)
+			if camera.IsCommand(req.Cmd) {
+				e.cameraCommand(req.Cmd, req.Msg, req.Reply) // answered once the camera has taken it
+			} else {
+				req.Run(e.command)
+			}
 		case fn := <-e.events:
 			fn()
 		case <-e.changes:
@@ -770,6 +779,7 @@ func (e *Engine) Stop() {
 			waitDone(s.done, time.Until(until))
 		}
 	}
+	e.cams.Flush() // the last second of camera settings changed
 	if e.audio != nil {
 		e.audio.Wait(until)
 	}

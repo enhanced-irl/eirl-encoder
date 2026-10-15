@@ -416,6 +416,7 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir string, bench 
 			x.(map[string]any)["alias"] = ""
 		}
 	}
+	cameraFake(variant, sources)
 	b, _ := json.Marshal(st)
 	status, err := ui.ParseStatus(b)
 	if err != nil {
@@ -528,6 +529,7 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir string, bench 
 		}
 		streamPreview(p, variant)
 		camsPreview(variant, p)
+		cameraPreview(p, variant)
 	}
 	if strings.HasPrefix(variant, "settingsnets") {
 		p.OpenNetworks()
