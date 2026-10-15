@@ -1,0 +1,1 @@
+- L'écran tactile ne perd plus le signal quand l'encodeur redémarre (après une mise à jour, ou quand vous enregistrez une destination) : il reste noir quelques secondes, sans le message « pas de signal » de l'écran, et revient tout seul.

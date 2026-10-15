@@ -19,6 +19,7 @@ import (
 const (
 	fbioGetVScreenInfo = 0x4600
 	fbioGetFScreenInfo = 0x4602
+	fbioPanDisplay     = 0x4606
 	fbioPutCon2FBMap   = 0x4610
 	fbioBlank          = 0x4611
 	fbVisualTrueColor  = 2
@@ -105,10 +106,21 @@ func (fb *FB) Blit(img *image.RGBA, r image.Rectangle) {
 	}
 }
 
-// Unblank turns the output on if it is blanked. Without the text console nobody else does it.
-func (fb *FB) Unblank() error {
-	if _, _, e := unix.Syscall(unix.SYS_IOCTL, fb.f.Fd(), fbioBlank, fbBlankUnblank); e != 0 {
-		return e
+// Show turns the output on if it is blanked and puts this framebuffer back on screen. Without the text
+// console nobody else does it. The pan (to where it already is) brings back the framebuffer's window: the
+// engine's screen takes that window and, since the HDMI output stays lit when it closes, leaves it switched off
+// with the head on (MIXER.md §3, trap 27); an unblank alone does nothing then.
+func (fb *FB) Show() error {
+	fd := fb.f.Fd()
+	if _, _, e := unix.Syscall(unix.SYS_IOCTL, fd, fbioBlank, fbBlankUnblank); e != 0 {
+		return fmt.Errorf("FBIOBLANK: %w", e)
+	}
+	var v [40]uint32 // struct fb_var_screeninfo
+	if _, _, e := unix.Syscall(unix.SYS_IOCTL, fd, fbioGetVScreenInfo, uintptr(unsafe.Pointer(&v[0]))); e != 0 {
+		return fmt.Errorf("FBIOGET_VSCREENINFO: %w", e)
+	}
+	if _, _, e := unix.Syscall(unix.SYS_IOCTL, fd, fbioPanDisplay, uintptr(unsafe.Pointer(&v[0]))); e != 0 {
+		return fmt.Errorf("FBIOPAN_DISPLAY: %w", e)
 	}
 	return nil
 }

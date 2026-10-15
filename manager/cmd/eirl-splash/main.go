@@ -98,7 +98,7 @@ func runStatic(r *splash.Renderer, dev string, scene splash.Scene) int {
 		return 1
 	}
 	defer fb.Close()
-	_ = fb.Unblank()
+	_ = fb.Show()
 	g := fb.Geometry()
 	r.Layout(g.Width, g.Height)
 	img := r.Frame(scene)
@@ -119,7 +119,7 @@ func runBoot(r *splash.Renderer, dev string, timeout time.Duration, fps int) int
 		return 1
 	}
 	defer fb.Close()
-	_ = fb.Unblank()
+	_ = fb.Show()
 
 	var base, bar *image.RGBA
 	paintAll := func() {
@@ -166,7 +166,7 @@ func runBoot(r *splash.Renderer, dev string, timeout time.Duration, fps int) int
 					slog.Warn("invalid screen mode: paused until it comes back", "err", err, "uptime", uptime())
 				case err == nil && (changed || paused):
 					paused = false
-					_ = fb.Unblank()
+					_ = fb.Show()
 					paintAll()
 					lastFull = now
 					slog.Info("screen mode", "mode", fb.Geometry().String(), "uptime", uptime())

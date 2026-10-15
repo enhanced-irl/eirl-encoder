@@ -1,0 +1,1 @@
+- The touch screen no longer loses the signal when the encoder restarts (after an update, or when you save a destination): it stays black for a few seconds, without the screen's «no signal» message, and comes back by itself.

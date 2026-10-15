@@ -1,5 +1,5 @@
 > **Status:** DEPLOYED on the test board and checked on screen (Oct 12). The app's `install.sh` installs it. Two minor tests remain (§6)
-> **Updated:** 2026-10-14
+> **Updated:** 2026-10-15
 
 # EnhancedIRL boot splash screen
 
@@ -21,6 +21,23 @@ logo stays still and the screen is left free for the compositor (the mixer's tou
 | 8.5 s | `eirl-encoderd` active; `jetson login:` on screen | The bar is removed: **still logo**, screen free |
 
 Full boot: 11.4 s, the same as before (`systemd-analyze`).
+
+**The HDMI signal during boot (Oct 15, the microSD image, cold start).** The table above is from reboots. From
+power-on, the panel was not ready when the board read its EDID, and the signal dropped twice before the splash:
+
+| Since the kernel starts | What happens | Signal |
+|---|---|---|
+| Firmware | CBoot does not read the EDID either: NVIDIA logo at 640×480 | yes |
+| 1.43 – 1.55 s | `hdmi: edid read failed` → the kernel's built-in 1280×720 EDID: mode change | off ~0.1 s |
+| 2.15 – 2.92 s | The panel drops its hot plug (`hdmi: unplugged`) and comes back with its EDID: 1024×600 | **off ~0.8 s** |
+| 3.1 s | Splash | yes |
+
+Both come from the panel (it answers late, then re-plugs itself), not from anything we start: no software of ours
+runs before 2.4 s. The fallback EDID is compiled into the kernel (`default_720p_edid`) and the hot plug cannot be
+forced before systemd, so they are left as they are. What makes the panel late is still to be checked (how it is
+powered: if it hangs from the board's USB hub, it only gets power when the kernel brings the hub up, ~1.5 s).
+After the splash, the HDMI output no longer goes off when the engine's screen closes or the engine restarts
+(MIXER.md §3, trap 27).
 
 **The NVIDIA logo is not touched** (D1): CBoot draws it from the BMP partition of the QSPI and
 changing it means flashing the QSPI, which the board rules forbid. On our own PCB (plan in
@@ -115,6 +132,12 @@ How it waits:
 
 D2 is still met with both ways: the logo stays still until boot finishes, and
 then the compositor appears.
+
+**Painting after the engine (Oct 15).** The engine's screen takes the framebuffer's window, and when it closes
+the window stays switched off while the HDMI output stays lit (MIXER.md §3, trap 27). An unblank alone does
+nothing then (the head is not blanked), so every scene goes through `Show`: unblank plus a pan of `fb0` to where
+it already is, which makes tegradc program the framebuffer's window again. "Restarting…" and "Shutting
+down…" appear without the signal ever dropping.
 
 Nothing else: the splash does not hold `fb0` when it exits and the text console does not write again. The screen's mode
 is set by the driver when it detects the screen, not by the console (measured Oct 12: 1024×600 at 1.40 s

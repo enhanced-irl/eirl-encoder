@@ -1,0 +1,1 @@
+- La pantalla táctil ya no pierde la señal cuando el codificador se reinicia (tras una actualización o al guardar un destino): se queda unos segundos en negro, sin el aviso de «sin señal» de la pantalla, y vuelve sola.

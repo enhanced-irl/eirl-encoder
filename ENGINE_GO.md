@@ -1,5 +1,5 @@
 > **Status:** CLOSED (Oct 14) — the Go engine is the only engine: M0-M6 in main, the Python engine retired (§16); open outside C1: the in-place HDMI reset (MR !72, draft)
-> **Updated:** 2026-10-14
+> **Updated:** 2026-10-15
 
 # The Go engine (`eirl-engine`)
 
@@ -698,6 +698,9 @@ slot).
   display, painting at once failed (`screen_error`, "Internal data stream error") because the panel unplugged a
   moment later. At boot, the splash path already takes one reading. So multiview takes ~4-5 s on a restart, held
   by the panel, and should be ~1 s after the engine at boot (to be measured at the next reboot).
+  Oct 15: the panel unplugged because the closing screen switched the HDMI output off (MIXER.md §3, trap 27).
+  With `displayhold` it stays lit and black between engines, so the wait can be revisited once measured on
+  the board.
 - **Touch** (`touch_max_ms` in the `timings` line): from the kernel's touch event to the UI frame pushed into the
   screen's pipeline. Six taps injected into the touch device: 35 ms at most. The screen's compositor adds about
   one frame, so the total stays under the 100 ms target.

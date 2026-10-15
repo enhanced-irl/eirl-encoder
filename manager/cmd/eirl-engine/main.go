@@ -20,6 +20,7 @@ import (
 
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/config"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/displayhold"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/elog"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/hdmi"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/pipeline"
@@ -55,6 +56,8 @@ func run(checkOnly bool) int {
 		return 0
 	}
 	elog.Event("engine", "starting", "version", version, "gstreamer", gst.Version())
+	// The HDMI output stays lit when the screen closes (MIXER.md §3, trap 27); false = libc's ioctl won
+	elog.Event("engine", "display_hold", "active", displayhold.Read().Active)
 	if cfg.SingleSource {
 		elog.Event("engine", "single_source_unsupported")
 	}
@@ -83,6 +86,9 @@ func run(checkOnly bool) int {
 	defer stop()
 	err = e.Run(ctx)
 	e.Stop()
+	if st := displayhold.Read(); st.Held+st.Released+st.Cancelled > 0 {
+		elog.Event("engine", "display_hold", "held", st.Held, "released", st.Released, "cancelled", st.Cancelled)
+	}
 	if cfg.RunDir != "" {
 		os.Remove(filepath.Join(cfg.RunDir, "video"))
 	}

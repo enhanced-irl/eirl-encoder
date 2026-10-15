@@ -11,6 +11,6 @@ docker image inspect eirl-engine-build >/dev/null 2>&1 ||
 mkdir -p build/out
 (cd manager && go test ./internal/engine/... ./internal/service/ >/dev/null)
 docker run --rm --platform linux/arm64 -v "$PWD/manager":/src -v "$PWD/build/out":/out -v eirl-engine-gocache:/go \
-  eirl-engine-build sh -c "go test ./internal/gst/ >/dev/null && \
+  eirl-engine-build sh -c "go test ./internal/gst/ ./internal/engine/displayhold/ >/dev/null && \
     go build -trimpath -ldflags '-s -w -X main.version=$ver' -o /out/eirl-engine ./cmd/eirl-engine"
 echo "build/out/eirl-engine $ver ($(du -h build/out/eirl-engine | cut -f1))"

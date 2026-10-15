@@ -1,7 +1,7 @@
 # Multi-camera: composition, multiview and touch screen
 
 > **Status:** IN PROGRESS (F0, F1 —single engine— and F2 —web ↔ screen— in main; F3 —no rehearsal mode— on the board; next F4, per-source audio)
-> **Updated:** 2026-10-15 (Oct 15: USB cameras plugged and unplugged while running, "Sources and slots" in §4, and a camera's audio follows its video slot, §10; the output protocols and encoding settings in the state and `output_config`, §5, [`OUTPUTS.md`](OUTPUTS.md); translated to English; the Python engine retired, the Go engine is the only one: [`ENGINE_GO.md`](ENGINE_GO.md); last content change Oct 13: header and Settings, §18; Wi-Fi in Settings, §19; Oct 14: renaming "Create my Wi-Fi", §19; everything the web configures, on the screen, §21; fades one step per program frame and the screen's tiles in step with the program, §22)
+> **Updated:** 2026-10-15 (Oct 15: the HDMI output stays lit when the screen closes, §3 trap 27; USB cameras plugged and unplugged while running, "Sources and slots" in §4, and a camera's audio follows its video slot, §10; the output protocols and encoding settings in the state and `output_config`, §5, [`OUTPUTS.md`](OUTPUTS.md); translated to English; the Python engine retired, the Go engine is the only one: [`ENGINE_GO.md`](ENGINE_GO.md); last content change Oct 13: header and Settings, §18; Wi-Fi in Settings, §19; Oct 14: renaming "Create my Wi-Fi", §19; everything the web configures, on the screen, §21; fades one step per program frame and the screen's tiles in step with the program, §22)
 
 **The mixer is the encoder.** `eirl-engine` captures all the sources it detects at the same time, and what
 comes out is always the composed **program** (cut, PiP, side by side, fades). That includes SRT/SRTLA
@@ -97,7 +97,7 @@ RK3588.
     seconds: an immediate attempt fails with "Failed to set plane". Also, at startup, the TC358743
     announces 640×480 until it locks. The launcher waits for the screen to be connected and stable for
     3 s, and for the board's HDMI to give the same mode 3 times in a row. The unit retries every 10 s,
-    5 times at most.
+    5 times at most. (Oct 15: the HDMI turning off was the screen's sink itself; cause and fix in trap 27.)
 12. **The VIC clock can get stuck at its minimum.** Writing `performance` when it already is does not
     reapply the frequency, and the suspended VIC wakes up at 140 MHz: everything drops to ~27 fps. The launcher
     sets `power/control=on` on the VIC and changes the governor in two steps (`wmark_active` → `performance`).
@@ -171,6 +171,30 @@ RK3588.
     checked whether the input was live, nor the I2S "no signal", nor the watchdog that reopens a
     USB without samples. The audio reached the program anyway, but the web did not show the levels.
     Fixed in F4b (§13).
+27. **Closing the screen switched the HDMI output off.** When the screen's pipeline closes, `nvdrmvideosink`
+    takes its plane off (SetPlane with no framebuffer). NVIDIA's libdrm treats the last plane leaving the head
+    as switching the head off: `libnvdc`'s `nvdcDPMS` sends `FBIOBLANK` with power-down to `/dev/fb0` and
+    tegradc turns the HDMI off (`tegradc.0: blank - powerdown` in the kernel log, ~0.5 s after the engine
+    starts stopping). It happened on every engine restart (an update, saving a destination) and on every
+    retry of the screen. The panel shows "no signal", ~4.3 s later drops its hot plug (`hdmi: unplugged`) and
+    comes back with a re-plug; if the new engine had painted just before, its screen failed ("Internal data
+    stream error", the "Failed to set plane" of trap 11) and the HDMI went off a second time. Measured on Oct
+    15: 5 s without signal and 5-12 s until the multiview. The sink runs with the default `set-mode=false`,
+    which is already the SetPlane path, and `libnvdc` refuses to open the display without `/dev/fb0` (any
+    error but "does not exist"), so neither a property nor hiding the device avoids it. **Fix**: the engine exports its
+    own `ioctl` (`internal/engine/displayhold`, C), which the display libraries the engine loads resolve
+    before libc's. It holds back those blanks (suspend and power-down levels) and lets everything else
+    through. A mode set on the same fd gets the held blank just before (`nvdcSetMode` sends power-down,
+    mode, unblank), and an unblank cancels it. With the head on and no plane, tegradc shows its background,
+    black: the screen stays black **with signal** until the next screen paints. The engine logs
+    `display_hold active=true` when it starts (`false`: libc's `ioctl` won, the fix is not working) and, when it
+    stops, how many blanks it held. Since the sink leaves the framebuffer's window switched off, `eirl-splash`
+    brings it back with a pan when it paints "Restarting…" (SPLASH.md §3). Checked on the board on Oct 15
+    (0.6.0 plus the fix): before, stopping the engine gave `blank - powerdown` at 0.7 s and `unplugged` 4.3 s
+    later; with it, three restarts without either, the new screen at the first attempt (`no_display=0`) and
+    the multiview back 8 s after the restart began (4 s of that is the old engine stopping and 3 s the wait
+    for a stable display, which can now be revisited). With the engine stopped, window A of the head is off
+    (black, with signal) and `eirl-splash -scene reboot` turns it back on with `fb0`.
 
 ## 4. The engine (F1)
 
@@ -249,6 +273,8 @@ pieces today (`manager/internal/engine/…`):
 - Then it waits for the screen to be connected (`/sys/class/switch/hdmi/state`) with the same mode for
   3 s, and draws at its real mode.
 - If it fails, it retries after 3, 6… 30 s. If the mode changes or it is unplugged, it is rebuilt.
+- Between two screens (a retry, an engine restart) the HDMI output stays lit and black: the engine holds
+  back the power-down of NVIDIA's display libraries (trap 27).
 - 1 fps snapshot in `/run/eirl-engine/screen.jpg`.
 - Touch through evdev; if it is unplugged, it looks for it again:
   - tap on a thumbnail: that source on air;
