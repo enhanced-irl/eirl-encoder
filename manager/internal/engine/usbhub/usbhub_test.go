@@ -381,3 +381,47 @@ func TestPlugged(t *testing.T) {
 		t.Error("root port, not enumerated: no hub to ask")
 	}
 }
+
+// Ident tells a camera from another one plugged into the same port; without a serial it still says
+// vendor and product, and a device that is not enumerated has none.
+func TestIdent(t *testing.T) {
+	s, _ := newFake(t)
+	d := filepath.Join(s.Root, "sys/bus/usb/devices/2-1.4")
+	for k, v := range map[string]string{"idVendor": "046d", "idProduct": "086b", "serial": "0B2CFE13"} {
+		if err := os.WriteFile(filepath.Join(d, k), []byte(v+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := s.Ident("2-1.4"); got != "046d:086b:0B2CFE13" {
+		t.Errorf("logi: %q", got)
+	}
+	d = filepath.Join(s.Root, "sys/bus/usb/devices/1-2.1")
+	for k, v := range map[string]string{"idVendor": "534d", "idProduct": "2109"} {
+		if err := os.WriteFile(filepath.Join(d, k), []byte(v+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := s.Ident("1-2.1"); got != "534d:2109:" {
+		t.Errorf("no serial: %q", got)
+	}
+	for _, dev := range []string{"1-2.3", "1-2.2", "", "../2-1.4"} {
+		if got := s.Ident(dev); got != "" {
+			t.Errorf("%q: %q", dev, got)
+		}
+	}
+}
+
+// LastCut is the newest cut of any hub.
+func TestLastCut(t *testing.T) {
+	s, _ := newFake(t)
+	h := NewHubs(s)
+	if !h.LastCut().IsZero() {
+		t.Fatal("no cut yet")
+	}
+	t0 := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	h.Claim(Plan{Hubs: []string{"1-2", "2-1"}}, t0, StuckFor)
+	h.Claim(Plan{Hubs: []string{"1-3"}}, t0.Add(time.Minute), StuckFor)
+	if got := h.LastCut(); !got.Equal(t0.Add(time.Minute)) {
+		t.Fatalf("last cut %v", got)
+	}
+}

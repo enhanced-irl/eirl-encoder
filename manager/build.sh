@@ -35,6 +35,8 @@ cp deploy/splash/* dist/pkg/splash/ && chmod +x dist/pkg/splash/install.sh
 # Network cameras (NETWORK_SOURCES.md §6): the root helper and MediaMTX (official binary, version and
 # sha256 pinned in build/mediamtx.sh)
 build dist/pkg/eirl-netsetup ./cmd/eirl-netsetup
+# The fan control (FAN.md): a root daemon and its unit (deploy/eirl-fan.service, copied above)
+build dist/pkg/eirl-fan ./cmd/eirl-fan
 [ -x ../build/out/mediamtx ] || ../build/mediamtx.sh
 cp ../build/out/mediamtx dist/pkg/
 # srtla_send (SRTLA): built separately in build/out (arm64 container, pinned commit); reused
@@ -78,7 +80,7 @@ for l in "$goroot/LICENSE" "$goroot/../LICENSE"; do [ -f "$l" ] && { golic=$l; b
 cp "$golic" "$doc/licenses/go/LICENSE.golang"
 [ -f "$goroot/PATENTS" ] && cp "$goroot/PATENTS" "$doc/licenses/go/PATENTS.golang"
 GOOS=linux GOARCH=arm64 go list -deps -f '{{with .Module}}{{if not .Main}}{{.Path}} {{.Version}} {{.Dir}}{{end}}{{end}}' \
-    ./cmd/eirl-encoderd ./cmd/eirl-splash ./cmd/eirl-netsetup ./cmd/eirl-update ./cmd/eirl-engine ./cmd/eirl-send | sort -u |
+    ./cmd/eirl-encoderd ./cmd/eirl-splash ./cmd/eirl-netsetup ./cmd/eirl-update ./cmd/eirl-engine ./cmd/eirl-send ./cmd/eirl-fan | sort -u |
   while read -r mod modver dir; do
     [ -n "$dir" ] || continue
     d="$doc/licenses/go/$mod"

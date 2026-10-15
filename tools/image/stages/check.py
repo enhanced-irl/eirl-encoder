@@ -15,6 +15,7 @@ import re
 import subprocess
 import sys
 import tarfile
+import time
 
 FAILS = []
 NOTES = []
@@ -163,6 +164,7 @@ def main():
         ok("enabled " + u, u in w)
     must_mask = ["nv-l4t-bootloader-config.service", "alsa-restore.service"]
     must_mask += ["nv-l4t-usb-device-mode.service"]
+    must_mask += ["apt-daily.timer", "apt-daily-upgrade.timer", "motd-news.timer", "motd-news.service"]
     if not debug:
         must_mask += ["ssh.service", "ssh.socket"]
     for u in must_mask:
@@ -170,6 +172,8 @@ def main():
     ok("no oem-config", not os.path.exists(os.path.join(R, "etc/systemd/system/nv-oem-config.target"))
        and not os.path.exists(os.path.join(R, "lib/systemd/system/nv-oem-config.service")))
     ok("no USB device mode console wanted", "serial-getty@ttyGS0.service" not in w)
+    ok("timers: fstrim only", sorted(u for u in w if u.endswith(".timer")) == ["fstrim.timer"],
+       ", ".join(sorted(u for u in w if u.endswith(".timer"))))
     ok("ModemManager installed, not enabled", "modemmanager" in installed and "ModemManager.service" not in w
        and not os.path.lexists(os.path.join(R, "etc/systemd/system/dbus-org.freedesktop.ModemManager1.service")))
 
@@ -205,6 +209,13 @@ def main():
     ok("no account with a password", not pw, ", ".join(pw))
     root = [s for s in shadow if s[0] == "root"]
     ok("root locked", root and root[0][1].startswith(("!", "*")))
+    groups = [l.split(":")[0] for l in open(os.path.join(R, "etc/group")).read().splitlines() if l]
+    ok("group debug (NVIDIA's udev rules)", "debug" in groups)
+    clk = os.path.join(R, "var/lib/private/systemd/timesync/clock")
+    ok("clock floor at the build time", os.path.exists(clk) and abs(os.stat(clk).st_mtime - time.time()) < 6 * 3600
+       and os.path.islink(os.path.join(R, "var/lib/systemd/timesync"))
+       and os.readlink(os.path.join(R, "var/lib/systemd/timesync")) == "../private/systemd/timesync")
+    ok("APN database", "mobile-broadband-provider-info" in installed)
     ok("resolv.conf is the resolved stub", os.readlink(os.path.join(R, "etc/resolv.conf")).endswith("stub-resolv.conf"))
     ok("no extlinux backups", not [f for f in os.listdir(os.path.join(R, "boot/extlinux")) if f != "extlinux.conf"],
        ", ".join(os.listdir(os.path.join(R, "boot/extlinux"))))
@@ -235,6 +246,8 @@ def main():
     # a new device never had them
     gone = set("/usr/lib/eirl-encoder/engine/" + r for r in retired)
     missing = [p for p in files_txt if p not in gone and not os.path.lexists(os.path.join(R, p.lstrip("/")))]
+    if "eirl-fan" in names:  # the fan control (FAN.md), in the bundles after 0.5.0
+        ok("enabled eirl-fan.service", "eirl-fan.service" in w)
     ok("every path of files.txt installed (%d, %d retired ones not expected)" % (len(files_txt), len(gone & set(files_txt))),
        not missing, ", ".join(missing[:10]))
     # Every file of the bundle at the path install.sh gives it (manager/deploy/install.sh), with the bundle's bytes
@@ -246,9 +259,9 @@ def main():
     def dest(n):
         top, _, rest = n.partition("/")
         if not rest:
-            if n in ("eirl-encoderd", "srtla_send", "mediamtx", "srt-live-transmit"):
+            if n in ("eirl-encoderd", "srtla_send", "mediamtx", "srt-live-transmit", "eirl-send", "ristsender"):  # OUTPUTS.md §4
                 return "usr/local/bin/" + n
-            if n in ("eirl-netsetup", "eirl-update"):
+            if n in ("eirl-netsetup", "eirl-update", "eirl-fan"):
                 return "usr/local/sbin/" + n
             if n.startswith("libsrt.so."):
                 return "usr/lib/eirl-encoder/lib/" + n

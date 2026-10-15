@@ -51,6 +51,7 @@ avahi-daemon
 libnss-mdns
 policykit-1                   # Wi-Fi client and the wizard's clock/hostname (.pkla)
 modemmanager                  # 4G modems for SRTLA (stays, D-I6)
+mobile-broadband-provider-info # the APN database for a modem without one set (MODEMS.md §7.2)
 wireless-regdb                # Wi-Fi channels and power per country
 crda
 linux-firmware                # the Intel 8265 and USB adapters

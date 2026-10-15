@@ -259,7 +259,8 @@ func (e *Engine) reassign() {
 		e.sources[i] = nil
 		e.bridges[i].PushStill(e.black)
 	}
-	e.place(e.lastCat, retired, byID)
+	e.place(e.placeable(e.lastCat), retired, byID)
+	e.syncAudio(e.lastCat)
 	if e.fading == nil {
 		e.applyScene()
 	}

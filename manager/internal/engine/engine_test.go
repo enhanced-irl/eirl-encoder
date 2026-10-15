@@ -256,6 +256,12 @@ func TestSlateTick(t *testing.T) {
 	if len(m.Bridges[4].Stills) < 3 {
 		t.Errorf("pause stills: %d", len(m.Bridges[4].Stills))
 	}
+	// An empty slot gets black at every tick: its screen tile must not keep the last frame of what left it
+	empty := len(m.Bridges[2].Stills)
+	e.slateTick()
+	if e.sources[2] != nil || len(m.Bridges[2].Stills) != empty+1 {
+		t.Errorf("empty slot stills: %d → %d", empty, len(m.Bridges[2].Stills))
+	}
 }
 
 func TestDiscoveryAssignsSlots(t *testing.T) {

@@ -74,6 +74,8 @@ type Source struct {
 	audioCard string // the audio input of the same device
 	choice    *probe.Result
 	usbDev    string    // USB: its device (1-2.1), to cut its port's power if it hangs
+	usbIdent  string    // USB: which device that is (usbhub.Sys.Ident), to tell it from another on its port
+	unplugged time.Time // USB: since when it has been unplugged (zero = it is not): the actor frees its slot
 	lastFrame time.Time // the last time it gave frames (usb_on_air's "recently live")
 	// USB: the camera's image settings as last read (SOURCES.md §7) and the node they were read from
 	controls []camera.Control
@@ -232,6 +234,10 @@ func (s *Source) run() {
 			if s.recovery != nil {
 				s.recovery.Forget()
 			}
+			if s.kind == "usb" {
+				_, err := os.Stat(s.id)
+				s.noteUnplugged(err != nil && s.physicallyGone())
+			}
 			s.wait(500 * time.Millisecond)
 			continue
 		}
@@ -350,8 +356,10 @@ func (s *Source) prepareCSI(w, h int) (string, error) {
 func (s *Source) prepareUSB(w, h int) (string, error) {
 	if _, err := os.Stat(s.id); err != nil {
 		s.clearControls()
+		s.noteUnplugged(s.physicallyGone())
 		return "", &notReady{StateGone, detail.New("gone"), time.Second}
 	}
+	s.noteUnplugged(false)
 	p, err := s.e.chooseUSB(s.id)
 	if err != nil {
 		return "", err
@@ -364,9 +372,13 @@ func (s *Source) prepareUSB(w, h int) (string, error) {
 	}
 	s.node = p.Node
 	dev := s.e.hubs.Sys.DeviceOf(s.node)
+	ident := s.e.hubs.Sys.Ident(dev)
 	s.mu.Lock()
 	if dev != "" {
 		s.usbDev = dev
+	}
+	if ident != "" {
+		s.usbIdent = ident
 	}
 	s.choice = &p
 	if p.Name != "" {
@@ -384,6 +396,48 @@ func (s *Source) prepareUSB(w, h int) (string, error) {
 	// user gave this camera are put back
 	s.openCamera(s.node, name)
 	return s.e.plat.USB(p.Probe, w, h, s.jpegParse), nil
+}
+
+// physicallyGone: has the USB camera been unplugged? Its port is empty, or another device is on it. Not
+// when it has only dropped off the bus and is still on its port: that is a hung one, which the recovery
+// may cure by cutting the power, and which says "unplug it" when it gives up. Off the actor: asking the
+// hub is a control transfer.
+func (s *Source) physicallyGone() bool {
+	s.mu.Lock()
+	dev, ident := s.usbDev, s.usbIdent
+	s.mu.Unlock()
+	if dev == "" {
+		return true // never seen on the bus: there is nothing to recover
+	}
+	sys := s.e.hubs.Sys
+	if now := sys.Ident(dev); now != "" {
+		// Enumerated on its port: another device, or itself without its video node yet (or hung)
+		return ident != "" && now != ident
+	}
+	plugged, known := sys.Plugged(dev)
+	return !known || !plugged
+}
+
+// noteUnplugged keeps since when the camera has been unplugged (gone) or forgets it.
+func (s *Source) noteUnplugged(gone bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case !gone:
+		s.unplugged = time.Time{}
+	case s.unplugged.IsZero():
+		s.unplugged = time.Now()
+	}
+}
+
+// unpluggedFor is how long the camera has been unplugged (0 if it is not).
+func (s *Source) unpluggedFor(now time.Time) time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.unplugged.IsZero() {
+		return 0
+	}
+	return now.Sub(s.unplugged)
 }
 
 func (s *Source) prepareNet(w, h int) (string, error) {

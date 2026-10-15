@@ -1,5 +1,5 @@
-> **Status:** IN PROGRESS (I1 done on Oct 14: the recipe builds the image and its offline checks pass; I2 and I3, on a board, are next)
-> **Updated:** 2026-10-14
+> **Status:** IN PROGRESS (I1-I3 done on Oct 14-15: the test board now runs the image; the second boot from scratch and I4 are next)
+> **Updated:** 2026-10-15
 
 # A minimal microSD image for the Jetson Nano
 
@@ -16,9 +16,9 @@ recipe (B0-B3), applied from scratch to NVIDIA's own base instead of by hand on 
 |---|---|---|
 | F0 Research and proposal | ✅ Oct 14 | This document; the maintainer's decisions are in §12 |
 | I1 Recipe and first image | ✅ Oct 14 | `tools/image/`: test and debug images of release 0.1.1, every offline check passes (§10.1) |
-| I2 First boot and uniqueness | — | Two boots from scratch: every per-device value is different (§10.2) |
-| I3 Test on a real card | — | On another microSD, never the test board's own card (§10.3) |
-| I4 Publish | — | Signed image on GitHub Releases, flashing and verification instructions (§10.4) |
+| I2 First boot and uniqueness | 🟡 Oct 14-15 | One boot from scratch and later boots on the test board (§10.4); the second boot from scratch, with the fixes of §10.4, is next |
+| I3 Test on a real card | ✅ Oct 14-15 | Wizard, sources, a stream, a real OTA (0.1.1 → 0.3.0) and reboots (§10.4). The maintainer chose to back up the board's own card and use it; the board **keeps the image** |
+| I4 Publish | — | Signed image on GitHub Releases, flashing and verification instructions (§10.5) |
 
 ## 1. Scope
 
@@ -189,6 +189,14 @@ Applied as files and `systemctl` commands in the chroot, each one from the repo 
 - The `base/` units (§11): B1 group A, B2, `alsa-restore`, the QSPI service (§4), D5 out (USB device mode and
   `serial-getty@ttyGS0` masked).
 - Persistent journal, 200 MB (`90-eirl-persistent.conf`, as on the board) and no syslog (B2).
+- The apt and motd timers masked (`apt-daily`, `apt-daily-upgrade`, `motd-news`), as on the board since Oct 8
+  (BASE.md §4.1): `fstrim` is the only timer left.
+- The system group `debug`, which NVIDIA's udev rules (`99-tegra-devices.rules`) give the GPU's debug nodes to and
+  L4T's own image creates with its first user.
+- A clock floor: the Nano has no RTC battery, so a first boot would start at systemd's build date (2023) until NTP
+  answers, and TLS (the OTA, the cloud) would reject today's certificates. The image ships timesyncd's clock file
+  (`/var/lib/private/systemd/timesync/clock`, linked from `/var/lib/systemd/timesync`: the unit has `DynamicUser=`)
+  with the build time, and timesyncd moves the clock forward to it when it starts.
 - Hostname `eirl-encoder` (renamed at first boot, §5), `C.UTF-8`, time zone UTC until the wizard.
 - No login users; `root` locked; the only sudo rule is the app's (`/etc/sudoers.d/eirl-encoder`).
 - Ubuntu's branding replaced (§9.2): `/etc/os-release` `NAME`/`PRETTY_NAME`, `/etc/issue`, `/etc/lsb-release`
@@ -526,7 +534,32 @@ The test board's card is kept untouched; the maintainer swaps the cards by hand.
 4. OTA to the next release (or a test release), a reboot, and back to the original card.
 5. Measurements against the test board (§11.2).
 
-### 10.4 I4, publishing (with the maintainer's OK)
+### 10.4 Results of I2 and I3 (Oct 14-15, debug image of 0.1.1)
+
+The maintainer chose to use the test board's own card: it was backed up whole first (raw, compressed, checked
+against the card's hash), and a restore that writes only the card's used ranges (GPT, NVIDIA's partitions and the
+used blocks of `APP`, 6.1 of 31.9 GB) was rehearsed on a dirtied copy. 🪤 On macOS, not even root can open
+`/dev/rdiskN` from an app without Full Disk Access: write the card from Terminal.
+
+| | Result |
+|---|---|
+| First boot | 16 s to `multi-user` (the grow 9 s: `APP` and its ext4 grown online to the whole 32 GB card); splash, then the wizard on the touch screen |
+| Per-device values | New `machine-id`, host name `eirl-encoder-<xxxx>` and the matching Wi-Fi name, SSH host keys (NVIDIA's `nvfb`), setup code and AP password |
+| Firmware | QSPI read, VER and VER_b = 32.7.6; nothing written (mode `check`) |
+| Nothing from the test board | No login user but `eirl-debug`, `root` locked, no NVIDIA questions, the QSPI service masked, ModemManager off |
+| Sources and stream | Board HDMI at 1080p50, a USB capture card and a UVC camera; a stream over SRTLA to the test relay |
+| OTA | 0.1.1 → 0.3.0 from the touch screen in 35 s (signature, backup, `install.sh`, health check) |
+| Later boots | 9 s; the first-boot units are skipped (markers), the identity stays |
+
+Found and fixed for the next image (§3.5): `motd-news` failed at every boot (the system was `degraded`) and the apt
+timers ran; the group `debug` was missing; the first boot's clock started in 2023. Found and **not** the image's (the
+board's own system does the same): saving a destination restarts the engine and with it the touch screen, which is
+black for about 12 s (`Failed to set plane` until the engine takes the screen again). The fan stays at PWM 0 until
+about 51 °C under the kernel's control (D-I7): since Oct 15 our own daemon drives it ([`FAN.md`](FAN.md)). The test
+board's old system also ran `jetson_clocks` at boot (its `automagic-fan` had `MAX_PERF=1`: CPU, GPU and memory at
+their highest clocks); the image keeps NVIDIA's default frequency scaling, and the test went well with it.
+
+### 10.5 I4, publishing (with the maintainer's OK)
 
 Signed image and its files (§8.2) on the release; the recipe and this document already on the public repository
 (the public sync); flashing and verification instructions in the README.
@@ -584,7 +617,7 @@ Each with the recommendation first. The maintainer's answer goes in the last col
 | Image session (owner) | This document, `tools/image/`, the kernel layer, first boot, the firmware step, the checks |
 | App session | Done on Oct 14: a fresh device's needs in the bundle (`/etc/default/eirl-engine`, `srt-live-transmit` + `libsrt`, the EDIDs, `OUTPUT=off` by default), `install.sh` image mode, `eirl-encoderd -print-hardware-id`, the public repository sync (`tools/public-sync.sh`), the image's signature and publication (§8.1), release 0.1.1. That session is closed: changes to the app, the installer or the release tools now go through the maintainer |
 | Cloud session | D-I8 (hardware id after a reflash); with the app session, remote support (§7.1) when the maintainer starts it |
-| To be assigned | The fan controller (D-I7): the daemon (a root helper writing the PWM, with profiles and the "camera" mode) and its interface in Settings and the web |
+| Image session (step 1, Oct 15) | The fan controller (D-I7, [`FAN.md`](FAN.md)): the root daemon `eirl-fan` with one curve, in the package (it arrives by OTA). Its profiles and the "camera" mode in Settings and the web: later |
 | Maintainer | The decisions in §12, the card swaps and the slots of I3, every publication |
 
 ## 14. Risks

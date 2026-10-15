@@ -1,5 +1,5 @@
-> **Status:** IN PROGRESS — **in `main` (MR !5)**, phase 0 measured (1080p60 over USB fits), installed and tested on the board on Oct 12 (hot unplugging too). Still missing: per-source A/V sync and a long test. Camera image settings (§7): in a branch, Oct 14
-> **Updated:** 2026-10-14
+> **Status:** IN PROGRESS — **in `main` (MR !5)**, phase 0 measured (1080p60 over USB fits), installed and tested on the board on Oct 12 (hot unplugging too). Still missing: per-source A/V sync and a long test. Camera image settings (§7): in a branch, Oct 14. Plugging and unplugging while running, and the audio following the video slots (§8): in a branch, Oct 15
+> **Updated:** 2026-10-15
 
 # Encoder video sources (board HDMI, capture cards and USB cameras)
 
@@ -330,3 +330,90 @@ sources, a hidden source and one that is gone carry none (the key is absent).
   `eirl-enginectl camera 2 brightness 140`, `eirl-enginectl camera-reset 2`.
 - Undo: `sudo rm /var/lib/eirl-engine/cameras.json` and restart the engine (the cameras keep the values they have
   until they are unplugged or reset).
+
+## 8. Plugging and unplugging while running
+
+Asked for on Oct 15: a USB camera plugged in while the encoder runs must appear by itself, and one unplugged must
+disappear. Before, a camera that was plugged in did appear (if a slot was free), but an unplugged one stayed in its slot
+as "disconnected" for good, keeping that slot taken, until the engine restarted.
+
+### 8.1 What happens
+
+| Event | What the engine does |
+|---|---|
+| A camera is plugged in | Its `/dev/v4l` link appears: within 2 s, `probe -list` and the camera goes to a free slot (and its microphone to a free audio slot). A second `probe -list` 3 s later catches what was still binding the first time |
+| A camera is unplugged | Its slot shows "disconnected" (the slate) and, **3 s** after the engine sees that it is unplugged, the slot is freed: black, empty, out of the state's `sources`. Its audio input goes the same way (but stays as long as its camera keeps its video slot). `event=source_removed … reason=unplugged` and `event=audio_input_removed … reason=unplugged` |
+| It is plugged in again | Back to the **slot it had**, if still free (the ones coming back are placed before a new camera listed in the same catalogue). Its settings come back by id (image settings, audio volume, delay and mix, hidden or not) |
+| A new camera with every slot taken | It waits without a slot (`event=no_free_slot`); it gets one as soon as another camera leaves |
+| Moved to another port within 3 s | It keeps its slot (same by-id link, if it has a serial; a capture card without one goes by port, so it is a new source) |
+
+A freed slot goes **black** on its screen tile and stays so: the engine pushes black into every empty slot at
+each slate tick (250 ms), as it already did for a hidden source. Once was not enough: the tile kept the last frame
+of what left the slot (the slate, or the camera's own while its pipeline was still closing, which can deliver frames
+for ~200 ms after the black). The web drops a tile's thumbnail when another source takes its slot.
+
+Not freed:
+
+- **On air**: the main source or, in PiP and side by side, the secondary. It keeps its slot with the slate until it is taken
+  off air (then it leaves within 2 s). The engine never changes what goes out by itself.
+- **Hung on its port**: it dropped off the bus but something is still on its port (the hub's connection bit), or it is
+  enumerated on its port without its video node. That is the USB recovery's case (MIXER.md §16), which cuts the power and,
+  when it gives up, says "unplug it".
+- **During a hub's power cut**: for 20 s after any cut nothing leaves, because everything under the hub drops for a few
+  seconds and comes back by itself.
+- A **pinned slot** (SETUP.md) is freed too, but stays reserved for its camera and black until it comes back.
+
+### 8.2 How "unplugged" is told apart
+
+The source's goroutine checks it when its node is not there (off the actor: asking the hub is a USB control transfer):
+
+1. Never seen on the bus (it never opened): unplugged.
+2. Its USB device (`1-2.1`) is enumerated: unplugged only if it is **another device** (vendor, product and serial in sysfs,
+   `usbhub.Sys.Ident`, read while it was live). The same one without its node is still binding, or hung.
+3. Not enumerated: what the hub says of the port (`Sys.Plugged`). Empty, or it cannot tell: unplugged.
+
+The actor frees the slots every 2 s (`dropUnplugged`, in the discovery tick): only USB sources unplugged for more than
+`unplugGrace` (3 s), not on air, and with no hub cut in the last `cutSettle` (20 s). Then it places at once whatever was
+waiting for a slot. The slot each camera had is kept in memory (not across restarts).
+
+A dropped camera is not placed again until a catalogue **probed after it left** lists it (`unpluggedAt`, and
+`Bus.Seen` for its sound card): the last catalogue, or a slow `probe -list` that started before the unplug, may still
+list it, and placing it would bring back a camera that is no longer there. One that comes back while every slot is
+taken waits like any other and gets the next slot freed.
+
+### 8.3 Detected cameras and the four slots: the audio follows
+
+Decided on Oct 15: **the cameras connected and the encoder's four slots are two different things**. Every camera is
+detected (the catalogue, `probe -list`, has no limit: the state's `catalog` lists them all, also those without a
+slot), but only four go into the slots (the four previews), and only those are opened. Each slot is set on the
+screen ("Sources") and on the web ("Source slots"): **Automatic** (it takes the next camera detected, so a new
+board shows its camera without configuring anything), **Off**, or **pinned** to one camera. The ones left over wait
+in the list, connected, to be assigned.
+
+The audio goes with that: until Oct 15 the four audio slots went to the first four sound cards detected, whatever
+was in the video slots. With more than four cameras, one in a slot could be left without its sound and one without
+a slot took an audio slot. Now (`Engine.syncAudio`, after every change of the catalogue or of the slots):
+
+- A camera's **own sound card** (`probe -list` pairs each USB camera with the card of the same device:
+  `sources[].audio`, read into `probe.Entry.Audio`; a network camera's audio has its own id) is opened only while
+  that camera has a video slot, or while a camera with a slot has it as its audio chosen by hand (`audio_link`).
+  A camera with a slot keeps its own sound open even when it was given another one: `audio_link` only takes an
+  open input, and that is how the user goes back to it.
+- The board's HDMI audio (I2S) and a **USB sound card that belongs to no camera** (a microphone, an interface) are
+  always opened.
+- They take the audio slots in the order of their video slots (the I2S in the HDMI's place), the loose cards last.
+  With four audio slots, the HDMI and three cameras with sound fill them: a loose microphone only gets a slot if
+  one is left, and one that had a slot gives it up to the sound of a camera that gets a video slot
+  (`event=audio_input_removed reason=no_audio_slot`). One that leaves (`reason=no_video_slot`) goes back to its
+  audio slot when its camera gets a video slot again; its settings are kept by id.
+- **The audio on air is never closed by itself**: neither a camera's whose camera loses its video slot nor a loose
+  microphone's. It leaves when another audio is put on air (or when it is unplugged).
+
+### 8.4 Tests
+
+`go test ./internal/engine/ -run 'Unplugged|PhysicallyGone|DiscoverWatches|WaitingCamera|ReturnedCamera|StaleProbe|AudioFollows|LooseCard|SlateTick'`
+and `./internal/engine/audio -run DropGone`: leaving after the grace, on air until taken off air, held after a hub cut,
+hidden, back to its own slot (placed before a new one), the camera waiting for a slot (also one that came back), a
+stale probe, the four "unplugged" cases, by-path and the second probe, black in the empty slots; the audio following
+the video slots (a slot off, a slot pinned to a waiting camera, the loose microphone giving up its slot, the audio on
+air kept, an audio chosen by hand, a camera's audio kept while its video keeps its slot).

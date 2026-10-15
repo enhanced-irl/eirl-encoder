@@ -1,0 +1,36 @@
+# eirl-fan: the encoder's fan control (FAN.md). Root, because the fan's speed is a sysfs file of root; it
+# writes nothing else but its state in /run/eirl-fan. While it runs the kernel's control is off: the daemon
+# gives it back when it stops, and ExecStopPost does too if it dies.
+[Unit]
+Description=eirl-fan: the encoder's fan control
+Documentation=https://github.com/enhanced-irl/eirl-encoder/blob/main/FAN.md
+ConditionPathExists=/sys/devices/pwm-fan/target_pwm
+# The test board's old hand-installed controller: never two of them writing the same fan (install.sh also
+# disables it). After the boot-time undo of an interrupted update, which may remove this very daemon
+Conflicts=automagic-fan.service
+After=automagic-fan.service eirl-update-recover.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/eirl-fan
+ExecStopPost=/bin/sh -c 'echo 1 > /sys/devices/pwm-fan/temp_control'
+Restart=always
+RestartSec=2
+RuntimeDirectory=eirl-fan
+RuntimeDirectoryMode=0755
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX
+MemoryDenyWriteExecute=yes
+LockPersonality=yes
+RestrictRealtime=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

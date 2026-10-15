@@ -1,7 +1,7 @@
 # Multi-camera: composition, multiview and touch screen
 
 > **Status:** IN PROGRESS (F0, F1 —single engine— and F2 —web ↔ screen— in main; F3 —no rehearsal mode— on the board; next F4, per-source audio)
-> **Updated:** 2026-10-15 (Oct 15: the output protocols and encoding settings in the state and `output_config`, §5, [`OUTPUTS.md`](OUTPUTS.md); translated to English; the Python engine retired, the Go engine is the only one: [`ENGINE_GO.md`](ENGINE_GO.md); last content change Oct 13: header and Settings, §18; Wi-Fi in Settings, §19; Oct 14: renaming "Create my Wi-Fi", §19; everything the web configures, on the screen, §21; fades one step per program frame and the screen's tiles in step with the program, §22)
+> **Updated:** 2026-10-15 (Oct 15: USB cameras plugged and unplugged while running, "Sources and slots" in §4, and a camera's audio follows its video slot, §10; the output protocols and encoding settings in the state and `output_config`, §5, [`OUTPUTS.md`](OUTPUTS.md); translated to English; the Python engine retired, the Go engine is the only one: [`ENGINE_GO.md`](ENGINE_GO.md); last content change Oct 13: header and Settings, §18; Wi-Fi in Settings, §19; Oct 14: renaming "Create my Wi-Fi", §19; everything the web configures, on the screen, §21; fades one step per program frame and the screen's tiles in step with the program, §22)
 
 **The mixer is the encoder.** `eirl-engine` captures all the sources it detects at the same time, and what
 comes out is always the composed **program** (cut, PiP, side by side, fades). That includes SRT/SRTLA
@@ -190,7 +190,10 @@ pieces today (`manager/internal/engine/…`):
 
 **Sources and slots.**
 - The source catalogue (`eirl-encoderd probe -list`) is read at startup and every time
-  `/dev/v4l/by-id` changes. The board's HDMI goes in slot 1 and the USB ones in catalogue order.
+  `/dev/v4l/by-id` or `/dev/v4l/by-path` changes (checked every 2 s; by-path too because two capture cards
+  with the same serial share one by-id link), and once more 3 s after each change, for what was still
+  binding the first time (a camera's sound card). The board's HDMI goes in slot 1 and the USB ones in
+  catalogue order.
 - Each source's id is the catalogue's: `hdmi`, the USB's by-id path or `test`.
 - Each source has its own thread and pipeline (`… ! nvvidconv output-buffers=16 ! NV12 NVMM 1920×1080
   ! appsink`). Its buffers go to its slot's `appsrc` in the program and in the multiview.
@@ -199,7 +202,18 @@ pieces today (`manager/internal/engine/…`):
   unplugged) · `error`.
 - Watchdog: 3 s without frames → that source is reopened, and only that one. With the source live, every 2 s it
   checks that the HDMI is still in the same mode and that the USB is still plugged in. Retries after 1, 2, 4 and 8 s.
-- A slot with a disconnected USB is reused only if another one arrives and there is no free one left.
+- **Plugging and unplugging while running** (Oct 15; [`SOURCES.md` §8](SOURCES.md#8-plugging-and-unplugging-while-running)):
+  a USB camera that is plugged in appears in a free slot within ~2 s; one that is unplugged shows
+  "disconnected" for ~3 s and then **leaves its slot** (black and empty, gone from the state, and its audio input
+  too), like a network camera removed from the web. It comes back to the **same slot** if that one is still free (the
+  ones coming back are placed before a new camera). Exceptions: a camera **on air** (the main one or, in PiP and side by side,
+  the secondary) keeps its slot with the slate until it is taken off air, because the engine never changes what goes out
+  by itself; one that only **dropped off the bus but is still on its port** (hung) stays for the USB recovery (§16);
+  and for 20 s after a hub's power cut nothing leaves (everything under the hub drops and comes back by itself). A
+  pinned slot stays reserved and black while its camera is unplugged.
+- A slot whose USB camera has been gone for over 10 s without leaving it (a hung one, not on air) is reused only if
+  another one arrives and there is no free one left. A camera that arrives with every slot taken gets one as soon as
+  another camera leaves.
 - **USB.** With `eirl-encoderd probe -all` (SOURCES.md §1) the bus is shared among all the USB ones and
   what is already live is kept (`-keep`): a camera on air does not change mode because another one is plugged
   in. With a binary without `-all`, each one is chosen on its own as if it had the whole bus.
@@ -493,11 +507,17 @@ the video's, for example a USB microphone.
   of the board's HDMI and each USB sound card in the catalogue (`probe -list` → `audio`), that is,
   capture cards, webcams, microphones and interfaces. They reach the program through one `appsrc` per slot
   (`aa0…aa3`, `MIXER_AUDIO_SLOTS`) towards the `audiomixer`, with a background silence that keeps the track.
+  **Since Oct 15 the audio follows the video slots** ([`SOURCES.md` §8.3](SOURCES.md#83-detected-cameras-and-the-four-slots-the-audio-follows)):
+  a camera's own sound card is opened only while that camera has a video slot (or a camera with a slot was given
+  it by hand, `audio_link`); the I2S and a USB sound card that belongs to no camera, always. They take the audio
+  slots in the order of their video slots, the loose cards last (one gives its slot up to a camera's); the audio on
+  air is never closed by itself.
 - **One plays.** The one on air goes at volume 1 and the rest muted but capturing, to switch
   instantly with a 250 ms fade. At startup `AUDIO_SOURCE` plays (auto = the main source's:
   I2S with HDMI, the USB's card). The choice is saved with the scene.
-- **Isolated.** A card that is unplugged or stops only takes itself down (it is reopened when it comes back; new
-  cards are detected when `/proc/asound/cards` changes). I2S without a camera stays in `no_signal` and is not
+- **Isolated.** A card that is unplugged or stops only takes itself down (new cards are detected when
+  `/proc/asound/cards` changes; since Oct 15 an unplugged one leaves its slot after 3 s and goes back to it when it
+  comes again, SOURCES.md §8). I2S without a camera stays in `no_signal` and is not
   reopened: closing it takes ~5 s (trap 19).
 - **Web**: "Audio" row in "Sources" (each input, its level and which one plays; "No audio"). The Audio
   card shows the one that plays. **Screen**: "Audio: <name>".

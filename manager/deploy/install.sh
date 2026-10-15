@@ -17,7 +17,8 @@
 #   sudoers · polkit · tmpfiles of the power readings and /run/eirl-uplinks · network cameras
 #   (eirl-netsetup, MediaMTX and their units; F7) · app unit (+ /etc/default/eirl-encoderd) · eirl-engine
 #   drop-in · the engine itself when the package carries it (a release bundle: engine/; its units enabled) ·
-#   the update helper (eirl-update and its units, UPDATES.md) · one-time migrations (hdmi2srt →
+#   the update helper (eirl-update and its units, UPDATES.md) · the fan control (eirl-fan and its unit, FAN.md) ·
+#   one-time migrations (hdmi2srt →
 #   eirl-engine; the destination from /etc/default/eirl-engine to /etc/eirl-encoder/engine.env) · on a
 #   new device, engine.env with the output off and a default /etc/default/eirl-engine (never overwritten) · boot
 #   splash (splash/install.sh: binary, units and extlinux entry; seen at the next boot, SPLASH.md) ·
@@ -97,6 +98,10 @@ list_files() {
   if [ -f "$SRC/eirl-update" ]; then
     echo /usr/local/sbin/eirl-update
     for u in $UPDATE_UNITS; do echo "/etc/systemd/system/$u"; done
+  fi
+  if [ -f "$SRC/eirl-fan" ]; then
+    echo /usr/local/sbin/eirl-fan
+    echo /etc/systemd/system/eirl-fan.service
   fi
   if [ -d "$SRC/splash" ]; then
     echo /usr/local/bin/eirl-splash
@@ -338,6 +343,11 @@ if [ -f "$SRC/eirl-update" ]; then
   for u in $UPDATE_UNITS; do put 0644 "$D/$u" "/etc/systemd/system/$u"; done
   install -d -m 0755 -o root -g root /var/lib/eirl-update
 fi
+# 6b'. The fan control (FAN.md): the root daemon eirl-fan and its unit, (re)started at the end
+if [ -f "$SRC/eirl-fan" ]; then
+  put 0755 "$SRC/eirl-fan" /usr/local/sbin/eirl-fan
+  put 0644 "$D/eirl-fan.service" /etc/systemd/system/eirl-fan.service
+fi
 [ -n "$IMAGE" ] || systemctl daemon-reload
 [ -f "$SRC/eirl-update" ] && systemctl enable eirl-update-recover.service >/dev/null 2>&1
 # The engine and its boot preparation (eirl-hdmi-init) start at boot: nothing else enables them, and a new
@@ -456,6 +466,19 @@ if [ -x /usr/local/sbin/eirl-netsetup ]; then
   if [ -z "$IMAGE" ]; then
     systemctl start eirl-ap.service || true
     echo "network cameras: $(cat /run/eirl-ap/state.json 2>/dev/null)"
+  fi
+fi
+
+# 8c. The fan control: enabled at boot; (re)started now, which takes the fan from the kernel or from the test board's
+#     old automagic-fan (its unit conflicts with that one)
+if [ -x /usr/local/sbin/eirl-fan ]; then
+  systemctl enable eirl-fan.service >/dev/null 2>&1
+  if [ -z "$IMAGE" ]; then
+    # A hand-installed automagic-fan (the test board until Oct 15): off for good, or both would start at boot
+    if systemctl cat automagic-fan.service >/dev/null 2>&1 && systemctl is-enabled automagic-fan.service >/dev/null 2>&1; then
+      systemctl disable --now automagic-fan.service >/dev/null 2>&1 && echo "automagic-fan disabled: eirl-fan drives the fan (FAN.md)"
+    fi
+    systemctl restart eirl-fan.service || echo "WARNING: eirl-fan did not start: the kernel keeps the fan" >&2
   fi
 fi
 

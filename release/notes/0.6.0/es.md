@@ -1,0 +1,3 @@
+- Las cámaras USB se enchufan y desenchufan con el codificador en marcha: una cámara nueva aparece sola en una fuente libre en un par de segundos y, al desenchufarla, su fuente queda libre (y en negro) a los pocos segundos. Si la vuelves a enchufar, vuelve a la misma fuente. Si está al aire, se queda con la carta «NO SIGNAL» hasta que pongas otra.
+- Puedes tener conectadas más cámaras que fuentes: todas aparecen en Ajustes › Fuentes y ahí eliges cuáles ocupan las cuatro. El micrófono de una cámara solo se usa mientras esa cámara ocupa una fuente.
+- El codificador controla ahora su propio ventilador: arranca antes y sube con la temperatura, así la placa trabaja más fresca (en reposo, unos 40 °C).

@@ -929,7 +929,7 @@ The drop-in sets `EIRL_CONF`, which the engine reads (`internal/engine/config`);
 - **Access**: `http://jetson.local` or `http://<board-ip>` (port 80, LAN only).
 - **Logs**: `journalctl -u eirl-encoderd` (method, route and code; never bodies or secrets).
 
-Undo: for SRTLA, see [`SRTLA.md` §8](SRTLA.md#8-install-and-undo); the boot splash, [`SPLASH.md` §4](SPLASH.md#4-build-install-and-undo). The rest: `sudo systemctl disable --now eirl-encoderd`, delete `/usr/local/bin/eirl-encoderd`,
+Undo: for SRTLA, see [`SRTLA.md` §8](SRTLA.md#8-install-and-undo); the boot splash, [`SPLASH.md` §4](SPLASH.md#4-build-install-and-undo); the fan control, [`FAN.md` §4](FAN.md#4-install-and-undo). The rest: `sudo systemctl disable --now eirl-encoderd`, delete `/usr/local/bin/eirl-encoderd`,
 `/etc/systemd/system/eirl-encoderd.service`, `/etc/systemd/system/eirl-engine.service.d/eirl-encoder.conf`,
 `/etc/sudoers.d/eirl-encoder`, `/etc/tmpfiles.d/eirl-encoder.conf`, `/etc/default/eirl-encoderd` and `/etc/eirl-encoder`
 (with `cloud.json` and `identity`: unlink first from the web to revoke the token in the cloud; without

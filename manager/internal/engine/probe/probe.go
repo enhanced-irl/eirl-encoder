@@ -31,6 +31,7 @@ var (
 	reSourceID = regexp.MustCompile(`^/dev/v4l/by-(id|path)/[A-Za-z0-9_:.-]{1,200}$`)
 	reAllLine  = regexp.MustCompile(`^SRC([0-9])_([A-Z_]+)=(.*)$`)
 	reNode     = regexp.MustCompile(`^/dev/video[0-9]{1,3}$`)
+	reALSA     = regexp.MustCompile(`^alsa:[A-Za-z0-9_-]{1,32}$`)
 )
 
 // CleanName keeps the characters a name may have in logs, the web and the screen (≤48).
@@ -135,6 +136,9 @@ func KeepArg(id string, p pipeline.Probe) string {
 // Entry is one video source of the catalogue.
 type Entry struct {
 	ID, Kind, Name, Node string // Kind: hdmi-csi | usb | network | test
+	// Audio is the audio input of the same device ("alsa:<card>" of a USB camera, the network camera's
+	// own id), "" if none: the audio of a camera follows its video slot (Engine.syncAudio)
+	Audio string
 }
 
 // AudioEntry is one audio input of the catalogue (used by the audio phase).
@@ -199,12 +203,18 @@ func ParseList(out string, test bool, netValid NetworkValid, netName NetworkName
 				if name = CleanName(name); name == "" {
 					name = "USB"
 				}
-				want = append(want, Entry{ID: id, Kind: "usb", Name: name})
+				e := Entry{ID: id, Kind: "usb", Name: name}
+				if a, ok := s["audio"].(map[string]any); ok {
+					if aid, _ := a["id"].(string); reALSA.MatchString(aid) {
+						e.Audio = aid
+					}
+				}
+				want = append(want, e)
 			}
 		case "network":
 			if netValid != nil && netValid(id, node) {
 				name, _ := str(s, "name")
-				want = append(want, Entry{ID: id, Kind: "network", Name: netName(name), Node: node})
+				want = append(want, Entry{ID: id, Kind: "network", Name: netName(name), Node: node, Audio: id})
 			}
 		}
 	}

@@ -298,6 +298,19 @@ func (s Sys) Plugged(dev string) (plugged, known bool) {
 	return st&1 != 0, true
 }
 
+// Ident is what tells one USB device from another on the same port: "vendor:product:serial" from sysfs
+// ("vendor:product:" without a serial), "" if dev is not enumerated.
+func (s Sys) Ident(dev string) string {
+	if !reDev.MatchString(dev) || !isDir(s.dev(dev)) {
+		return ""
+	}
+	v, p := read(filepath.Join(s.dev(dev), "idVendor")), read(filepath.Join(s.dev(dev), "idProduct"))
+	if v == "" || p == "" {
+		return ""
+	}
+	return v + ":" + p + ":" + read(filepath.Join(s.dev(dev), "serial"))
+}
+
 // Plan is what to cut for a device: the hubs (the device's and its twins that switch power) and the
 // port. Why: why it cannot be done ("" = it can). Affected: the OTHER devices that power off with the
 // cut (everything under those hubs: see the package comment).
@@ -456,6 +469,20 @@ func (h *Hubs) Claim(p Plan, now time.Time, quiet time.Duration) (last time.Time
 		h.cuts[hub] = now
 	}
 	return time.Time{}, false
+}
+
+// LastCut is the last cut of any hub (zero if none): everything under it drops off the bus for a few
+// seconds and comes back by itself, so that is no camera being unplugged.
+func (h *Hubs) LastCut() time.Time {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var last time.Time
+	for _, t := range h.cuts {
+		if t.After(last) {
+			last = t
+		}
+	}
+	return last
 }
 
 // Cycle cuts the port's VBUS on the plan's hubs, waits off and gives it back, in reverse order. It

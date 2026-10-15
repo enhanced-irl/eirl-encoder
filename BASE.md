@@ -368,7 +368,7 @@ there was before each group, the plans and what was purged) is kept in `/var/lib
 | D4 | Development tools on the board (ffmpeg, compilers, kernel headers, `libssl-dev`, `tcl`) | **Keep** while it is the development board | Keep |
 | D5 | USB device mode (192.168.55.1 + `ttyGS0` console), rescue path | **Keep** in development; removed in a product image | Keep |
 | D6 | rsyslog removed, with the 200 MB persistent journal | **Yes** | Yes |
-| D7 | Fan: `automagic-fan` (Python every 2 s) or the kernel's thermal control | Measure first; small impact | Measure first |
+| D7 | Fan: `automagic-fan` (Python every 2 s) or the kernel's thermal control | Measure first; small impact | Measure first. **Oct 15: neither: our own daemon (`eirl-fan`, [`FAN.md`](FAN.md))** |
 | D8 | B5: engine priority, IRQs and a dedicated user | **Yes**, after B0 and with the mixer session | Yes |
 
 ## 9. Coordination

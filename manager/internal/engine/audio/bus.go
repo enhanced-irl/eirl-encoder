@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -90,7 +92,9 @@ type Bus struct {
 	mode        string
 	mix         map[string]bool
 	gains       map[string]float64
-	vols        map[int]float64 // the volume each slot has now (where a fade starts)
+	vols        map[int]float64      // the volume each slot has now (where a fade starts)
+	lastSlot    map[string]int       // the slot of each input dropped (unplugged, or its camera without a slot): it goes back there
+	unplugged   map[string]time.Time // dropped by DropGone (when), until a catalogue probed afterwards lists it (Seen)
 	fading      *fadeState
 	cards       string
 	cardsRead   bool
@@ -145,7 +149,7 @@ func New(h Host, cfg Config) (*Bus, error) {
 	b := &Bus{media: h.Media, net: h.Net, changed: h.Changed, cfg: cfg, asound: cfg.ASound, amix: amix,
 		now: time.Now, descFor: Desc, slots: make([]*Input, cfg.Slots), mode: ModeSingle,
 		delays: map[string]int{}, overrides: map[string]string{}, mix: map[string]bool{}, gains: map[string]float64{},
-		vols: map[int]float64{}}
+		vols: map[int]float64{}, lastSlot: map[string]int{}, unplugged: map[string]time.Time{}}
 	if b.asound == "" {
 		b.asound = "/proc/asound"
 	}
@@ -410,11 +414,13 @@ func (b *Bus) Discover(c probe.Catalogue) {
 			have[in.id] = true
 		}
 	}
+	// The ones coming back to their slot first: a newcomer must not take it
+	slices.SortStableFunc(want, func(x, y wanted) int { return backFirst(b.lastSlot, x.id) - backFirst(b.lastSlot, y.id) })
 	for _, w := range want {
 		if have[w.id] {
 			continue
 		}
-		slot, ok := b.freeSlot(w.id == "i2s")
+		slot, ok := b.freeSlot(w.id)
 		if !ok {
 			elog.Event("audio", "audio_no_free_slot", "input", w.name)
 			continue
@@ -425,6 +431,8 @@ func (b *Bus) Discover(c probe.Catalogue) {
 		in := newInput(b, slot, w.id, w.kind, w.name, w.device)
 		b.slots[slot] = in
 		have[w.id] = true
+		delete(b.lastSlot, w.id)
+		delete(b.unplugged, w.id)
 		b.links[slot].bridge.SetParams(b.params(in))
 		go in.run()
 		added = true
@@ -453,11 +461,97 @@ func (b *Bus) pruneRetired() {
 	b.retired = keep
 }
 
-// freeSlot: the first slot if asked and free, else any free one, else the one gone the longest (for
-// more than goneReuse). With b.mu.
-func (b *Bus) freeSlot(first bool) (int, bool) {
-	if first && b.slots[0] == nil {
+// DropGone frees the slots of the USB inputs whose card has been gone for grace (the camera or the
+// sound card unplugged), as Discover does with a removed network camera; it goes back to the same slot
+// if it comes back while that one is free. Its settings (volume, delay, mix) are kept by id. keep: the
+// audio of a camera that keeps its video slot (on air, or hung on its port): it goes with its video. It
+// returns the ids it dropped.
+func (b *Bus) DropGone(grace time.Duration, keep map[string]bool) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	now := b.now()
+	var dropped []string
+	for i, in := range b.slots {
+		if in == nil || in.kind != KindUSB || keep[in.id] {
+			continue
+		}
+		if state, since := in.snapshot(); state != StateGone || now.Sub(since) < grace {
+			continue
+		}
+		elog.Event("audio", "audio_input_removed", "slot", i+1, "input", in.Name(), "reason", "unplugged")
+		b.lastSlot[in.id] = i
+		b.unplugged[in.id] = now
+		dropped = append(dropped, in.id)
+		b.retire(i)
+	}
+	if len(dropped) > 0 {
+		b.apply(nil)
+	}
+	b.pruneRetired()
+	return dropped
+}
+
+// Unplugged: was input id dropped by DropGone, and no catalogue probed since has listed it?
+func (b *Bus) Unplugged(id string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	_, ok := b.unplugged[id]
+	return ok
+}
+
+// Seen: a catalogue probed from started lists ids: those dropped before it are back. Not one dropped while
+// that probe ran (it may have seen it still there).
+func (b *Bus) Seen(ids []string, started time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, id := range ids {
+		if t, ok := b.unplugged[id]; ok && t.Before(started) {
+			delete(b.unplugged, id)
+		}
+	}
+}
+
+// Retire stops the inputs in ids and frees their slots, saying why in the log (no_video_slot: a camera's own
+// audio while that camera has no video slot; no_audio_slot: a loose sound card giving its slot to a camera's).
+// They go back to the same slot when they come again. The one on air is never retired. true if any was.
+func (b *Bus) Retire(ids map[string]bool, reason string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	done := false
+	for i, in := range b.slots {
+		if in == nil || !ids[in.id] || in.id == b.main {
+			continue
+		}
+		elog.Event("audio", "audio_input_removed", "slot", i+1, "input", in.Name(), "reason", reason)
+		b.lastSlot[in.id] = i
+		b.retire(i)
+		done = true
+	}
+	if done {
+		b.apply(nil)
+	}
+	b.pruneRetired()
+	return done
+}
+
+// Slots is how many audio slots there are.
+func (b *Bus) Slots() int { return len(b.slots) }
+
+// Overrides is the audio of each video source chosen by hand ({video id: audio id, "" = none}), a copy.
+func (b *Bus) Overrides() map[string]string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return maps.Clone(b.overrides)
+}
+
+// freeSlot is where input id goes: the first slot for the I2S if free; the slot it had when it left if
+// still free; else a free one; else the one gone the longest (for more than goneReuse). With b.mu.
+func (b *Bus) freeSlot(id string) (int, bool) {
+	if id == "i2s" && b.slots[0] == nil {
 		return 0, true
+	}
+	if i, ok := b.lastSlot[id]; ok && i < len(b.slots) && b.slots[i] == nil {
+		return i, true
 	}
 	for i, in := range b.slots {
 		if in == nil {
@@ -474,6 +568,14 @@ func (b *Bus) freeSlot(first bool) (int, bool) {
 		}
 	}
 	return best, found
+}
+
+// backFirst orders the ones coming back to a remembered slot (0) before the rest (1).
+func backFirst(last map[string]int, id string) int {
+	if _, ok := last[id]; ok {
+		return 0
+	}
+	return 1
 }
 
 // params are an input's bridge timing: capture time + MIXER_SYNC, plus its delay and, for a network

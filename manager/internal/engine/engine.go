@@ -118,23 +118,27 @@ type Engine struct {
 	pauseSlot   int
 
 	// Owned by the actor
-	scene     scene.Scene
-	locked    bool
-	extra     scene.Extra // the audio settings of mixer-scene.json, kept for the audio phase
-	sources   []*Source
-	slotCfg   []SlotConfig    // slots.go: what each slot takes, and its alias
-	lastCat   probe.Catalogue // the last good catalogue (the state's catalog, re-placing on a slots change)
-	applied   map[int]scene.Layer
-	aspects   map[int]scene.Aspect
-	fading    *fadeState
-	previewOn bool
-	pauseSeq  int // the newest Pause text whose image is being made
-	outBy     string
-	outSeq    int
-	newFPS    *float64
-	measured  *float64
-	per       periodicState
-	disc      discoverState
+	scene    scene.Scene
+	locked   bool
+	extra    scene.Extra // the audio settings of mixer-scene.json, kept for the audio phase
+	sources  []*Source
+	slotCfg  []SlotConfig    // slots.go: what each slot takes, and its alias
+	lastCat  probe.Catalogue // the last good catalogue (the state's catalog, re-placing on a slots change)
+	lastSlot map[string]int  // the slot each unplugged USB camera had: it goes back there (discover.go)
+	// unpluggedAt: when each camera was dropped as unplugged, until a catalogue probed afterwards lists it
+	unpluggedAt map[string]time.Time
+	leaving     []*Source // sources taken out when unplugged, until their goroutine ends
+	applied     map[int]scene.Layer
+	aspects     map[int]scene.Aspect
+	fading      *fadeState
+	previewOn   bool
+	pauseSeq    int // the newest Pause text whose image is being made
+	outBy       string
+	outSeq      int
+	newFPS      *float64
+	measured    *float64
+	per         periodicState
+	disc        discoverState
 
 	hiddenMu sync.RWMutex
 	hidden   map[string]bool // a copy of the scene's hidden set, for the source goroutines
@@ -171,7 +175,8 @@ func New(o Options) *Engine {
 		runDir:  c.RunDir, configMain: o.MixerMain,
 		net:       &netcam.Client{KeyFile: netcam.KeyFile(c.NetConfDir)},
 		previewOn: true, outBy: "start",
-		hidden:     map[string]bool{},
+		hidden:   map[string]bool{},
+		lastSlot: map[string]int{}, unpluggedAt: map[string]time.Time{},
 		events:     make(chan func(), 64),
 		changes:    make(chan struct{}, 1),
 		fatal:      make(chan error, 1),
@@ -549,11 +554,14 @@ func (e *Engine) Run(ctx context.Context) error {
 
 // slateTick: «Sin señal» in the slots whose source gives no image (also one that stops without an
 // error, before its watchdog reopens it at 3 s). Here and not in the source's goroutine: opening a hung
-// device blocks that goroutine for seconds. Black for a hidden source, or one opening for < 2 s.
+// device blocks that goroutine for seconds. Black for a hidden source, or one opening for < 2 s, and for
+// an empty slot: once was not enough, its screen tile kept the last frame of the source that left it (the
+// slate, or the camera's while its pipeline was still closing).
 func (e *Engine) slateTick() {
 	now := e.media.Monotonic()
 	for i, s := range e.sources {
 		if s == nil {
+			e.bridges[i].PushStill(e.black)
 			continue
 		}
 		state, since, _ := s.snapshot()

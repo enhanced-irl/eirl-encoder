@@ -153,6 +153,11 @@ for f in units-b1a.txt units-b2.txt units-b1b-alsa.txt units-qspi.txt; do
   done
 done
 for u in nv-l4t-usb-device-mode.service nv-l4t-usb-device-mode-runtime.service serial-getty@ttyGS0.service; do mask_unit "$u"; done
+# The apt and motd timers, off on the test board since Oct 8 (BASE.md §4.1): an appliance does not refresh apt's lists
+# every day, and motd-news has nothing left to run (update-motd.d is emptied below): it failed at every boot
+for u in apt-daily.timer apt-daily.service apt-daily-upgrade.timer apt-daily-upgrade.service motd-news.timer motd-news.service; do
+  mask_unit "$u"
+done
 # ModemManager stays installed and disabled, as on the test board (base/keep.txt): its postinst enables it on a new
 # install. Whether it runs at boot is decided with the modems' work
 find "$R/etc/systemd/system" -name ModemManager.service -path '*.wants/*' -delete
@@ -173,6 +178,9 @@ else
   mask_unit ssh.service; mask_unit ssh.socket
 fi
 in_root passwd -l root >/dev/null
+# NVIDIA's udev rules (nvidia-l4t-init, 99-tegra-devices.rules) give the GPU's debug nodes to the group debug, which
+# L4T's own image creates with its first user: without it udev warns at every boot
+in_root getent group debug >/dev/null || in_root groupadd --system debug
 # Every nvidia-l4t-* on hold, as on the board: never an apt upgrade of L4T (it rewrote a QSPI on Oct 4)
 in_root /bin/sh -c "dpkg-query -W -f '\${db:Status-Abbrev} \${Package}\n' 'nvidia-l4t-*' | awk '\$1 ~ /^.i/ {print \$2}' | xargs apt-mark hold" >/dev/null
 
@@ -212,6 +220,16 @@ for f in setup-code ap.psk network.json device.json admin.hash cloud.json identi
 done
 rm -f "$R"/boot/extlinux/extlinux.conf.bak-* "$R/boot/extlinux/extlinux.conf.nv-update-extlinux-backup"
 rm -f "$R/usr/sbin/policy-rc.d"
+# No RTC battery: the first boot's clock would start at systemd's build date (2023) until NTP answers, and TLS (the OTA,
+# the cloud) would reject today's certificates. timesyncd moves the clock forward to this file's time when it starts:
+# the image's build time. After the first sync, timesyncd keeps it at the last known time itself. timesyncd runs with
+# DynamicUser=: its state is in /var/lib/private (0700), linked from /var/lib/systemd/timesync, and systemd gives the
+# tree to the unit's user when it starts
+rm -rf "$R/var/lib/systemd/timesync"
+install -d -m 0700 "$R/var/lib/private"
+install -d -m 0755 "$R/var/lib/private/systemd" "$R/var/lib/private/systemd/timesync"
+ln -s ../private/systemd/timesync "$R/var/lib/systemd/timesync"
+touch "$R/var/lib/private/systemd/timesync/clock"
 umount_all
 rm -f "$R/etc/resolv.conf" && ln -s ../run/systemd/resolve/stub-resolv.conf "$R/etc/resolv.conf"
 du -sh --apparent-size "$R" | sed 's/^/== rootfs: size /'

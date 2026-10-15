@@ -3230,6 +3230,14 @@ function updateTile(tile, s, p, cfg) {
   const onAir = !!s && s.id === p.main;
   const sec = !!s && s.id === p.secondary && p.layout !== 'full';
   const name = srcName(s);
+  // Another source in the slot (or none): the thumbnail is the previous one's until the next one loads. Dropping
+  // the src aborts a request in flight without load or error: refreshImg's busy mark goes with it
+  if (tile.dataset.id !== (s ? s.id : '')) {
+    const img = tile.querySelector('img');
+    img.onload = img.onerror = null;
+    delete img.dataset.busy;
+    img.removeAttribute('src');
+  }
   tile.dataset.id = s ? s.id : '';
   tile.dataset.state = s ? s.state : 'free';
   tile.classList.toggle('onair', onAir);

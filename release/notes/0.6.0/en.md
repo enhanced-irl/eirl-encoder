@@ -1,0 +1,3 @@
+- USB cameras can be plugged in and unplugged while the encoder runs: a new camera shows up by itself in a free source within a couple of seconds and, when it is unplugged, its source is freed (and goes black) a few seconds later. Plug it in again and it goes back to the same source. If it is on air, it stays with the «NO SIGNAL» card until you put another one on air.
+- You can have more cameras connected than sources: they all appear in Settings › Sources, and there you choose which ones take the four. A camera's microphone is only used while that camera has a source.
+- The encoder now drives its own fan: it starts earlier and speeds up with the temperature, so the board runs cooler (about 40 °C idle).

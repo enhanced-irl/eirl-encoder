@@ -601,3 +601,88 @@ func TestTimingsKV(t *testing.T) {
 }
 
 var errDown = errors.New("down")
+
+// An unplugged USB input leaves its slot after the grace (not one whose camera keeps its video slot), keeps
+// its settings, and goes back to the same slot when it comes back; the ones coming back are placed before a
+// new card. The unplugged mark goes only with a catalogue probed after it left.
+func TestDropGoneAndBackToItsSlot(t *testing.T) {
+	r := newRig(t, 4, Config{})
+	b := r.bus
+	r.card("Logi", true)
+	r.card("Mic", true)
+	b.Discover(probe.Catalogue{OK: true, Audio: []probe.AudioEntry{{ID: "i2s"}, {ID: "alsa:Logi", Name: "Logi"},
+		{ID: "alsa:Mic", Name: "Mic"}}})
+	ids := func() string {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		var out []string
+		for _, in := range b.slots {
+			if in == nil {
+				out = append(out, "-")
+			} else {
+				out = append(out, in.id)
+			}
+		}
+		return strings.Join(out, ",")
+	}
+	if got := ids(); got != "i2s,alsa:Logi,alsa:Mic,-" {
+		t.Fatalf("slots %s", got)
+	}
+	b.mu.Lock()
+	logi, mic := b.slots[1], b.slots[2]
+	b.delays["alsa:Logi"] = 80
+	b.mu.Unlock()
+	r.card("Logi", false)
+	r.card("Mic", false)
+	eventually(t, "both gone", func() bool {
+		s1, _ := logi.snapshot()
+		s2, _ := mic.snapshot()
+		return s1 == StateGone && s2 == StateGone
+	})
+	if b.DropGone(time.Hour, nil) != nil || ids() != "i2s,alsa:Logi,alsa:Mic,-" {
+		t.Fatal("dropped within the grace")
+	}
+	// The Logi's camera keeps its video slot (on air, or hung on its port): its audio stays with it
+	if got := b.DropGone(0, map[string]bool{"alsa:Logi": true}); !reflect.DeepEqual(got, []string{"alsa:Mic"}) ||
+		ids() != "i2s,alsa:Logi,-,-" || !stopped(mic) {
+		t.Fatalf("kept: dropped %v, slots %s", got, ids())
+	}
+	before := time.Now()
+	if got := b.DropGone(0, nil); !reflect.DeepEqual(got, []string{"alsa:Logi"}) || ids() != "i2s,-,-,-" || !stopped(logi) {
+		t.Fatalf("not dropped: %v %s", got, ids())
+	}
+	if !strings.Contains(r.logs.String(), "event=audio_input_removed slot=2 input=Logi reason=unplugged") {
+		t.Errorf("log: %s", r.logs.String())
+	}
+	// A probe that started before the Logi left proves nothing; one that started after, does
+	b.Seen([]string{"alsa:Logi", "alsa:Mic"}, before)
+	if !b.Unplugged("alsa:Logi") || b.Unplugged("alsa:Mic") {
+		t.Fatalf("seen by an older probe: logi %v mic %v", b.Unplugged("alsa:Logi"), b.Unplugged("alsa:Mic"))
+	}
+	b.Seen([]string{"alsa:Logi"}, time.Now().Add(time.Second))
+	if b.Unplugged("alsa:Logi") {
+		t.Fatal("seen by a newer probe, still unplugged")
+	}
+	// The Mic comes back with a new card listed before it: the Mic to its slot 3, the new card to the free 2
+	r.card("Mic", true)
+	r.card("New", true)
+	b.Discover(probe.Catalogue{OK: true, Audio: []probe.AudioEntry{{ID: "i2s"}, {ID: "alsa:New", Name: "New"},
+		{ID: "alsa:Mic", Name: "Mic"}}})
+	if got := ids(); got != "i2s,alsa:New,alsa:Mic,-" {
+		t.Fatalf("back: %s", got)
+	}
+	// The Logi's slot 2 is taken now: it takes a free one, and keeps its settings
+	r.card("Logi", true)
+	b.Discover(probe.Catalogue{OK: true, Audio: []probe.AudioEntry{{ID: "i2s"}, {ID: "alsa:New", Name: "New"},
+		{ID: "alsa:Mic", Name: "Mic"}, {ID: "alsa:Logi", Name: "Logi"}}})
+	b.mu.Lock()
+	delay, left := b.delays["alsa:Logi"], len(b.lastSlot)
+	b.mu.Unlock()
+	if got := ids(); got != "i2s,alsa:New,alsa:Mic,alsa:Logi" || delay != 80 || left != 0 {
+		t.Fatalf("logi back: %s, delay %d, remembered %d", got, delay, left)
+	}
+	b.Stop()
+	if b.Wait(time.Now().Add(3*time.Second)) != 0 {
+		t.Error("inputs still running")
+	}
+}
