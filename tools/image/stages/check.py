@@ -4,7 +4,8 @@ from and on the assembled raw image. Runs in the linux/arm64 work container (Pyt
 walrus). Prints one line per check and a report; exits 1 if any check fails.
 
   check.py --rootfs DIR --image IMG --bootparts DIR --release DIR --bundle NAME --version V
-           --mode product|test|debug --lock FILE --report-dir DIR [--update-lock]
+           --mode product|test|debug --firmware-mode update|check --commit SHA12 --lock FILE --report-dir DIR
+           [--update-lock]
 """
 import argparse
 import fnmatch
@@ -12,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -99,7 +101,8 @@ def patterns(path):
 
 def main():
     ap = argparse.ArgumentParser()
-    for a in ("rootfs", "image", "bootparts", "bootparts-lock", "release", "bundle", "version", "mode", "lock", "report-dir", "repo"):
+    for a in ("rootfs", "image", "bootparts", "bootparts-lock", "release", "bundle", "version", "mode", "firmware-mode",
+              "commit", "lock", "report-dir", "repo"):
         ap.add_argument("--" + a, required=True)
     ap.add_argument("--update-lock", action="store_true")
     a = ap.parse_args()
@@ -112,7 +115,7 @@ def main():
     lock_lines = ["%s %s" % (p, installed[p]["Version"]) for p in sorted(installed)]
     report = os.path.join(a.report_dir, "packages.txt")
     with open(report, "w", encoding="utf-8") as f:
-        f.write("# package version source\n")
+        f.write("# package version source-package source-version\n")
         for p in sorted(installed):
             src = installed[p].get("Source", p).split(" ")
             srcv = src[1].strip("()") if len(src) > 1 else installed[p]["Version"]
@@ -149,6 +152,28 @@ def main():
               and not os.path.islink(os.path.join(R, "usr/share/doc", p.split(":")[0]))]
     ok("every package keeps its copyright file", len(nocopy) <= 3, "%d without: %s" % (len(nocopy), ", ".join(nocopy[:10])))
 
+    # --- licences and sources (IMAGE.md §9.3): the notices in the image, and SOURCES.md, which goes next to it
+    doc = os.path.join(R, "usr/share/doc/eirl-encoder-image")
+    ok("the image's NOTICE", os.path.isfile(os.path.join(doc, "NOTICE")))
+    ok("NVIDIA's licence", os.path.isfile(os.path.join(R, "usr/share/doc/nvidia-tegra/L4T_End_User_License_Agreement.txt.gz")))
+    ok("the RTL8761B firmware's licence", os.path.isfile(os.path.join(R, "lib/firmware/rtl_bt/LICENCE.rtlwifi_firmware.txt")))
+    sources = os.path.join(doc, "SOURCES.md")
+    text = open(sources, encoding="utf-8").read() if os.path.isfile(sources) else ""
+    rows = set(re.findall(r"(?m)^\| (\S+) \| (\S+) \|", text))
+    unlisted = []
+    for p in sorted(installed):
+        src = installed[p].get("Source", p).split(" ")
+        srcv = src[1].strip("()") if len(src) > 1 else installed[p]["Version"]
+        if (p, installed[p]["Version"]) not in rows and (src[0], srcv) not in rows:   # NVIDIA's by package, Ubuntu's by source
+            unlisted.append(p)
+    ok("SOURCES.md lists the source of every package", text and not unlisted, ", ".join(unlisted[:10]))
+    ok("SOURCES.md: the written offer, the recipe's commit and the release",
+       "## Written offer" in text and ("`%s`" % a.commit) in text and ("release v%s " % a.version) in text)
+    if a.mode == "product":
+        ok("a product image from a committed recipe", not a.commit.endswith("-dirty"), a.commit)
+    if text:
+        shutil.copyfile(sources, os.path.join(a.report_dir, "sources.md"))
+
     # --- units
     w, m = wants(R), masked(R)
     with open(os.path.join(a.report_dir, "units.txt"), "w", encoding="utf-8") as f:
@@ -176,6 +201,7 @@ def main():
        ", ".join(sorted(u for u in w if u.endswith(".timer"))))
     ok("ModemManager installed, not enabled", "modemmanager" in installed and "ModemManager.service" not in w
        and not os.path.lexists(os.path.join(R, "etc/systemd/system/dbus-org.freedesktop.ModemManager1.service")))
+    ok("nvargus-daemon not enabled (as on the test board)", "nvargus-daemon.service" not in w)
     # Bluetooth audio (BLUETOOTH.md §3.7): bluetoothd installed, started only by eirl-bluealsa.service (Wants=)
     ok("bluez installed, bluetooth.service not enabled", "bluez" in installed and "bluetooth.service" not in w
        and not os.path.lexists(os.path.join(R, "etc/systemd/system/dbus-org.bluez.service")))
@@ -228,12 +254,16 @@ def main():
     subprocess.call(["rm", "-rf", scan])
     os.makedirs(scan)
     for d in ("etc", "root", "home", "boot/extlinux", "usr/local", "usr/lib/eirl-encoder", "usr/lib/eirl-image",
-              "usr/share/doc/eirl-encoder", "var/lib", "opt/nvidia/l4t-bootloader-config"):
+              "usr/share/doc/eirl-encoder", "usr/share/doc/eirl-encoder-image", "var/lib", "opt/nvidia/l4t-bootloader-config"):
         src = os.path.join(R, d)
         if os.path.isdir(src):
             os.makedirs(os.path.dirname(os.path.join(scan, d)), exist_ok=True)
             subprocess.check_call(["cp", "-a", src, os.path.join(scan, d)])
     subprocess.call(["rm", "-rf", os.path.join(scan, "var/lib/dpkg")])   # Ubuntu's package metadata (maintainers' addresses)
+    # The third-party licence texts of the release, kept verbatim as their licences require (an author's own address);
+    # the SOURCE.txt files next to them are ours and are scanned
+    subprocess.call(["find", os.path.join(scan, "usr/share/doc/eirl-encoder/licenses"), "-type", "f", "-name", "LICENSE*",
+                     "-delete"])
     rc = subprocess.call(["bash", os.path.join(a.repo, "tools/public-check.sh"), "--dir", scan])
     ok("nothing of the test board, no secrets (tools/public-check.sh on /etc, /var/lib, /usr/local, …)", rc == 0)
 
@@ -361,7 +391,9 @@ def main():
     ok("every APPEND has root=/dev/mmcblk0p1", len(appends) == len(labels) and all("root=/dev/mmcblk0p1" in l for l in appends))
     ok("nv_boot_control.conf", os.path.exists(os.path.join(R, "etc/nv_boot_control.conf")))
     fm = open(os.path.join(R, "usr/lib/eirl-image/firmware-mode")).read().strip()
-    ok("firmware mode = %s" % ("update" if a.mode == "product" else "check"), fm == ("update" if a.mode == "product" else "check"), fm)
+    # Only a product image may write the QSPI, and only when it was not built --firmware-check-only
+    want_fm = a.firmware_mode if a.mode == "product" else "check"
+    ok("firmware mode = %s" % want_fm, fm == want_fm and want_fm in ("update", "check"), fm)
     for s in ("usr/lib/eirl-image/eirl-firstboot", "usr/lib/eirl-image/eirl-firmware"):
         ok(s + " executable", os.access(os.path.join(R, s), os.X_OK))
     for f in ("etc/os-release", "usr/lib/os-release"):

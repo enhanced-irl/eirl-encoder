@@ -5,8 +5,10 @@
 #   /in/kernel/{tc358743.ko,<DTB>}      build/build.sh's output   /in/release  a verified release (bundle + manifest)
 #   /in/debug.pub                       only for a debug image (--debug-ssh-key)
 # Environment: BSP_FILE UBUNTU_BASE_FILE KERNEL_RELEASE IMAGE_VERSION FIRMWARE_MODE (check|update) BUNDLE DEBUG (0|1)
+#              IMAGE_NAME IMAGE_COMMIT (the recipe's commit, for SOURCES.md)
 set -euo pipefail
 : "${BSP_FILE:?}" "${UBUNTU_BASE_FILE:?}" "${KERNEL_RELEASE:?}" "${IMAGE_VERSION:?}" "${FIRMWARE_MODE:?}" "${BUNDLE:?}"
+: "${IMAGE_NAME:?}" "${IMAGE_COMMIT:?}"
 DEBUG=${DEBUG:-0}
 R=/work/rootfs
 L=/work/bsp/Linux_for_Tegra
@@ -127,7 +129,7 @@ mkdir -p "$R/etc/systemd/system/multi-user.target.wants"
 ln -sfn "/$nvp" "$R/etc/systemd/system/multi-user.target.wants/nvpmodel.service"
 # Journal: persistent, 200 MB, nothing forwarded to syslog (B2)
 # The image's own files: only what is tracked there (no editor or Finder leftovers from the build machine)
-(cd "$IMG/rootfs" && find . -type f ! -name '.DS_Store' ! -name '*~' ! -name '*.swp' ! -name '._*') | while read -r f; do
+(cd "$IMG/rootfs" && find . -type f ! -name '.DS_Store' ! -name '*~' ! -name '*.swp' ! -name '._*' ! -path '*/__pycache__/*') | while read -r f; do
   m=0644; [ -x "$IMG/rootfs/$f" ] && m=0755
   install -D -m "$m" -o root -g root "$IMG/rootfs/$f" "$R/${f#./}"
 done
@@ -170,6 +172,10 @@ done
 # install. Whether it runs at boot is decided with the modems' work
 find "$R/etc/systemd/system" -name ModemManager.service -path '*.wants/*' -delete
 rm -f "$R/etc/systemd/system/dbus-org.freedesktop.ModemManager1.service"
+# nvargus-daemon (NVIDIA's Argus camera service, nvidia-l4t-camera) off, as on the test board since Oct 8 (BASE.md §4.1):
+# the encoder does not use Argus, and at boot it probes every video device (a kernel warning for a USB capture card's
+# empty format, SCF errors for the TC358743) and keeps 40 MB
+find "$R/etc/systemd/system" -name nvargus-daemon.service -path '*.wants/*' -delete
 # bluetoothd (Bluetooth audio, BLUETOOTH.md §3.7) is installed but not enabled: its postinst enables it, and it only has
 # to run when the release's eirl-bluealsa.service (enabled by install.sh) pulls it in. One switch, ours
 find "$R/etc/systemd/system" -name bluetooth.service -path '*.wants/*' -delete
@@ -214,6 +220,12 @@ sed -i -E 's/^DISTRIB_DESCRIPTION=.*/DISTRIB_DESCRIPTION="EnhancedIRL Encoder '"
 printf 'EnhancedIRL Encoder \\n \\l\n\n' > "$R/etc/issue"
 printf 'EnhancedIRL Encoder\n' > "$R/etc/issue.net"
 rm -f "$R"/etc/update-motd.d/* "$R/etc/legal"
+
+step "notices and sources (IMAGE.md §9.3)"
+# NOTICE comes with the image's own files (tools/image/rootfs); SOURCES.md is made from what is installed now, and
+# check.py publishes it next to the image
+python3 -I "$IMG/stages/sources.py" --rootfs "$R" --repo /in/repo --release /in/release --version "$IMAGE_VERSION" \
+  --name "$IMAGE_NAME" --commit "$IMAGE_COMMIT" --out "$R/usr/share/doc/eirl-encoder-image/SOURCES.md"
 
 step "cleaning (IMAGE.md §3.6)"
 in_root apt-get clean

@@ -1,5 +1,5 @@
-> **Status:** IN PROGRESS (I1-I3 done on Oct 14-15: the test board now runs the image; the second boot from scratch and I4 are next)
-> **Updated:** 2026-10-15
+> **Status:** IN PROGRESS (I1-I3 done on Oct 14-15: the test board runs the image; I4, the image of 0.7.0 with its notices and sources, Oct 16)
+> **Updated:** 2026-10-16
 
 # A minimal microSD image for the Jetson Nano
 
@@ -16,9 +16,9 @@ recipe (B0-B3), applied from scratch to NVIDIA's own base instead of by hand on 
 |---|---|---|
 | F0 Research and proposal | ✅ Oct 14 | This document; the maintainer's decisions are in §12 |
 | I1 Recipe and first image | ✅ Oct 14 | `tools/image/`: test and debug images of release 0.1.1, every offline check passes (§10.1) |
-| I2 First boot and uniqueness | 🟡 Oct 14-15 | One boot from scratch and later boots on the test board (§10.4); the second boot from scratch, with the fixes of §10.4, is next |
+| I2 First boot and uniqueness | ✅ Oct 14-16 | Two boots from scratch on the test board, with different identities, and later boots (§10.4, §10.6) |
 | I3 Test on a real card | ✅ Oct 14-15 | Wizard, sources, a stream, a real OTA (0.1.1 → 0.3.0) and reboots (§10.4). The maintainer chose to back up the board's own card and use it; the board **keeps the image** |
-| I4 Publish | — | Signed image on GitHub Releases, flashing and verification instructions (§10.5) |
+| I4 Publish | 🟡 Oct 16 | The image of 0.7.0, with its notices, its sources and the written offer (§9.3); flashing and verification in the README; booted from scratch on the test board (§10.6); signed and published as assets of release v0.7.0 with the maintainer's OK (§10.5) |
 
 ## 1. Scope
 
@@ -44,7 +44,8 @@ is updated over the air). A new L4T or kernel means a new image and reflashing.
 | Kernel | NVIDIA's stock `Image` and `initrd` (package `nvidia-l4t-kernel`), **not rebuilt** | BSP |
 | Our kernel bits | `tc358743.ko` (patched, `driver/`) in `/lib/modules/4.9.337-tegra/extra/`; the cellular modem modules (`qmi_wwan`, `cdc_mbim`, `huawei_cdc_ncm`, `option` with the Quectel IDs: MODEMS.md §4) in `updates/eirl-modems/`, which wins over the kernel's own; `btusb` and `btrtl` with the Realtek RTL8761B in `updates/eirl-bluetooth/` and its firmware in `/lib/firmware/rtl_bt/` (BLUETOOTH.md §3.8); the B01 DTB with the TC358743 (`dt/`) in `/boot/`; an extlinux entry with that `FDT` (README, "Installing on the Jetson") | `build/build.sh` (kernel sources by sha256) |
 | Our software | The **latest signed release** (the OTA bundle of UPDATES.md §4): downloaded, verified with `release/eirl-release.pub`, installed with its own `install.sh` in image mode (§3.4) | The release's signed manifest |
-| Fan | The kernel's own thermal control, until our own controller exists (§12, D-I7); temperatures measured in I3 | — |
+| Fan | Our own controller, `eirl-fan`, in the release since 0.6.0 ([`FAN.md`](FAN.md); §12, D-I7) | The release |
+| Notices and sources | `/usr/share/doc/eirl-encoder-image/`: `NOTICE` and `SOURCES.md` with the written offer, made from what is installed (§9.3) | The build |
 
 Until Oct 14 the bundle did not carry everything a **new** device needs: `srt-live-transmit` and `libsrt` (hand-built
 in `/usr/local` on the test board), the EDID files and `/etc/default/eirl-engine` (without which the engine unit
@@ -69,6 +70,8 @@ tools/image/build.sh --release DIR --test
 tools/image/build.sh --release DIR --debug-ssh-key ~/.ssh/id_ed25519.pub
 # A product image (the release must be signed with the production key; it can update the QSPI once, §4):
 tools/image/build.sh --release DIR
+# The same, but its first boot only reads the QSPI, as a test image does:
+tools/image/build.sh --release DIR --firmware-check-only
 ```
 
 | File | What |
@@ -79,9 +82,14 @@ tools/image/build.sh --release DIR
 | `tools/image/stages/bootparts.sh` | The card's signed boot partitions with NVIDIA's `flash.sh --no-flash --sign` (§3.6) |
 | `tools/image/stages/rootfs.sh` | The root filesystem (§3.2-§3.6) |
 | `tools/image/stages/assemble.sh` | The card image and its `xz` (§3.6) |
-| `tools/image/stages/check.py` | The offline checks (§10.1); writes a report next to the image |
+| `tools/image/stages/sources.py` | The image's `SOURCES.md` (§9.3), from the installed packages, the pins and the release's own notices |
+| `tools/image/stages/check.py` | The offline checks (§10.1); writes a report next to the image, with the `packages.txt` and `sources.md` published next to it |
 | `tools/image/packages.txt`, `packages.lock` | What is installed, and the exact result with versions (a change fails the build until `--update-lock` and a review) |
-| `tools/image/rootfs/` | Files copied into the image: the first boot (`eirl-firstboot`, `eirl-firmware` and their unit), the persistent journal, NetworkManager's cable override |
+| `tools/image/rootfs/` | Files copied into the image: the first boot (`eirl-firstboot`, `eirl-firmware` and their unit), the persistent journal, NetworkManager's cable override, the image's `NOTICE` |
+
+A product image is built only from a committed recipe (its commit goes into `SOURCES.md` and the signed manifest);
+test and debug images of an uncommitted tree say `<commit>-dirty`. How a product image is signed and published:
+§10.5.
 
 ### 3.1 Build host
 
@@ -432,7 +440,7 @@ releases; a board flashed with an older image updates itself on its first check.
 
 - `sha256sum -c $F.img.xz.sha256` checks the download only against that unsigned file: it catches a damaged
   download, not a replaced one.
-- These commands go in the README with I4. `tools/image-sign-test.sh` runs the verifications above.
+- They are in the README ("Getting started"). `tools/image-sign-test.sh` runs the verifications above.
 
 ## 9. Licences
 
@@ -465,16 +473,44 @@ affect your rights under any open source licence…". Our image is a modified Ub
 
 ### 9.3 Copyleft obligations
 
-- **GPLv2** (kernel, U-Boot, the initrd's GNU tools, many Ubuntu packages): the corresponding source of the
-  exact binaries, or a written offer valid 3 years. The "pass on the offer you received" option (§3(c)) is only
+- **GPLv2** (the kernel, U-Boot, our modules, many Ubuntu packages): the corresponding source of the exact
+  binaries, or a written offer valid at least 3 years. The "pass on the offer you received" option (§3(c)) is only
   for non-commercial distribution, so not for us.
-- Per release, next to the image: NVIDIA's licence; `packages.txt`; `sources.md`; a mirrored copy of NVIDIA's
-  `public_sources.tbz2` (kernel and U-Boot); a tarball with our module and DT patches, the kernel config and
-  `build/build.sh`; `srtla` at its pinned commit with our patch (AGPL-3.0: attached, not just a link); SRT 1.5.7
-  (MPL-2.0); the GPL/LGPL Ubuntu source packages (mirrored as a sources release, or by the written offer); and the
-  recipe commit.
-- Inside the image: the `copyright` files, `/usr/share/doc/nvidia-tegra/`, our `NOTICE` and licences, and
-  `sources.md` with the written offer.
+- **GPLv3, LGPLv3, AGPLv3** (bash, coreutils, tar, gzip and other GNU tools, in the root filesystem and in NVIDIA's
+  initrd; `srtla_send` in the release): for a download, a written offer is not one of the options (GPLv3 §6(b) is for
+  physical products). The source has to be reachable by directions next to the image, and whoever distributes stays
+  responsible for it remaining available (§6(d)), even when it sits on someone else's server.
+- What the research listed per release (Oct 14): NVIDIA's licence; `packages.txt`; `sources.md`; NVIDIA's
+  `public_sources.tbz2`; our module and DT patches, the kernel config and `build/build.sh`; `srtla` at its pinned
+  commit with our patch; SRT 1.5.7; the GPL/LGPL Ubuntu source packages; the recipe commit. Inside the image: the
+  `copyright` files, `/usr/share/doc/nvidia-tegra/`, our `NOTICE` and licences, and the sources file with the offer.
+
+**What the image does (Oct 16).**
+- In the image, `/usr/share/doc/eirl-encoder-image/`: `NOTICE` (what the image is made of and under which licences;
+  built from Ubuntu packages and not Ubuntu; NVIDIA's proprietary parts under NVIDIA's licence, its open-source parts
+  under theirs) and `SOURCES.md`, written by `stages/sources.py` from what is installed.
+- `SOURCES.md` has the **written offer** (at least 3 years after we last distribute the image; every GPL, LGPL and AGPL
+  program; at no more than the cost of providing it; support@enhancedirl.com), and the directions to every source
+  (the GPLv3 ones too): the recipe's commit on the public repository; NVIDIA's BSP and `public_sources.tbz2` (URLs and
+  sha256) with every `nvidia-l4t-*` package; the programs of NVIDIA's initrd with the Ubuntu source package and version each one
+  comes from (NVIDIA records no versions: 42 of its 75 files are byte for byte the image's own; the others are the
+  versions Ubuntu had published on the day NVIDIA put it together, Nov 18 2020, which glibc's own version string
+  confirms); our modules, DT and the
+  RTL8761B firmware; every Ubuntu source package at its exact version; and the release's own notices (BlueALSA with
+  libsbc's source in the bundle, librist, SRT, srtla).
+- Next to the image: the same `SOURCES.md` as `-sources.md`, and the package list as `-packages.txt`.
+- The kernel configuration is in the repository (`build/kernel-4.9.337-tegra.config`, extracted from the BSP's own
+  kernel; `build/build.sh` uses it and no longer reads it from a board), and a product image always builds the modules
+  and the DT again from its own commit.
+- `check.py` checks that the notices and the licences of NVIDIA and of the firmware are there, that `SOURCES.md` names
+  the source of every installed package, and the offer, the commit and the release.
+- **Availability**: the maintainers keep copies of everything the directions point to (the pinned downloads and every
+  Ubuntu source package of each published image, initrd included), outside the repository.
+
+Not done: NVIDIA's `public_sources.tbz2` and the Ubuntu source packages as assets next to the image, which would make
+the source available "from the same place" in the plainest sense. It would need `publish-image` to upload more files
+(and about 1 GB per image). Until then the directions point to NVIDIA, Launchpad and this repository, and the copies
+above cover the obligation to keep it available.
 
 ### 9.4 Sources
 
@@ -559,10 +595,45 @@ about 51 °C under the kernel's control (D-I7): since Oct 15 our own daemon driv
 board's old system also ran `jetson_clocks` at boot (its `automagic-fan` had `MAX_PERF=1`: CPU, GPU and memory at
 their highest clocks); the image keeps NVIDIA's default frequency scaling, and the test went well with it.
 
+At a cold start the touch screen went off twice before the splash: neither CBoot nor the kernel could read its EDID
+(640×480, then the kernel's built-in 720p EDID at 1.43 s), and at 2.15-2.92 s the panel dropped its hot plug and came
+back at 1024×600. Both come from the panel, not from the image: nothing of ours runs that early ([`SPLASH.md`](SPLASH.md) §1).
+
 ### 10.5 I4, publishing (with the maintainer's OK)
 
 Signed image and its files (§8.2) on the release; the recipe and this document already on the public repository
-(the public sync); flashing and verification instructions in the README.
+(the public sync); flashing and verification instructions in the README. In order:
+
+1. The recipe in `main`; the release it carries already published (its `manifest.json`, `.sig` and bundle, downloaded
+   from GitHub Releases).
+2. `tools/image/build.sh --release DIR` on a clean `main`: the product image and its report. A debug image of the
+   same commit for the board test (`--debug-ssh-key`).
+3. A boot from scratch on a card that is then written again.
+4. `tools/release.sh image …`: the command `build.sh` prints at the end, with `EIRL_RELEASE_KEY_CMD` (the seed only
+   through that pipe, UPDATES.md §3). It writes `build/out/release/<release>/image/`.
+5. The public sync of exactly that commit (`tools/public-sync.sh --ref <commit>`, UPDATES.md §5), with the
+   maintainer's OK: `SOURCES.md` names the public commit "Sync with internal commit <commit>".
+6. `tools/release.sh publish-image <release>`, with the maintainer's OK.
+
+### 10.6 Results of I4 on the test board (Oct 16, debug image of 0.7.0)
+
+The debug image of `main` at the commit of MR !113 (the same recipe as the product image, with the debug user, ssh and
+a firmware check that never writes), written to the test board's card (the maintainer chose not to back it up: it ran
+the image already). It is the second boot from scratch of §10.2.
+
+| | Result |
+|---|---|
+| Write | 2.5 GB in 4 min 48 s (8.7 MB/s), read back: the raw sha256 of the build |
+| First boot | 16.2 s to `multi-user` (the grow 8.5 s, ext4 grown online to 30 GB); the clock started at the build time and NTP set it ~45 s later |
+| Per-device values | All new and different from the first card's (Oct 14): host name `eirl-encoder-74de`, machine-id, hardware id, SSH host keys, setup code, AP password |
+| Firmware | VER and VER_b = 32.7.6, nothing written |
+| Software | Release 0.7.0; `eirl-fan` running (fan stopped at 33 °C, below the curve); the TC358743 at 1080p50; a USB capture card and a UVC camera; the maintainer did the wizard on the touch screen (without the cloud) |
+| Bluetooth, cold | `btrtl` loads `rtl8761bu_config.bin` and `rtl8761bu_fw.bin` for the UB500 at 4 s and the controller reports LMP subversion 0xd922 (patched); `bluetooth.service` active and not enabled (pulled in by `eirl-bluealsa`, which runs as `bluealsa`); Bluetooth off in the app by default, switched on from the screen; the radio receives (inquiry and LE adverts in a 7 s scan) |
+| Second boot | 5.6 s; the same identity; the first-boot and firmware steps do not run again; `running` |
+
+Found and fixed (in the recipe from the next image): NVIDIA's Argus camera service `nvargus-daemon` was enabled (off
+on the test board since Oct 8): it probed every video device at boot, with a kernel warning (`v4l_enum_fmt`: a USB
+capture card's empty format) and SCF errors, and kept 40 MB. Now off; checked on the board by hand, with a reboot.
 
 ## 11. From `base/` to the image
 
@@ -601,7 +672,7 @@ Each with the recommendation first. The maintainer's answer goes in the last col
 | # | Question | Options | Recommendation and why | Maintainer |
 |---|---|---|---|---|
 | D-I1 | Can we publish a binary image? | (a) publish it with the compliance list of §9; (b) publish only the recipe; (c) (a), but only after a written answer from Canonical (and NVIDIA) | **(a)**, with the recipe public too. NVIDIA's licence allows exactly this (unmodified binaries + the licence provided), and there are precedents; the Ubuntu name and logo come out; the GPL work is mechanical. (b) would make the product unusable for a streamer. (c) can run in parallel if the residual Canonical risk worries the maintainer | **(a)**: a ready-to-clone card image |
-| D-I2 | The board's firmware (QSPI) | (A) NVIDIA's every-boot service masked; our one-shot update at first boot, shown on screen, only if the QSPI is not 32.7.6; (B) keep NVIDIA's service (the same write, silent, checked at every boot); (C) never write: boot on whatever firmware is there and warn | **(A)**. The same write NVIDIA's own image does, but once, visible ("keep the power connected"), logged, and with the test images unable to write at all. (B) hides a 2-minute risky write behind a black screen; (C) leaves boards on an unsupported bootloader/kernel combination | **(A)** |
+| D-I2 | The board's firmware (QSPI) | (A) NVIDIA's every-boot service masked; our one-shot update at first boot, shown on screen, only if the QSPI is not 32.7.6; (B) keep NVIDIA's service (the same write, silent, checked at every boot); (C) never write: boot on whatever firmware is there and warn | **(A)**. The same write NVIDIA's own image does, but once, visible ("keep the power connected"), logged, and with the test images unable to write at all. (B) hides a 2-minute risky write behind a black screen; (C) leaves boards on an unsupported bootloader/kernel combination | **(A)**. Oct 16: kept for the first published image (0.7.0), knowing that the write has not run on a board with older firmware yet and that the screen does not say it is updating |
 | D-I3 | Build host | (a) the maintainer's Mac with Docker (arm64 native + one `linux/amd64` step); (b) an x86-64 Linux machine; (c) CI | **(a)**: tested on Oct 14 (§3.1), fast, no new machine, and the signing key stays where it already is (through a pipe). The recipe also runs on Linux with Docker; CI later if wanted (it could never sign) | **(a)**; later, built by a GitHub workflow (§3.1) |
 | D-I4 | Maintenance access | (A) no SSH; (B) SSH off, switched on from the web with a key; (C) a user with a password from the wizard | **(A)** in the product image, with `--debug-ssh-key` for test images only (§7). Nothing to secure and nothing to leak. (B) as a later app feature if support needs it | **(A)**, with `openssh-server` installed and masked; remote support for linked devices analysed in §7.1 |
 | D-I5 | Card, host name, files, signature | Card: minimum 8 / 16 / 32 GB. Host name: `eirl-encoder` / `eirl-encoder-<xxxx>`. Files: §8.2. Signature: the release key with a separate image manifest (§8.1), or another key | Card **16 GB minimum, 32 GB high-endurance recommended** (the image fits in 8 GB, but the persistent journal, the OTA backups and future releases need room, and 8 GB cards are slow and rare). Host name **`eirl-encoder-<xxxx>`** (same suffix as the Wi-Fi name: two new devices on one LAN never clash). Files as in §8.2, **as assets of the release they carry** (never a separate *latest* release). **Same release key**, separate `product`: one key to trust and to guard | **As recommended**: 16 GB, `eirl-encoder-<xxxx>`, same release key, assets of the same release |

@@ -1,5 +1,5 @@
-> **Status:** IN PROGRESS — released and updating itself over the air (latest: v0.6.1, Oct 15); see [Status](#status)
-> **Updated:** 2026-10-15
+> **Status:** IN PROGRESS — released and updating itself over the air (latest: v0.7.0, Oct 16, also as a microSD image); see [Status](#status)
+> **Updated:** 2026-10-16
 
 # eirl-encoder
 
@@ -82,15 +82,72 @@ draws them again.*
   (language, time zone, network, web password, the device's name, optional EnhancedIRL link).
 - **Signed over-the-air updates** from GitHub Releases (ed25519): the encoder offers them, never installs
   while streaming, and goes back to the previous version by itself if the new one does not start.
-- Boot splash, its own fan control, and a slimmed-down base OS; a ready-to-flash microSD image is on its way
-  ([`IMAGE.md`](IMAGE.md)).
+- Boot splash, its own fan control, a slimmed-down base OS and a ready-to-flash microSD image
+  ([`IMAGE.md`](IMAGE.md)): write the card, power on, follow the wizard.
 - **Optional link to EnhancedIRL**: status, thumbnails and remote control from the EnhancedIRL app.
 
 ## Getting started
 
-Hardware: a **Jetson Nano Developer Kit 4 GB (carrier B01)** on **L4T R32.7.6**, a TC358743 HDMI-to-CSI
-board on CAM1 (with its I2S lines for HDMI audio), a **5 V 4 A** power supply and, optionally, a 1024×600
-HDMI touch screen. See [Hardware](#hardware).
+Hardware: a **Jetson Nano Developer Kit 4 GB (carrier B01)**, a TC358743 HDMI-to-CSI board on CAM1 (with its
+I2S lines for HDMI audio), a **5 V 4 A** power supply, a 1024×600 HDMI touch screen and a **microSD card of
+16 GB or more** (a 32 GB high-endurance card is best). See [Hardware](#hardware).
+
+### From the microSD image
+
+The image is a whole card: NVIDIA's L4T R32.7.6 with the encoder already installed, and nothing else
+([`IMAGE.md`](IMAGE.md)). Its files are assets of the release whose software it carries, on
+[GitHub Releases](https://github.com/enhanced-irl/eirl-encoder/releases): not every release has one, and a card
+written with an older image updates itself on its first check.
+
+1. Download `eirl-encoder-<version>-jetson-nano.img.xz` and, to check it, its `.img.json` and `.img.json.sig`.
+2. Check it (optional, recommended). With this repository and Go:
+
+   ```bash
+   git clone https://github.com/enhanced-irl/eirl-encoder.git && cd eirl-encoder
+   go -C manager build -o "$PWD/eirl-release" ./cmd/eirl-release
+   F=~/Downloads/eirl-encoder-<version>-jetson-nano
+   ./eirl-release verify-image -manifest $F.img.json -image $F.img.xz
+   ```
+
+   Exit 0: the image is the one we signed, with the same key as the updates. 1: the download does not match, do
+   not write it. 2: it could not be checked (a missing file). Without Go, with OpenSSL 3 and
+   `release/eirl-release.pem` of this repository (on macOS, not the LibreSSL it ships: `brew install openssl@3`):
+
+   ```bash
+   OPENSSL=openssl                      # macOS: OPENSSL=$(brew --prefix openssl@3)/bin/openssl
+   $OPENSSL base64 -d -A -in $F.img.json.sig -out $F.img.json.sig.bin &&
+     $OPENSSL pkeyutl -verify -pubin -inkey release/eirl-release.pem -rawin -in $F.img.json -sigfile $F.img.json.sig.bin &&
+     grep -q "\"sha256\": \"$(shasum -a 256 $F.img.xz | cut -d' ' -f1)\"" $F.img.json && echo "image OK"
+   ```
+
+   "Signature Verified Successfully", then "image OK": good. Anything else: do not write it.
+
+   (`sha256sum -c` with the `.img.xz.sha256` file only catches a damaged download, not a replaced one.)
+3. Write it to the card. With [balenaEtcher](https://etcher.balena.io): pick the `.img.xz` as it is (Etcher
+   decompresses it and checks what it wrote). Or with `dd`, on the card's whole device (everything on it is
+   erased):
+
+   ```bash
+   xz -dc $F.img.xz | sudo dd of=/dev/<card> bs=4M conv=fsync status=progress
+   ```
+
+4. Put the card in the Nano, connect the screen and power it on. The first boot takes a few seconds more: the
+   system grows to the whole card and makes the device's own identity (its name `eirl-encoder-<xxxx>` and the
+   name of its Wi-Fi). If the board's firmware is older than L4T R32.7.6, that first boot also updates it, once:
+   about 2 minutes more on the boot screen, then the board restarts by itself. **Keep the power connected** (the
+   screen does not say yet that it is updating).
+5. Follow the setup wizard on the touch screen. The web app, `http://eirl-encoder-<xxxx>.local` on the same
+   network, asks for the setup code the screen shows. From then on, new versions arrive over the air
+   ([`UPDATES.md`](UPDATES.md)).
+
+The image has no login user and no SSH. It is built from Ubuntu 18.04 packages and is not Ubuntu (not affiliated
+with or endorsed by Canonical), and it carries NVIDIA's software under NVIDIA's licence: the notices and where the
+sources are, with our written offer for them, are in the image (`/usr/share/doc/eirl-encoder-image/`) and next to
+it (`-sources.md`, `-packages.txt`).
+
+### On a Nano you set up yourself
+
+On **L4T R32.7.6**:
 
 1. Build and install the TC358743 module and the device tree ([Building](#building),
    [Installing on the Jetson](#installing-on-the-jetson)).
@@ -100,8 +157,6 @@ HDMI touch screen. See [Hardware](#hardware).
    NVIDIA's plugins, among others: see [Installing on the Jetson](#installing-on-the-jetson)).
 3. Open the touch screen, or `http://<device>.local` from a phone or a laptop on the same network, and follow
    the setup wizard. From then on, new versions arrive over the air ([`UPDATES.md`](UPDATES.md)).
-
-The microSD image ([`IMAGE.md`](IMAGE.md)) will turn this into "flash the card and power on".
 
 ## How it works
 
@@ -163,7 +218,7 @@ operating, the bugs found and the history of the test board.
 | Over-the-air updates | ✅ Released in 0.1.0; the test board updates itself from GitHub Releases like any device | [`UPDATES.md`](UPDATES.md) |
 | Fan control | ✅ Released in 0.6.0 (one curve); profiles next | [`FAN.md`](FAN.md) |
 | Boot splash | ✅ Released | [`SPLASH.md`](SPLASH.md) |
-| microSD image | 🟡 Built and running on the test board; publishing it is next | [`IMAGE.md`](IMAGE.md) |
+| microSD image | ✅ Published with 0.7.0: the whole card, signed with the updates' key. The one-time firmware update is still to be seen on a board with older firmware | [`IMAGE.md`](IMAGE.md) |
 
 ### HDMI capture: how it was brought up
 
@@ -263,13 +318,14 @@ It is built on the Mac, in native arm64 Docker: NVIDIA's x86 toolchain is not ne
 On kernel 4.9 the vermagic does not include the gcc version, so gcc 7.5 will do.
 
 ```bash
-JETSON=jetson ./build/build.sh      # 1st time: downloads 162 MB and builds the base kernel (~11 min)
+./build/build.sh                    # 1st time: downloads 162 MB and builds the base kernel (~11 min)
 ls build/out/                       # tc358743.ko · tegra210-p3448-0000-p3449-0000-b00-tc358743.dtb · edid-*.bin
 ```
 
 - The sources are kept in `~/.cache/l4t-r32.7.6/public_sources.tbz2` and verified with sha256.
-  The kernel config comes from the board's `/proc/config.gz`, and the base build gives an
-  **identical** config and `kernelrelease = 4.9.337-tegra`.
+  The kernel config is NVIDIA's own (`build/kernel-4.9.337-tegra.config`: the `/proc/config.gz` of the R32.7.6
+  kernel, extracted from the BSP's `kernel/Image`), and the base build gives an **identical** config and
+  `kernelrelease = 4.9.337-tegra`.
 - The tree is kept in the Docker volume `l4t-src`, not on the Mac's disk: APFS is not
   case-sensitive and the kernel has files that differ only in that.
 - The built `Image` **is not installed**: it only serves to have `Module.symvers` and the DT.
@@ -808,7 +864,8 @@ Already done before the project and not touched by it: on October 4 an `apt upgr
    TLS and a per-device password.
 9. **Updates** ([`UPDATES.md`](UPDATES.md) §11): key rotation with a list of trusted keys, a free-space check
    before the backup, a "Wi-Fi/Ethernet only" download option.
-10. **microSD image** ([`IMAGE.md`](IMAGE.md)): a second boot from scratch, then publishing it (I4).
+10. **microSD image** ([`IMAGE.md`](IMAGE.md)): the one-time firmware update on a board with older firmware, and
+    building it in a GitHub workflow.
 11. **Fan** ([`FAN.md`](FAN.md)): profiles in Settings and a "camera" mode.
 12. **Boot splash** ([`SPLASH.md`](SPLASH.md) §6): plugging the screen in with the splash running and a real
     failed boot.

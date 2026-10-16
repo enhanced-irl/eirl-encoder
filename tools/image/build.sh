@@ -3,7 +3,7 @@
 # L4T R32.7.6 BSP (IMAGE.md). Runs on a machine with Docker (macOS on Apple Silicon or Linux); every step runs
 # in containers, from inputs pinned in tools/image/pins.sh. Nothing is installed on the machine.
 #
-#   tools/image/build.sh --release DIR [--pubkey B64] [--test | --debug-ssh-key FILE] [--out DIR] [--keep]
+#   tools/image/build.sh --release DIR [--pubkey B64] [--test | --debug-ssh-key FILE | --firmware-check-only] [--out DIR] [--keep]
 #
 #   --release DIR        a release: DIR/manifest.json, manifest.json.sig and the bundle they name
 #                        (tools/release.sh build, or build --local for a test release). Verified before use.
@@ -11,6 +11,8 @@
 #   --test               a test image: the board's firmware (QSPI) is only checked, never written. Named …-test
 #   --debug-ssh-key F    a test image with a key-only eirl-debug user and ssh on (F = a public key). Named …-debug.
 #                        Never signed, never published
+#   --firmware-check-only  a product image whose first boot only reads the board's firmware (QSPI) and never
+#                        writes it, like a test image (IMAGE.md §4)
 #   --out DIR            where the image goes (default build/out/image)
 #   --keep               keep the work volume (the root filesystem, the raw image) for a look afterwards
 #   --update-lock        accept the packages the build installs as the new tools/image/packages.lock
@@ -24,7 +26,7 @@ ROOT=$(cd "$HERE/../.." && pwd)
 . "$HERE/pins.sh"
 die() { echo "image: $*" >&2; exit 1; }
 
-RELEASE="" PUBKEY="" MODE=product DEBUG_KEY="" OUT="$ROOT/build/out/image" KEEP="" UPDATE_LOCK=""
+RELEASE="" PUBKEY="" MODE=product DEBUG_KEY="" OUT="$ROOT/build/out/image" KEEP="" UPDATE_LOCK="" FW_CHECK_ONLY=""
 CACHE=${CACHE:-$HOME/.cache/eirl-image}
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -33,6 +35,7 @@ while [ $# -gt 0 ]; do
     --test) [ "$MODE" = debug ] || MODE=test ;;
     --debug-ssh-key) DEBUG_KEY=$(cd "$(dirname "${2:?}")" && pwd)/$(basename "$2"); MODE=debug; shift ;;
     --out) mkdir -p "${2:?}"; OUT=$(cd "$2" && pwd); shift ;;
+    --firmware-check-only) FW_CHECK_ONLY=1 ;;
     --keep) KEEP=1 ;;
     --update-lock) UPDATE_LOCK=1 ;;
     -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -42,6 +45,7 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$RELEASE" ] || die "--release DIR is required"
 [ "$MODE" != product ] || [ -z "$UPDATE_LOCK" ] || die "--update-lock is for test builds: a product image uses the reviewed locks"
+[ -z "$FW_CHECK_ONLY" ] || [ "$MODE" = product ] || die "--firmware-check-only is for product images (test images never write the firmware)"
 [ -z "$DEBUG_KEY" ] || [ -f "$DEBUG_KEY" ] || die "no such key: $DEBUG_KEY"
 command -v docker >/dev/null || die "Docker is needed"
 command -v go >/dev/null || die "Go is needed (to verify the release with eirl-release)"
@@ -58,16 +62,25 @@ if [ "$MODE" = product ]; then
     die "a product image carries a release signed with the production key: use --test with a test release"
 fi
 case "$MODE" in
-  product) NAME="eirl-encoder-$VERSION-jetson-nano"; FIRMWARE_MODE=update ;;
+  product) NAME="eirl-encoder-$VERSION-jetson-nano"; FIRMWARE_MODE=$([ -n "$FW_CHECK_ONLY" ] && echo check || echo update) ;;
   test) NAME="eirl-encoder-$VERSION-jetson-nano-test"; FIRMWARE_MODE=check ;;
   debug) NAME="eirl-encoder-$VERSION-jetson-nano-debug"; FIRMWARE_MODE=check ;;
 esac
-echo "== image $NAME ($MODE) with release $VERSION"
+# The recipe's commit (SOURCES.md, and the signed image manifest): a product image only from a committed recipe
+COMMIT=$(git -C "$ROOT" rev-parse --short=12 HEAD)
+if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
+  [ "$MODE" != product ] || die "a product image is built from a committed recipe: commit or clean the tree first"
+  COMMIT=$COMMIT-dirty
+fi
+BUILT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+echo "== image $NAME ($MODE, firmware $FIRMWARE_MODE) with release $VERSION, recipe $COMMIT"
 
-# --- 2. Our kernel bits (build/build.sh: the patched tc358743 module and the B01 DTB with the TC358743)
+# --- 2. Our kernel bits (build/build.sh: the patched tc358743 module and the B01 DTB with the TC358743). A product
+# image always builds them again from this commit (seconds, once the base kernel is built): build/out is not in git,
+# and SOURCES.md says they come from the recipe's commit
 DTB=tegra210-p3448-0000-p3449-0000-b00-tc358743.dtb
 KOUT="$ROOT/build/out"
-if [ ! -f "$KOUT/tc358743.ko" ] || [ ! -f "$KOUT/$DTB" ] || ! ls "$KOUT"/modules/*.ko >/dev/null 2>&1 ||
+if [ "$MODE" = product ] || [ ! -f "$KOUT/tc358743.ko" ] || [ ! -f "$KOUT/$DTB" ] || ! ls "$KOUT"/modules/*.ko >/dev/null 2>&1 ||
    ! ls "$KOUT"/modules-bt/*.ko >/dev/null 2>&1 || [ ! -f "$KOUT/firmware/rtl_bt/rtl8761bu_fw.bin" ]; then
   "$ROOT/build/build.sh"
 fi
@@ -92,7 +105,7 @@ free=$(docker run --rm -v "$VOL:/work" eirl-image-tools:arm64 df -BG --output=av
 [ "${free:-0}" -ge 12 ] || die "only ${free} GB free in Docker's disk (12 needed)"
 mkdir -p "$OUT"
 ENVS=(-e BSP_FILE="$BSP_FILE" -e UBUNTU_BASE_FILE="$UBUNTU_BASE_FILE" -e KERNEL_RELEASE="$KERNEL_RELEASE"
-      -e IMAGE_VERSION="$VERSION" -e FIRMWARE_MODE="$FIRMWARE_MODE" -e BUNDLE="$BUNDLE" -e IMAGE_NAME="$NAME"
+      -e IMAGE_VERSION="$VERSION" -e FIRMWARE_MODE="$FIRMWARE_MODE" -e BUNDLE="$BUNDLE" -e IMAGE_NAME="$NAME" -e IMAGE_COMMIT="$COMMIT"
       -e DEBUG="$([ "$MODE" = debug ] && echo 1 || echo 0)")
 MOUNTS=(-v "$VOL:/work" -v "$CACHE:/in/dl:ro" -v "$ROOT:/in/repo:ro" -v "$KOUT:/in/kernel:ro" -v "$RELEASE:/in/release:ro")
 [ "$MODE" = debug ] && MOUNTS+=(-v "$DEBUG_KEY:/in/debug.pub:ro")
@@ -111,7 +124,8 @@ mkdir -p "$OUT/$NAME.report"
 docker run --rm --platform linux/arm64 --cap-add SYS_CHROOT -e LC_ALL=C.UTF-8 -e PYTHONIOENCODING=utf-8 "${ENVS[@]}" "${MOUNTS[@]}" -v "$OUT:/out" \
   -v "$HERE:/in/lockdir" eirl-image-tools:arm64 python3 -I /in/repo/tools/image/stages/check.py \
   --rootfs /work/rootfs --image /work/out/assemble/image.img --bootparts /work/out/bootparts \
-  --release /in/release --bundle "$BUNDLE" --version "$VERSION" --mode "$MODE" --repo /in/repo \
+  --release /in/release --bundle "$BUNDLE" --version "$VERSION" --mode "$MODE" --firmware-mode "$FIRMWARE_MODE" \
+  --commit "$COMMIT" --repo /in/repo \
   --lock /in/lockdir/packages.lock --bootparts-lock /in/lockdir/bootparts.lock \
   --report-dir "/out/$NAME.report" ${UPDATE_LOCK:+--update-lock} || CHECK_FAILED=1
 docker run --rm -v "$VOL:/work" -v "$OUT:/out" eirl-image-tools:arm64 sh -c \
@@ -123,3 +137,10 @@ if [ -n "${CHECK_FAILED:-}" ]; then
 fi
 ( cd "$OUT" && shasum -a 256 "$NAME.img.xz" > "$NAME.img.xz.sha256" )
 echo "== $OUT/$NAME.img.xz ($(du -h "$OUT/$NAME.img.xz" | cut -f1)), report in $OUT/$NAME.report/"
+if [ "$MODE" = product ]; then
+  # How to sign it (IMAGE.md §8): the files to publish next to it come from the report
+  rep="$OUT/$NAME.report"
+  echo "== to sign it: EIRL_RELEASE_KEY_CMD=… tools/release.sh image --image $OUT/$NAME.img.xz" \
+    "$(sed -n 's/^rawSize=/--raw-size /p; s/^rawSha256=/--raw-sha256 /p' "$rep/raw.txt" | paste -sd' ' -)" \
+    "--packages $rep/packages.txt --sources $rep/sources.md --commit $COMMIT --built $BUILT --software-manifest $RELEASE/manifest.json"
+fi

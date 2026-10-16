@@ -1,0 +1,26 @@
+EnhancedIRL Encoder image for the NVIDIA Jetson Nano Developer Kit
+
+This system was put together by EnhancedIRL (https://github.com/enhanced-irl/eirl-encoder,
+tools/image/ and IMAGE.md) from:
+
+- Ubuntu 18.04 packages (arm64), installed as Ubuntu publishes them, with some of their
+  configuration files changed (the system's name, the login messages, the services that run). The
+  image is built from Ubuntu packages and is not Ubuntu: it is not affiliated with or endorsed by
+  Canonical Ltd. Each package's licence is in /usr/share/doc/<package>/copyright; the texts of the
+  common licences are in /usr/share/common-licenses.
+
+- NVIDIA Jetson Linux (L4T) R32.7.6 for the Jetson Nano, as NVIDIA ships it. NVIDIA's proprietary
+  software is under the NVIDIA Driver License Agreement, which is in
+  /usr/share/doc/nvidia-tegra/L4T_End_User_License_Agreement.txt.gz, with the licences of its parts
+  next to it; its open-source parts (the Linux kernel, U-Boot and others) keep their own licences,
+  and SOURCES.md says where their source is. NVIDIA and Jetson are trademarks of NVIDIA
+  Corporation; this image is not made, endorsed or supported by NVIDIA.
+
+- Our kernel modules (tc358743, the cellular modem and the Bluetooth modules) and the board's
+  device tree: GNU General Public License version 2. The Realtek RTL8761B Bluetooth firmware, from
+  linux-firmware, redistributable under /lib/firmware/rtl_bt/LICENCE.rtlwifi_firmware.txt.
+
+- The EnhancedIRL Encoder software: Apache License 2.0, with the third-party programs it carries;
+  its notices and licences are in /usr/share/doc/eirl-encoder/.
+
+Where the source code of all of it is, and our written offer for it: SOURCES.md, next to this file.
