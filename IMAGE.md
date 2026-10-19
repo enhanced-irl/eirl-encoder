@@ -1,5 +1,5 @@
-> **Status:** IN PROGRESS (I1-I3 done on Oct 14-15: the test board runs the image; I4, the image of 0.7.0 with its notices and sources, Oct 16)
-> **Updated:** 2026-10-16
+> **Status:** IN PROGRESS (I1-I4 done: the first image, of 0.7.0, published on Oct 16; next: the screen message and a board with older firmware for the one-time update, a GitHub workflow)
+> **Updated:** 2026-10-19
 
 # A minimal microSD image for the Jetson Nano
 
@@ -18,7 +18,7 @@ recipe (B0-B3), applied from scratch to NVIDIA's own base instead of by hand on 
 | I1 Recipe and first image | ✅ Oct 14 | `tools/image/`: test and debug images of release 0.1.1, every offline check passes (§10.1) |
 | I2 First boot and uniqueness | ✅ Oct 14-16 | Two boots from scratch on the test board, with different identities, and later boots (§10.4, §10.6) |
 | I3 Test on a real card | ✅ Oct 14-15 | Wizard, sources, a stream, a real OTA (0.1.1 → 0.3.0) and reboots (§10.4). The maintainer chose to back up the board's own card and use it; the board **keeps the image** |
-| I4 Publish | 🟡 Oct 16 | The image of 0.7.0, with its notices, its sources and the written offer (§9.3); flashing and verification in the README; booted from scratch on the test board (§10.6); signed and published as assets of release v0.7.0 with the maintainer's OK (§10.5) |
+| I4 Publish | ✅ Oct 16 | The image of 0.7.0, with its notices, its sources and the written offer (§9.3); flashing and verification in the README; booted from scratch on the test board (§10.6); signed and published as assets of release v0.7.0 with the maintainer's OK (§10.5): recipe `0f07c8317eb5`, `.img.xz` 299,307,788 bytes (sha256 `20f07ac5…b193`), raw 2,506,096,640 bytes. Downloaded from GitHub again and checked as a user would (signature, image and raw image) |
 
 ## 1. Scope
 
@@ -42,7 +42,7 @@ is updated over the air). A new L4T or kernel means a new image and reflashing.
 | Root filesystem (p1 `APP`, physically the last partition, grown at first boot) | Ubuntu 18.04 arm64: `ubuntu-base-18.04.5` + the packages of `tools/image/packages.txt` from `ports.ubuntu.com` (§3.2) | Ubuntu base sha256; the exact package list with versions, checked on every build (bionic no longer changes in its public pockets) |
 | NVIDIA BSP | The `nvidia-l4t-*` packages of the Driver Package, installed with `apply_binaries.sh` (§3.3), minus the ones the encoder does not use | BSP sha256 `865717ee…0212` (279 MB) |
 | Kernel | NVIDIA's stock `Image` and `initrd` (package `nvidia-l4t-kernel`), **not rebuilt** | BSP |
-| Our kernel bits | `tc358743.ko` (patched, `driver/`) in `/lib/modules/4.9.337-tegra/extra/`; the cellular modem modules (`qmi_wwan`, `cdc_mbim`, `huawei_cdc_ncm`, `option` with the Quectel IDs: MODEMS.md §4) in `updates/eirl-modems/`, which wins over the kernel's own; `btusb` and `btrtl` with the Realtek RTL8761B in `updates/eirl-bluetooth/` and its firmware in `/lib/firmware/rtl_bt/` (BLUETOOTH.md §3.8); the B01 DTB with the TC358743 (`dt/`) in `/boot/`; an extlinux entry with that `FDT` (README, "Installing on the Jetson") | `build/build.sh` (kernel sources by sha256) |
+| Our kernel bits | `tc358743.ko` (patched, `driver/`) in `/lib/modules/4.9.337-tegra/extra/`; the cellular modem modules (`qmi_wwan`, `cdc_mbim`, `huawei_cdc_ncm`, `option` with the Quectel IDs: MODEMS.md §4) and `ipheth` (an iPhone's tethering, from 0.8.0: MODEMS.md §12) in `updates/eirl-modems/`, which wins over the kernel's own; `btusb` and `btrtl` with the Realtek RTL8761B in `updates/eirl-bluetooth/` and its firmware in `/lib/firmware/rtl_bt/` (BLUETOOTH.md §3.8); the B01 DTB with the TC358743 (`dt/`) in `/boot/`; an extlinux entry with that `FDT` (README, "Installing on the Jetson") | `build/build.sh` (kernel sources by sha256) |
 | Our software | The **latest signed release** (the OTA bundle of UPDATES.md §4): downloaded, verified with `release/eirl-release.pub`, installed with its own `install.sh` in image mode (§3.4) | The release's signed manifest |
 | Fan | Our own controller, `eirl-fan`, in the release since 0.6.0 ([`FAN.md`](FAN.md); §12, D-I7) | The release |
 | Notices and sources | `/usr/share/doc/eirl-encoder-image/`: `NOTICE` and `SOURCES.md` with the written offer, made from what is installed (§9.3) | The build |
@@ -493,9 +493,9 @@ affect your rights under any open source licence…". Our image is a modified Ub
   program; at no more than the cost of providing it; support@enhancedirl.com), and the directions to every source
   (the GPLv3 ones too): the recipe's commit on the public repository; NVIDIA's BSP and `public_sources.tbz2` (URLs and
   sha256) with every `nvidia-l4t-*` package; the programs of NVIDIA's initrd with the Ubuntu source package and version each one
-  comes from (NVIDIA records no versions: 42 of its 75 files are byte for byte the image's own; the others are the
-  versions Ubuntu had published on the day NVIDIA put it together, Nov 18 2020, which glibc's own version string
-  confirms); our modules, DT and the
+  comes from (NVIDIA records no versions: 42 of its 75 files are byte for byte the image's own, 32 byte for byte
+  Ubuntu's packages of the versions published on the day NVIDIA put it together, Nov 18 2020, compared with the
+  `.deb` files on Oct 17, and one is NVIDIA's xusb firmware); our modules, DT and the
   RTL8761B firmware; every Ubuntu source package at its exact version; and the release's own notices (BlueALSA with
   libsbc's source in the bundle, librist, SRT, srtla).
 - Next to the image: the same `SOURCES.md` as `-sources.md`, and the package list as `-packages.txt`.
@@ -505,7 +505,10 @@ affect your rights under any open source licence…". Our image is a modified Ub
 - `check.py` checks that the notices and the licences of NVIDIA and of the firmware are there, that `SOURCES.md` names
   the source of every installed package, and the offer, the commit and the release.
 - **Availability**: the maintainers keep copies of everything the directions point to (the pinned downloads and every
-  Ubuntu source package of each published image, initrd included), outside the repository.
+  Ubuntu source package of each published image, initrd included), outside the repository. For 0.7.0: 328 source
+  packages, checked against their `.dsc` (Oct 17). 🪤 Launchpad's file server (`launchpadlibrarian.net`) did not take
+  connections from the maintainers' home address on Oct 16-17, while its API did: the superseded versions were fetched
+  from another network.
 
 Not done: NVIDIA's `public_sources.tbz2` and the Ubuntu source packages as assets next to the image, which would make
 the source available "from the same place" in the plainest sense. It would need `publish-image` to upload more files

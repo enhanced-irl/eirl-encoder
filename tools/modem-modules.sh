@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installs on the board the cellular modem modules built by build/build.sh (build/out/modules/: qmi_wwan,
-# cdc_mbim, huawei_cdc_ncm and option with the Quectel IDs L4T lacks; MODEMS.md §4).
+# cdc_mbim, huawei_cdc_ncm, option with the Quectel IDs L4T lacks, and ipheth for an iPhone; MODEMS.md §4).
 #   tools/modem-modules.sh            → copies them to /lib/modules/<release>/updates/eirl-modems/ and runs depmod
 #   tools/modem-modules.sh --check    → what is installed and which of them are loaded
 #   tools/modem-modules.sh --undo     → removes them and runs depmod (the stock option.ko is used again)
@@ -14,13 +14,13 @@ set -euo pipefail
 HOST=${JETSON:-jetson}
 cd "$(dirname "$0")/.."
 SRC=build/out/modules
-MODS="qmi_wwan cdc_mbim huawei_cdc_ncm option"
+MODS="qmi_wwan cdc_mbim huawei_cdc_ncm option ipheth"
 
 case "${1:-}" in
 --check)
   ssh "$HOST" 'd=/lib/modules/$(uname -r)/updates/eirl-modems; ls -l $d 2>/dev/null || echo "not installed ($d)";
     for m in '"$MODS"'; do printf "%-15s %s\n" $m "$(modinfo -F filename $m 2>/dev/null || echo -)"; done;
-    echo "loaded:"; lsmod | grep -E "^(qmi_wwan|cdc_mbim|huawei_cdc_ncm|option|usb_wwan|cdc_wdm) " || echo "  none"'
+    echo "loaded:"; lsmod | grep -E "^(qmi_wwan|cdc_mbim|huawei_cdc_ncm|option|ipheth|usb_wwan|cdc_wdm) " || echo "  none"'
   exit 0
   ;;
 --undo)

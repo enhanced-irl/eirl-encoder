@@ -1,0 +1,3 @@
+- iPhone por cable: enchufa un iPhone al codificador por USB, desbloquéalo, responde «Confiar» a «¿Confiar en este ordenador?» y activa Compartir Internet. El codificador lo usa como una conexión más a internet, también con SRTLA, y la próxima vez vuelve sin preguntar.
+- Llega con la imagen de tarjeta 0.8.0: actualizar desde una versión anterior no lo añade. Para tenerlo hay que grabar la tarjeta con esa imagen, que empieza de cero (se repite la configuración inicial).
+- Es una primera versión: si algo no va, cuéntanoslo.

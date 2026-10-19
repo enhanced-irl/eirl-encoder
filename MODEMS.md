@@ -1,5 +1,5 @@
-> **Status:** IN PROGRESS — plan approved on Oct 14 (§10). M1-M3 merged (the app's modem service and the dots, the web's card, the screen's header and tab). M4 (configuration, a modem's page on the screen and the web) written from the documentation of ModemManager, NetworkManager and the HiLink API, and tested against fakes and the simulator: §11 is what M0 checks with real modems. M0 waits for the test modems and hub
-> **Updated:** 2026-10-14
+> **Status:** IN PROGRESS — plan approved on Oct 14 (§10). M1-M3 merged (the app's modem service and the dots, the web's card, the screen's header and tab). M4 (configuration, a modem's page on the screen and the web) written from the documentation of ModemManager, NetworkManager and the HiLink API, and tested against fakes and the simulator: §11 is what M0 checks with real modems. M0 waits for the test modems and hub. An iPhone sharing its data over USB works since Oct 19 (§12), in the image from 0.8.0
+> **Updated:** 2026-10-19
 
 # Cellular modems and the health of every connection
 
@@ -26,7 +26,7 @@ connected modem is one more interface that the NetworkManager dispatcher turns i
 | `cdc_ether`, `cdc_ncm` | built in | HiLink, USB routers, modems in ECM/NCM mode |
 | `rndis_host` | module | Android tethering, modems in RNDIS mode |
 | `option`, `usb_wwan`, `cdc-wdm`, PPP | yes | the modems' AT ports |
-| `qmi_wwan`, `cdc_mbim`, `huawei_cdc_ncm`, `ipheth` | **not set** | a QMI or MBIM modem (Quectel, Sierra, Telit… in their normal mode) gets no network interface |
+| `qmi_wwan`, `cdc_mbim`, `huawei_cdc_ncm`, `ipheth` | **not set** | a QMI or MBIM modem (Quectel, Sierra, Telit… in their normal mode) gets no network interface, nor does an iPhone. We build them since (§4.1, §12) |
 | Quectel IDs in `qmi_wwan.c` / `option.c` (L4T sources) | 4G only | EC25/EG25, EC21, EG91/95, BG96, EP06; **not** RM500Q/RM520N (5G), EM05-G, EM12, EM160R |
 | ModemManager | 1.10.0, disabled | runs with `--filter-policy=strict`; knows 2G/3G/4G. 5G modes and access technology arrived in 1.14, NR signal in 1.20 |
 | libqmi / libmbim | 1.22 / 1.18 | enough for 4G |
@@ -42,9 +42,10 @@ connected modem is one more interface that the NetworkManager dispatcher turns i
 | **ModemManager** (QMI/MBIM) | Quectel EG25/EC25, EM05-G, RM520N (5G) on a USB adapter; Sierra EM7455; Telit FN990 | `wwan0` (qmi_wwan/cdc_mbim) + AT ports | everything: RSRP, RSRQ, SINR, RSSI, operator, technology, SIM, registration, IMEI | PIN, APN, roaming, network mode, enable, reset |
 | **HiLink** | Huawei E3372h-320, E8372 | `enx…` (cdc_ether/RNDIS); a router inside, web API on its gateway | its API: RSRP, RSRQ, SINR, RSSI, bars, operator, technology, SIM | PIN, APN profiles, network mode, reboot, its subnet |
 | Phone sharing data | Android over USB | `usb0`/`enx…` (RNDIS/NCM) | that it is there, internet, traffic | on/off |
+| Phone sharing data | iPhone over USB (§12) | `eth…` (`ipheth`, once `usbmuxd` opens its session) | that it is there, internet, traffic | on/off |
 | Router or CPE | a 5G router by cable | `eth…` | the same as a cable | on/off |
 
-iPhone tethering would need `ipheth` + `usbmuxd`: not planned.
+An iPhone needs `ipheth` and `usbmuxd`: both in the image from 0.8.0 (§12).
 
 ## 4. Design
 
@@ -93,13 +94,15 @@ eirl-encoderd
 ### 4.1 Kernel modules
 
 `build/build.sh` also builds, from the same L4T R32.7.6 sources and the board's exact config,
-`qmi_wwan.ko`, `cdc_mbim.ko`, `huawei_cdc_ncm.ko` and `option.ko` into `build/out/modules/`:
+`qmi_wwan.ko`, `cdc_mbim.ko`, `huawei_cdc_ncm.ko`, `option.ko` and `ipheth.ko` into `build/out/modules/`:
 
 - `driver/modems/qmi_wwan-ids.patch`: EM05-G v2, EG12/EM12, EM160R, RM500Q, RM520N on the QMI interface of
   their default composition (`AT+QCFG="usbnet",0`, interface 4). Upstream matches them by class and
   protocol, which 4.9 lacks.
 - `driver/modems/option-ids.patch`: their AT/NMEA/DM ports, from upstream v6.6 (with the QMI interface reserved).
 - `cdc_mbim` binds by class: any MBIM-mode modem works without IDs.
+- `ipheth` (an iPhone's tethering, §12), unpatched: 4.9's table already has `05ac:12a8`, the product id of
+  every current iPhone.
 
 `tools/modem-modules.sh` installs them in `/lib/modules/<release>/updates/eirl-modems/` and runs `depmod`
 (Ubuntu looks in `updates/` first, so the patched `option.ko` wins over the stock one); `--check` and
@@ -382,3 +385,70 @@ restarted so that it sees the bus; `mmcli -L`, `mmcli -m 0`, `nmcli -f all devic
 
 Results: a line per item here (✅, or what changed and the commit).
 
+## 12. iPhone over USB (Oct 19)
+
+An iPhone with **Personal Hotspot** on, plugged into the encoder by cable, is one more internet link: the
+same as an Android sharing its data, also for SRTLA. It needs two things L4T lacks, both in the SD card image
+from **0.8.0** (the OTA does not bring them: §4.1):
+
+- **`ipheth`**, the kernel's driver for the iPhone's tethering interface (§4.1).
+- **`usbmuxd`** (Ubuntu's package, 1.1.0 with libimobiledevice 1.2.1). An iPhone shows up in its photos
+  configuration (1 of 4); its tethering interface (`ff/fd/01`) is in configuration 4. usbmuxd's udev rule starts
+  it when an iPhone is plugged in, and usbmuxd switches the phone to that configuration (`ipheth` binds: `eth1`)
+  and opens a session with it. **Without that session there is no link**, even with the phone already trusting
+  the encoder (checked: `usbmuxd` stopped and the configuration set by hand, 25 s without carrier).
+
+What the owner does, once: unlock the iPhone when plugging it in, answer **Trust** to "Trust this computer?" (the
+phone's passcode), and have Personal Hotspot on ("Allow Others to Join"). usbmuxd asks for the trust by itself;
+nothing has to run on the encoder. From then on the iPhone comes back without asking.
+
+### 12.1 Tested on the test board (Oct 19)
+
+A test iPhone 15 (`iPhone15,4`, iOS 26.7.1) on the board's USB hub, with the software of 0.7.0:
+
+| | Result |
+|---|---|
+| Not paired | "Trust this computer?" on the phone at once; trusted → link up and an address by DHCP (`172.20.10.x/28`) in under 1 s |
+| Paired, plugged in again | Link and address in 2.7 s, no question |
+| The encoder | `90-eirl-uplinks` gives it its own table like any link; the app lists it as `kind: usb`, green; `eth0` keeps the main default route (metric 100, the iPhone 101) |
+| Board ↔ iPhone over the cable | ~95 Mbps each way at once (flood ping of 1,428-byte packets to the phone's gateway, 0.5 ms) |
+| To the internet | ~3 Mbps down and up: the phone's mobile data where the test was, not the cable |
+| Power | The phone charges from the board: 5.12-5.18 V on the board's 5 V rail |
+
+`idevicepair validate` (libimobiledevice-utils, not in the image) answers error -8 with this old libimobiledevice;
+it does not affect the link.
+
+### 12.2 The phone's trust is root's only
+
+The pairing record usbmuxd keeps reaches much more of the phone than its tethering (its files, its backups). As
+Ubuntu ships it, any user of the board could use it: usbmuxd's socket is `0666` and its records are world-readable
+(`/var/lib/lockdown`, `2775`). The image adds `/etc/systemd/system/usbmuxd.service.d/90-eirl.conf`:
+
+- `UMask=0077`: the records are written `0600` (usbmuxd sets its folder back to `2775` on every start, so the
+  files are what is protected).
+- The socket made `0600`: usbmuxd chmods it to `0666` right after creating it (hard-coded, no option), so the
+  drop-in waits for that `0666` and then changes it. If the socket does not show up in 3 s the unit fails:
+  closed, not open. In between there are a few milliseconds while it is `0666`, right after an iPhone is plugged in.
+
+None of the encoder's services talks to usbmuxd. The image's check refuses an image with records or a host
+identity in `/var/lib/lockdown`: the host identity (`SystemConfiguration.plist`) is made on each device the first
+time an iPhone is plugged in.
+
+### 12.3 Traps
+
+- usbmuxd is started by its udev rule (`SYSTEMD_WANTS`) only when the iPhone's device **appears**. Re-authorising
+  the USB device (`authorized` 0/1) or `udevadm trigger` with the device already there does not start it again:
+  `systemctl start usbmuxd`.
+- `ipheth` binds as soon as the phone is in configuration 4 (`eth1` with no carrier): the interface existing
+  does not mean the link is there.
+
+### 12.4 Pending
+
+- The link says "USB" on the screen and the web: it should say "iPhone" (from the USB device's product name).
+- No hint when an iPhone is plugged in but has no link (not trusted, or Personal Hotspot off): the screen could say
+  what to do on the phone.
+- The board's hub cut (§8) drops it, as it does the modems.
+- On the test board (Oct 19) it was installed by hand: `ipheth.ko` with `tools/modem-modules.sh`'s path
+  (`updates/eirl-modems/`), `usbmuxd` and `libimobiledevice-utils` with apt, and the drop-in of §12.2. To undo it:
+  `sudo apt-get purge usbmuxd libimobiledevice-utils`, `sudo rm -r /etc/systemd/system/usbmuxd.service.d
+  /lib/modules/$(uname -r)/updates/eirl-modems/ipheth.ko && sudo depmod -a`.

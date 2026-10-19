@@ -1,0 +1,3 @@
+- iPhone par câble : branchez un iPhone sur l'encodeur en USB, déverrouillez-le, répondez « Se fier » à « Se fier à cet ordinateur ? » et activez le Partage de connexion. L'encodeur l'utilise comme une connexion internet de plus, SRTLA compris, et la fois suivante il revient sans rien demander.
+- Il arrive avec l'image de carte 0.8.0 : la mise à jour depuis une version antérieure ne l'ajoute pas. Pour l'avoir, il faut écrire la carte avec cette image, qui repart de zéro (la configuration initiale est à refaire).
+- C'est une première version : si quelque chose ne fonctionne pas, dites-le-nous.

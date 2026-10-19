@@ -1,0 +1,3 @@
+- iPhone by cable: plug an iPhone into the encoder over USB, unlock it, answer Trust to "Trust This Computer?" and turn on Personal Hotspot. The encoder uses it as one more internet connection, SRTLA included, and next time it comes back without asking.
+- It comes with the 0.8.0 SD card image: updating from an earlier version does not add it. To get it, write the card with that image, which starts from scratch (the initial setup runs again).
+- This is a first version: if something does not work, let us know.

@@ -1,5 +1,5 @@
 > **Status:** IN PROGRESS — implemented (phases 2-4), tested over loopback and **deployed on the board** (Oct 9: a real stream over SRTLA to eu1 with one link). Pending: tests with several real links (they need the 5 V 4 A power supply and modems), §7
-> **Updated:** 2026-10-14
+> **Updated:** 2026-10-19
 
 # Streaming over SRTLA (bonding several links) from the encoder
 
@@ -20,7 +20,7 @@ as Moblin does. If one link drops or degrades, the stream carries on over the ot
 | The app rejects `srtla://` on purpose (`config.ParseURL`: "SRTLA is not supported") and the script only accepts `srt://` | Both whitelists have to be opened, in a bounded way |
 | **Server side already done**: the 3 production relays (eu1/us1/as1) run `srtla_rec` (irlserver fork) on **5001/udp**, which forwards to MediaMTX :5000 keeping the streamid. The key is protocol-agnostic (`mediamtx-path.ts`: SRTLA → path `<key>`) and the dashboard already gives the URL `srtla://host:5001?streamid=publish:<key>` | **Zero changes in the backend, dashboard and relays.** All the work is on the board |
 | The board's network: only `eth0` (1 Gbps, LAN). `rndis0`/`usb0`/`l4tbr0` are the micro-USB's *gadget* mode (they are not links). No Wi-Fi | The extra links have to come through the 4 USB-A ports (one shared USB 3.0 hub; the modems are USB 2.0, plenty of bandwidth) |
-| Kernel 4.9: `cdc_ether` and `cdc_ncm` **built in**, `rndis_host` as a module. **No** `ipheth`, `cdc_mbim` or `qmi_wwan`. `option`/`usb_wwan` yes (serial modems). `usb-modeswitch` installed, but with data from **2017** | These work: **HiLink** modems (they show up as Ethernet: `cdc_ether`), **Android** phones with USB tethering (RNDIS or NCM) and 4G routers over cable. **They do not work without building modules**: iPhone (`ipheth`) and "stick" modems in QMI/MBIM mode (they would also need ModemManager, disabled when slimming down the board) |
+| Kernel 4.9: `cdc_ether` and `cdc_ncm` **built in**, `rndis_host` as a module. **No** `ipheth`, `cdc_mbim` or `qmi_wwan`. `option`/`usb_wwan` yes (serial modems). `usb-modeswitch` installed, but with data from **2017** | These work: **HiLink** modems (they show up as Ethernet: `cdc_ether`), **Android** phones with USB tethering (RNDIS or NCM) and 4G routers over cable. **They do not work without building modules**: iPhone (`ipheth`) and "stick" modems in QMI/MBIM mode (they would also need ModemManager, disabled when slimming down the board). Both are built since (MODEMS.md §4.1; the iPhone, MODEMS.md §12, from the 0.8.0 image) |
 | `CONFIG_IP_MULTIPLE_TABLES=y`, iproute2 4.15 | There is *policy routing* |
 | NetworkManager **1.10.6** active and managing new USB-Ethernet devices (DHCP only); `networkd-dispatcher` also active | NM 1.10 does **not** know how to set source-based routing rules (`ipv4.routing-rules` arrived in 1.18): it has to be done with a *dispatcher* script |
 | `rp_filter`: `all=1` (strict), `eth0=2` | With `from <ip>` rules the strict check should pass, but **it has to be verified** in the spike; if not, `rp_filter=2` on the link interfaces |
@@ -158,7 +158,7 @@ build), and the cost of the Python process (target: < 1% of a core, < 30 MB).
 
 | Phase | What | Who / interruption |
 |---|---|---|
-| **0** | **Hardware requirements**: 5 V 4 A supply (blocking). Get at least **2 real links**: `eth0` + an Android with USB tethering is the minimum; the realistic option is 2 **HiLink** modems (e.g. Huawei E3372h-320 HiLink) with SIMs from different carriers. Decide whether the iPhone is in (it requires building `ipheth` in `build/Dockerfile` and `usbmuxd`) | The maintainer. No interruption |
+| **0** | **Hardware requirements**: 5 V 4 A supply (blocking). Get at least **2 real links**: `eth0` + an Android with USB tethering is the minimum; the realistic option is 2 **HiLink** modems (e.g. Huawei E3372h-320 HiLink) with SIMs from different carriers. Decide whether the iPhone is in (it requires building `ipheth` in `build/Dockerfile` and `usbmuxd`): in since Oct 19, MODEMS.md §12 | The maintainer. No interruption |
 | **1** ✅ | **Manual spike** (done on Oct 9 over loopback, without modems: see §7), without touching the service: build `srtla_send` in `~/srtla`; the operator sets the `ip rule`/`ip route` rules by hand for `eth0` + 1 USB link (script in `~`, with sudo); a test stream in parallel (`SOURCE=test`, another FIFO) → `srt-live-transmit` → `srtla_send` → **relay eu1:5001** with our own production key; reading from a workstation with `srt-live-transmit` (`read:` on eu1:5000, the workstation always as caller). Measure: CPU/RAM of `srtla_send`, distribution per link, what happens when one is unplugged (cut or not, how long it takes to come back), `rp_filter`. Test in a separate pipeline the on-the-fly `bitrate` change of `nvv4l2h264enc` | The maintainer, for sudo and cables. No interruption of `eirl-engine` |
 | **2** ✅ code | **Integrated SRTLA transport**: script, dispatcher, `install.sh`, binary in `build/`, app (URL, latency, `uplinks`, "Links" card). Bitrate still fixed | Deployment with `build.sh` (the maintainer) + script with `mv`. One interruption |
 | **3** ✅ code | **Dynamic bitrate** (§4), enabled with `ABR=1` and also tested with plain SRT | One interruption |
@@ -181,7 +181,7 @@ on the LAN).
   link plain SRT is still better, and the web must make that clear.
 - **Personal data/licences**: no new customer data. The AGPL of `srtla_send` (§3) must be reviewed
   before selling the device.
-- **Decisions for the maintainers**: (1) which links to buy/use for the tests; (2) iPhone, yes or no?;
+- **Decisions for the maintainers**: (1) which links to buy/use for the tests; (2) iPhone, yes or no? (yes: MODEMS.md §12);
   (3) dynamic bitrate with our own controller (recommended) or belacoder; (4) H.265? It saves ~30%
   of bitrate at the same quality (Moblin uses it for that reason and MediaMTX accepts it), but reading it
   in the Cloud OBS has to be validated: outside this plan.

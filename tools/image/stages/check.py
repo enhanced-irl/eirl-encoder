@@ -205,6 +205,13 @@ def main():
     # Bluetooth audio (BLUETOOTH.md §3.7): bluetoothd installed, started only by eirl-bluealsa.service (Wants=)
     ok("bluez installed, bluetooth.service not enabled", "bluez" in installed and "bluetooth.service" not in w
        and not os.path.lexists(os.path.join(R, "etc/systemd/system/dbus-org.bluez.service")))
+    # An iPhone's USB tethering (MODEMS.md §12): usbmuxd, started by its udev rule when an iPhone is plugged in, and
+    # our drop-in that keeps the phone's trust (its socket, its pairing records) for root only
+    ok("usbmuxd installed, started by its udev rule", "usbmuxd" in installed
+       and os.path.exists(os.path.join(R, "lib/udev/rules.d/39-usbmuxd.rules")) and "usbmuxd.service" not in w)
+    dropin = os.path.join(R, "etc/systemd/system/usbmuxd.service.d/90-eirl.conf")
+    dtext = open(dropin).read() if os.path.exists(dropin) else ""
+    ok("usbmuxd: socket and pairing records root-only", "UMask=0077" in dtext and "chmod 0600 /run/usbmuxd" in dtext)
 
     # --- per-device values and nothing of the test board
     mid = open(os.path.join(R, "etc/machine-id"), encoding="utf-8").read()
@@ -213,6 +220,9 @@ def main():
     ok("no random seed", not os.path.exists(os.path.join(R, "var/lib/systemd/random-seed")))
     keys = [f for f in os.listdir(os.path.join(R, "etc/ssh")) if f.startswith("ssh_host_")]
     ok("no SSH host keys", not keys, ", ".join(keys))
+    lockdown = os.path.join(R, "var/lib/lockdown")
+    lk = sorted(os.listdir(lockdown)) if os.path.isdir(lockdown) else []
+    ok("no iPhone host identity or pairing records", not lk, ", ".join(lk))
     conf = os.path.join(R, "etc/eirl-encoder")
     left = sorted(os.listdir(conf)) if os.path.isdir(conf) else []
     ok("/etc/eirl-encoder holds only a new device's engine.env", left == ["engine.env"], ", ".join(left))
@@ -371,7 +381,7 @@ def main():
     ok("depmod knows extra/tc358743.ko", "extra/tc358743.ko:" in dep)
     ok("no in-tree tc358743 module shadowing ours", "kernel/drivers/media/i2c/tc358743.ko" not in dep)
     deps = dict((l.split(":", 1)[0].rsplit("/", 1)[-1], l.split(":", 1)[0]) for l in dep.splitlines() if ":" in l)
-    for m in ("qmi_wwan", "cdc_mbim", "huawei_cdc_ncm", "option"):
+    for m in ("qmi_wwan", "cdc_mbim", "huawei_cdc_ncm", "option", "ipheth"):
         ok("modem module %s from updates/eirl-modems/ (MODEMS.md §4)" % m,
            deps.get(m + ".ko") == "updates/eirl-modems/%s.ko" % m, deps.get(m + ".ko", "missing"))
     for m in ("btusb", "btrtl"):

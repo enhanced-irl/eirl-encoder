@@ -69,18 +69,18 @@ mk M=/tmp/mod modules 2>&1 | grep -vi "clock skew\|modification time" || true
 cp /tmp/mod/tc358743.ko /out/
 
 echo "== modem modules (MODEMS.md §4)"
-# qmi_wwan, cdc_mbim and huawei_cdc_ncm are not set in the board config, and option lacks the 5G
-# Quectel IDs: built from the same sources, installed under /lib/modules/<release>/updates/ so they
+# qmi_wwan, cdc_mbim, huawei_cdc_ncm and ipheth (iPhone tethering) are not set in the board config, and
+# option lacks the 5G Quectel IDs: built from the same sources, installed under /lib/modules/<release>/updates/ so they
 # take precedence over the stock option.ko.
 rm -rf /tmp/modem && mkdir /tmp/modem
 cp $K/drivers/net/usb/qmi_wwan.c $K/drivers/net/usb/cdc_mbim.c $K/drivers/net/usb/huawei_cdc_ncm.c \
-   $K/drivers/usb/serial/option.c $K/drivers/usb/serial/usb-wwan.h /proj/driver/modems/Makefile /tmp/modem/
+   $K/drivers/net/usb/ipheth.c $K/drivers/usb/serial/option.c $K/drivers/usb/serial/usb-wwan.h /proj/driver/modems/Makefile /tmp/modem/
 (cd /tmp/modem && patch -s qmi_wwan.c < /proj/driver/modems/qmi_wwan-ids.patch \
   && patch -s option.c < /proj/driver/modems/option-ids.patch)
 mk M=/tmp/modem modules 2>&1 | grep -vi "clock skew\|modification time" || true
 # The pipe hides the status of make: check every module was built, and never leave an older one behind
 rm -rf /out/modules && mkdir -p /out/modules
-for m in qmi_wwan cdc_mbim huawei_cdc_ncm option; do
+for m in qmi_wwan cdc_mbim huawei_cdc_ncm option ipheth; do
   [ -f /tmp/modem/$m.ko ] || { echo "modem module $m.ko was not built"; exit 1; }
   cp /tmp/modem/$m.ko /out/modules/
 done

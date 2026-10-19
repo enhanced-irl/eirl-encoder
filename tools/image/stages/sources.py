@@ -19,10 +19,10 @@ NVIDIA_LICENSE_URL = ("https://developer.download.nvidia.com/embedded/L4T/r32_Re
                       "Tegra_Software_License_Agreement-Tegra-Linux.txt")
 
 # NVIDIA's initrd (nvidia-l4t-initrd) holds programs from Ubuntu 18.04 arm64 packages and records no versions.
-# Established on Oct 16 2026 for the version below: its 75 files compared with the image's own (42 are byte for byte the
-# same as the packages of §4) and, for the others, the version Ubuntu had published on the day NVIDIA put the initrd
-# together (its files' date, Nov 18 2020: Launchpad's publishing history). glibc's own version string confirms its one.
-# A new BSP fails the build here until this is established again.
+# Established on Oct 16-17 2026 for the version below: of its 75 files, 42 are byte for byte the same as the image's own
+# packages (§4), 32 byte for byte the same as Ubuntu's arm64 packages of these versions (the ones published on the day
+# NVIDIA put the initrd together, Nov 18 2020, compared with the .deb files from Launchpad), and one is NVIDIA's xusb
+# firmware. A new BSP fails the build here until this is established again.
 INITRD_VERSION = "32.7.6-20241104234540"
 INITRD_SOURCES = [  # (source package, version, what of the initrd)
     ("bash", "4.4.18-2ubuntu1.2", "bash"),
@@ -169,8 +169,8 @@ def main():
     w("NVIDIA's initrd (`nvidia-l4t-initrd`, `/boot/initrd`) holds programs from Ubuntu 18.04 arm64 packages, and NVIDIA")
     w("records no versions. Some of its files are byte for byte those of the image's own packages (%s: their"
       % ", ".join(INITRD_SAME))
-    w("source is in §4). The others come from these Ubuntu source packages, the versions Ubuntu had published when")
-    w("NVIDIA put the initrd together (November 2020):")
+    w("source is in §4). The others are byte for byte those of Ubuntu's packages built from these source packages,")
+    w("the versions Ubuntu had published when NVIDIA put the initrd together (November 2020):")
     w("")
     w("| Source package (initrd) | Version | What |")
     w("|---|---|---|")
@@ -184,9 +184,9 @@ def main():
     w("")
     w("- `/lib/modules/%s/extra/tc358743.ko`: the TC358743 HDMI-to-CSI-2 bridge driver with `driver/tc358743-jetson.patch`."
       % pins["KERNEL_RELEASE"])
-    w("- `/lib/modules/%s/updates/eirl-modems/`: `qmi_wwan`, `cdc_mbim`, `huawei_cdc_ncm` and `option`, with"
+    w("- `/lib/modules/%s/updates/eirl-modems/`: `qmi_wwan`, `cdc_mbim`, `huawei_cdc_ncm`, `option` and `ipheth`,"
       % pins["KERNEL_RELEASE"])
-    w("  `driver/modems/*.patch`.")
+    w("  with `driver/modems/*.patch`.")
     w("- `/lib/modules/%s/updates/eirl-bluetooth/`: `btusb` and `btrtl`, with `driver/bluetooth/*.patch`."
       % pins["KERNEL_RELEASE"])
     w("- `/boot/tegra210-p3448-0000-p3449-0000-b00-tc358743.dtb`: NVIDIA's device tree of the B01 board with `dt/*.dtsi`.")
