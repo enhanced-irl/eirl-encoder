@@ -1,5 +1,5 @@
 > **Status:** IN PROGRESS — P1-P5 released in v0.5.0 (Oct 15) and tested on the board (a test SD card, §12). Pending: platforms with real keys, a Cloud OBS reading H.265, the SRT listener's firewall, the cloud's side (P6)
-> **Updated:** 2026-10-15
+> **Updated:** 2026-10-19
 
 # Output protocols and encoding settings
 
@@ -86,7 +86,7 @@ Every protocol has a sender the output session starts and watches:
 | Protocol | Sender | Input | Stats for the ABR |
 |---|---|---|---|
 | srt | `srt-live-transmit` (as before) | FIFO on stdin | its `-pf:json` on fd 3 |
-| srtla | `srtla_send` + `srt-live-transmit` (as before) | FIFO | the same |
+| srtla | an SRTLA sender (irlserver's in Rust by default, BELABOX's in C: SRTLA.md §9) + `srt-live-transmit` | FIFO | the same; the Rust sender adds statistics per link (`srtla-links.json`, SRTLA.md §9.3), not used by the ABR |
 | rtmp, rtmps | `eirl-send rtmp` (§5) | FIFO on stdin | its JSON on fd 3, same shape |
 | rist | `ristsender` (§6) | UDP datagrams to `127.0.0.1:<RIST_LOCAL_PORT>` (6100) | its own JSON, converted by the engine |
 | udp | none: `udpsink` at the end of the pipeline | — | none (the encoder's own counter for `sentKbps`) |
@@ -96,6 +96,10 @@ Every protocol has a sender the output session starts and watches:
   The engine writes the last one to `srt-stats.json` (legacy name) for the app, for every protocol that has stats
   (RIST's are converted to this shape first).
 - The ABR's latency budget is `SRT_LATENCY` for srt/srtla, `OUTPUT_LATENCY` for rist and 2000 ms for rtmp.
+- srt and srtla (SRTLA.md §9.5, §9.7): each SRT packet carries `SRT_PAYLOAD` bytes (1,128 = 6 TS packets by default;
+  the mux writes that many at a time and `srt-live-transmit` reads them with `-chunk`), and the relay is given by its
+  address, which the session resolves itself and caches (`STATE_DIR/relay-addr.json`) for when name resolution
+  fails. The other protocols keep 7 TS packets and their own name resolution.
 - A sender that exits ends the session; the output retries with its retry plan (§8). Senders get secrets through
   the environment, never argv — except `srt-live-transmit` and `ristsender`, which have no other way (an accepted
   risk, MANAGER.md §12).

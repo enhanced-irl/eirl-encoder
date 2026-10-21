@@ -25,6 +25,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -574,6 +575,9 @@ type session struct {
 	srtla   *child
 	readers sync.WaitGroup
 	srtlaRd chan struct{} // closed when srtla_send's reader has read its last line
+	ready   *oneShot      // the SRTLA sender registered its uplinks with the relay
+	statsUp *oneShot      // the Rust sender's statistics are coming (so ready can be trusted to come too)
+	stop    chan struct{} // closed by teardown: the helpers that are not readers of a pipe end
 	files   []string
 	pipe    gst.Pipeline
 	feeding bool   // the bridges send to this session's appsrcs
@@ -607,7 +611,14 @@ func (o *Output) runSession() error {
 	case config.ProtoUDP:
 		return s.runUDP()
 	}
-	return s.run(cfg.SRTTarget())
+	// srt names the relay in its target; srtla's goes to its sender (startSRTLA)
+	addr := ""
+	if host := cfg.RelayHost(); host != "" && cfg.Transport == config.ProtoSRT {
+		if a, ok := relayAddr(host, cfg.StateDir); ok {
+			addr = a
+		}
+	}
+	return s.run(cfg.SRTTargetAt(addr))
 }
 
 // fifo makes the session's FIFO and opens it O_RDWR: opening a FIFO like this waits for nobody, and the
@@ -646,13 +657,16 @@ func (s *session) run(target config.Secret) error {
 		if err := s.startSRTLA(); err != nil {
 			return err
 		}
+		if err := s.waitRegistered(); err != nil {
+			return err
+		}
 	}
 	fifo, fd, err := s.fifo()
 	if err != nil {
 		return err
 	}
 	defer fd.Close()
-	args := []string{"-chunk:1316"}
+	args := []string{"-chunk:" + strconv.Itoa(cfg.SRTPayloadBytes())}
 	var extra []*os.File
 	statsR, statsW, err := s.statsPipe()
 	if err != nil {
@@ -665,7 +679,7 @@ func (s *session) run(target config.Secret) error {
 		if cfg.ABR {
 			kbps, perSecond = cfg.VBitrateMin, 4
 		}
-		args = append(args, "-s:"+strconv.Itoa(statsInterval(kbps, cfg.ABitrate, perSecond)), "-pf:json",
+		args = append(args, "-s:"+strconv.Itoa(statsInterval(kbps, cfg.ABitrate, perSecond, cfg.SRTPayloadBytes())), "-pf:json",
 			"-statsout:/dev/fd/3")
 	}
 	// The target holds the stream id and the passphrase: it goes to srt-live-transmit's argv because it
@@ -835,6 +849,9 @@ func (s *session) teardown() {
 	o.mu.Lock()
 	o.rates = nil
 	o.mu.Unlock()
+	if s.stop != nil {
+		close(s.stop)
+	}
 	stopChildren(s.procs)
 	if s.pipe != nil {
 		closed := make(chan struct{})
@@ -865,7 +882,7 @@ func (s *session) teardown() {
 	for _, f := range s.files {
 		_ = os.Remove(f)
 	}
-	for _, n := range []string{fileABR, fileUplinks, fileSRTLAIPs, fileSRTStats} {
+	for _, n := range []string{fileABR, fileUplinks, fileSRTLAIPs, fileSRTStats, fileSRTLALinks, fileSRTLASock} {
 		_ = os.Remove(filepath.Join(o.runDir, n))
 	}
 	// What the session's pipeline freed stays in glibc's arenas: each reconnection added ~1 MB of RSS
@@ -1054,44 +1071,127 @@ func (s *session) startSRTLA() error {
 			return fail(ReasonNoUplinks, "sin enlaces a internet")
 		}
 	}
+	addr, _ := relayAddr(cfg.SRTLAHost(), cfg.StateDir) // the name itself if it does not resolve: the sender tries
+	snd, err := pickSender(cfg, o.runDir, addr, uf.ipsPath())
+	if err != nil {
+		return fail(ReasonInternal, err.Error())
+	}
 	uf.write(sel)
 	elog.Event("engine", "srtla_uplinks", "links", uplinksDesc(sel))
 	if len(sel) < 2 {
 		elog.Event("engine", "srtla_single_uplink", "note", "no bonding: if it goes, the emission goes")
 	}
-	argv := append(append([]string{}, stdbufArgv...), cfg.SRTLABin, strconv.Itoa(cfg.SRTLALocalPort),
-		cfg.SRTLAHost(), strconv.Itoa(cfg.SRTLAPort()), uf.ipsPath())
-	p, out, err := startChild("srtla_send", argv[0], argv[1:], nil, true, nil, nil)
+	if snd.sock != "" {
+		_ = os.Remove(snd.sock) // a socket left by a sender that was killed
+	}
+	if snd.kind == senderIRLServer {
+		elog.Event("engine", "srtla_sender", "sender", snd.kind, "mode", cfg.SRTLAMode, "relay", addr)
+	} else {
+		elog.Event("engine", "srtla_sender", "sender", snd.kind, "relay", addr)
+	}
+	p, out, err := startChild("srtla_send", snd.bin, snd.argv, nil, true, nil, snd.env)
 	if err != nil {
 		return fail(ReasonInternal, err.Error())
 	}
 	s.srtla = p
 	s.procs = append(s.procs, p)
+	s.ready, s.statsUp = newOneShot(), newOneShot()
 	s.srtlaRd = make(chan struct{})
+	ready, statsUp := s.ready, s.statsUp
 	s.goRead(func() {
 		defer close(s.srtlaRd)
-		o.readSRTLA(out, s.res)
+		o.readSRTLA(out, s.res, ready, p.Terminate)
 	}, out)
 	s.readers.Add(1)
 	go func() {
 		defer s.readers.Done()
 		watchUplinks(uf, p, sel, s.res)
 	}()
+	if snd.sock != "" {
+		s.stop = make(chan struct{})
+		done := s.stop
+		s.readers.Add(1)
+		go func() {
+			defer s.readers.Done()
+			o.followStats(snd.sock, cfg.SRTLAMode, mergeDone(done, p.Done()), ready, statsUp)
+		}()
+	}
 	return nil
 }
 
-// readSRTLA sends srtla_send's output to the journal and keeps why it gives up.
-func (o *Output) readSRTLA(r io.Reader, res *result) {
+// mergeDone closes when either closes.
+func mergeDone(a, b <-chan struct{}) <-chan struct{} {
+	c := make(chan struct{})
+	go func() {
+		select {
+		case <-a:
+		case <-b:
+		}
+		close(c)
+	}()
+	return c
+}
+
+// srtlaDeadWait is how long the Rust sender may say it has lost every uplink before the engine stops it (SRTLA.md
+// §9.1). A variable for the tests.
+var srtlaDeadWait = 60 * time.Second
+
+var reDigits = regexp.MustCompile(`[0-9]+`)
+
+// readSRTLA sends srtla_send's output to the journal and keeps why it gives up. The C sender's «connection
+// established» is its registration (the Rust one says so in its statistics, followStats).
+//
+// Every line is classified, but the journal gets each kind of line (its numbers aside) at most once every logEvery
+// s, with how many were left out: the Rust sender prints a warning per NAK, and per packet while it has no uplink.
+// And it never exits when it has lost every uplink (it says «Failed to re-establish any connections» every second
+// and keeps trying, which saves rebuilding the session after a short cut): after srtlaDeadWait of that, giveUp stops
+// it, so that the session ends and the next one resolves the relay's name again, as the C sender's exit does.
+func (o *Output) readSRTLA(r io.Reader, res *result, ready *oneShot, giveUp func()) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 4096), 1<<20)
+	type seen struct {
+		last float64
+		n    int
+	}
+	logged := map[string]*seen{}
+	var deadSince, deadLast float64
+	gaveUp := false
 	for sc.Scan() {
-		line := o.mask(reSRTLAAddr.ReplaceAllString(strings.TrimRight(sc.Text(), trailingSpace), ""))
+		line := o.mask(reSRTLAAddr.ReplaceAllString(plainSRTLA(strings.TrimRight(sc.Text(), trailingSpace)), ""))
 		if line == "" {
 			continue
 		}
-		elog.Event("srtla", srtlaEvent(line), "line", line)
+		now := mono()
+		key := reDigits.ReplaceAllString(line, "#")
+		if len(logged) > 256 {
+			logged = map[string]*seen{}
+		}
+		if e, ok := logged[key]; !ok || now-e.last >= logEvery {
+			if ok && e.n > 0 {
+				elog.Event("srtla", srtlaEvent(line), "line", line, "repeats", e.n)
+			} else {
+				elog.Event("srtla", srtlaEvent(line), "line", line)
+			}
+			logged[key] = &seen{last: now}
+		} else {
+			e.n++
+		}
+		if strings.HasSuffix(line, ": connection established") {
+			ready.fire()
+		}
 		if why := classifySRTLA(line); why != "" {
 			res.setSRTLA(why, cut(line, detailMax))
+		}
+		if strings.Contains(line, "Failed to re-establish any connections") {
+			if now-deadLast > 5 {
+				deadSince = now // a new outage
+			}
+			deadLast = now
+			if !gaveUp && now-deadSince >= srtlaDeadWait.Seconds() {
+				gaveUp = true
+				elog.Event("engine", "srtla_gave_up", "after_s", srtlaDeadWait.Seconds())
+				giveUp()
+			}
 		}
 	}
 }
@@ -1099,10 +1199,74 @@ func (o *Output) readSRTLA(r io.Reader, res *result) {
 // srtlaEvent is the journal code of a line of srtla_send (the phrases journal.go knew).
 func srtlaEvent(line string) string {
 	switch {
-	case strings.Contains(line, "connection failed, attempting to reconnect"):
+	case strings.Contains(line, "connection failed, attempting to reconnect"),
+		strings.Contains(line, "attempting full socket reconnection"):
 		return "srtla_link_down"
 	case strings.Contains(line, "no available connections"):
 		return "srtla_no_uplinks"
 	}
 	return "srtla_log"
+}
+
+// srtlaRegisterWait is how long srt-live-transmit waits for the SRTLA sender to register before starting anyway
+// (it then waits up to its conntimeo, as before); the C sender gives up after 10 s of its own. A variable for the
+// tests.
+var srtlaRegisterWait = 15 * time.Second
+
+// waitRegistered holds srt-live-transmit back until the SRTLA sender has registered its uplinks with the relay
+// (SRTLA.md §9.1). The relays' SRT (gosrt, in MediaMTX) starts its delivery clock when the handshake arrives
+// without discounting how long the caller had been connecting: every second srt-live-transmit spent waiting for
+// the bond would be a second more of latency for the whole session (the Rust sender takes ~2 s to register).
+//
+// Unlike the C sender, the Rust one never gives up its first registration: with a relay that does not answer
+// (down, or a cached address that is no longer its own) it would retry for ever and the session would never
+// resolve the name again. So when its statistics come and say it has not registered in srtlaRegisterWait, the
+// session ends with relay_unreachable, as the C sender does by exiting; the retry resolves the name again.
+func (s *session) waitRegistered() error {
+	o := s.o
+	t0 := time.Now()
+	deadline := time.NewTimer(srtlaRegisterWait)
+	defer deadline.Stop()
+	tick := time.NewTicker(retryTick)
+	defer tick.Stop()
+	for {
+		select {
+		case <-s.ready.C():
+			elog.Event("engine", "srtla_registered", "ms", time.Since(t0).Milliseconds())
+			return nil
+		case <-s.srtla.Done():
+			return nil // the session ends with what it said (watch)
+		case <-deadline.C:
+			elog.Event("engine", "srtla_register_slow", "after_s", srtlaRegisterWait.Seconds())
+			if s.statsUp.fired() {
+				return fail(ReasonRelayUnreachable, "the relay does not answer: the SRTLA sender did not register")
+			}
+			return nil
+		case <-tick.C:
+			if !o.running() {
+				return nil
+			}
+		}
+	}
+}
+
+// oneShot is an event that may fire from several goroutines.
+type oneShot struct {
+	once sync.Once
+	c    chan struct{}
+}
+
+func newOneShot() *oneShot { return &oneShot{c: make(chan struct{})} }
+
+func (g *oneShot) fire() { g.once.Do(func() { close(g.c) }) }
+
+func (g *oneShot) C() <-chan struct{} { return g.c }
+
+func (g *oneShot) fired() bool {
+	select {
+	case <-g.c:
+		return true
+	default:
+		return false
+	}
 }

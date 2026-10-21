@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # build.sh — builds the app's package for the Jetson (static, linux/arm64) and, with JETSON=<ssh host>,
 # installs it there.
-#   ./build.sh                    → dist/pkg/ (binaries, srt-live-transmit + libsrt, srtla_send, MediaMTX, deploy/,
+#   ./build.sh                    → dist/pkg/ (binaries, srt-live-transmit + libsrt, srtla_send + srtla_send_rs, MediaMTX, deploy/,
 #                                   splash/, install.sh, VERSION, BUILD, files.txt, doc/ with the licences)
 #   JETSON=jetson ./build.sh      → also copies it and runs `sudo ./install.sh` on the board
 #   JETSON=jetson ./build.sh --restart-engine   (passes the option to install.sh)
@@ -42,6 +42,14 @@ cp ../build/out/mediamtx dist/pkg/
 # srtla_send (SRTLA): built separately in build/out (arm64 container, pinned commit); reused
 [ -x ../build/out/srtla_send ] || ../build/srtla.sh
 cp ../build/out/srtla_send dist/pkg/
+# srtla_send_rs, irlserver's SRTLA sender (SRTLA.md §9): the default one, the C one stays as the way back. Built
+# separately in build/out (arm64 container, pinned commit); reused while build/out has the pinned one
+srtla_rs_commit=$(sed -n 's/^SRTLA_RS_COMMIT=\([0-9a-f]*\).*/\1/p' ../build/srtla-rs.sh)
+[ -n "$srtla_rs_commit" ] || { echo "build/srtla-rs.sh without SRTLA_RS_COMMIT" >&2; exit 1; }
+if ! [ -x ../build/out/srtla_send_rs ] || [ "$(cut -d' ' -f1 ../build/out/srtla_send_rs.version 2>/dev/null)" != "$srtla_rs_commit" ]; then
+  ../build/srtla-rs.sh
+fi
+cp ../build/out/srtla_send_rs dist/pkg/
 # The SRT output: srt-live-transmit and its libsrt (Haivision SRT, pinned tag in build/srt.sh, arm64 container);
 # reused while build/out has the pinned one
 srt_version=$(sed -n 's/^SRT_VERSION=\([^ ]*\).*/\1/p' ../build/srt.sh)
@@ -77,11 +85,11 @@ cp ../build/out/bluealsa/bluealsa ../build/out/bluealsa/libasound_module_pcm_blu
 build dist/pkg/eirl-update ./cmd/eirl-update
 
 # Licences of what the package ships (→ /usr/share/doc/eirl-encoder): ours, the Go toolchain and every
-# Go module linked into the binaries, MediaMTX (MIT), srtla_send (AGPL-3.0) and SRT (MPL-2.0), the last two
-# with where their source is
+# Go module linked into the binaries, MediaMTX (MIT), srtla_send (AGPL-3.0), srtla_send_rs (MIT, with the crates it
+# links) and SRT (MPL-2.0), with where their source is
 doc=dist/pkg/doc
-mkdir -p "$doc/licenses/go" "$doc/licenses/mediamtx" "$doc/licenses/srtla" "$doc/licenses/srt" "$doc/licenses/rist" \
-  "$doc/licenses/bluealsa"
+mkdir -p "$doc/licenses/go" "$doc/licenses/mediamtx" "$doc/licenses/srtla" "$doc/licenses/srtla-rs" "$doc/licenses/srt" \
+  "$doc/licenses/rist" "$doc/licenses/bluealsa"
 for f in LICENSE NOTICE; do [ -f "../$f" ] && cp "../$f" "$doc/$f"; done
 # The Go toolchain's licence (Homebrew keeps it next to GOROOT, not inside)
 goroot=$(go env GOROOT)
@@ -113,6 +121,16 @@ Source: https://github.com/BELABOX/srtla/tree/$srtla_commit
 It is built from that commit with one change, applied by build/srtla.sh of eirl-encoder
 (https://github.com/enhanced-irl/eirl-encoder): the socket that receives the local SRT listens on
 127.0.0.1 instead of INADDR_ANY.
+SRC
+cp ../build/out/srtla_send_rs.LICENSE "$doc/licenses/srtla-rs/LICENSE"
+cp -R ../build/out/srtla_send_rs-licenses "$doc/licenses/srtla-rs/crates"
+cat > "$doc/licenses/srtla-rs/SOURCE.txt" <<SRC
+srtla_send_rs is irlserver/srtla_send, licensed under the MIT License (LICENSE here), statically linked with the
+Rust crates listed in crates/THIRD-PARTY.txt, whose licences are in crates/.
+Source: https://github.com/irlserver/srtla_send/tree/$srtla_rs_commit
+It is built from that commit with one change, applied by build/srtla-rs.sh of eirl-encoder
+(https://github.com/enhanced-irl/eirl-encoder): the socket that receives the local SRT listens on
+127.0.0.1 instead of all interfaces.
 SRC
 cp ../build/out/srt.LICENSE "$doc/licenses/srt/LICENSE"
 cat > "$doc/licenses/srt/SOURCE.txt" <<SRC

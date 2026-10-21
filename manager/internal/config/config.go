@@ -81,13 +81,14 @@ var EDIDModes = []string{"1080p30", "1080p50", "720p60"}
 
 func validEDID(m string) bool { return slices.Contains(EDIDModes, m) }
 
-// SRTLALatencyMs: the latency set when switching to SRTLA unless another one is given. With mobile
-// uplinks 200-500 ms falls short; 2000 is what Moblin uses.
-const SRTLALatencyMs = 2000
+// DefaultLatencyMs: the SRT latency of a new SRT or SRTLA destination, and when switching to one, unless another one
+// is given. One value for both (SRTLA.md §9.6): the latency is fixed for the whole session by its handshake and the
+// links change during it; with a mobile network 200-500 ms falls short (5-8 × RTT), and 2000 is what Moblin uses.
+const DefaultLatencyMs = 2000
 
 // Defaults: the same as the engine when the variable is missing.
 func Defaults() Settings {
-	return Settings{ManagedBy: "local", Mode: "caller", LatencyMs: 200, VideoKbps: 6000, AudioKbps: 128, Output: "on", VideoMinKbps: 1000, EDIDPreferred: "1080p30",
+	return Settings{ManagedBy: "local", Mode: "caller", LatencyMs: DefaultLatencyMs, VideoKbps: 6000, AudioKbps: 128, Output: "on", VideoMinKbps: 1000, EDIDPreferred: "1080p30",
 		Source: "hdmi", VideoDevice: "auto", VideoFormat: "auto", VideoMode: "auto", AudioSource: "auto"}
 }
 

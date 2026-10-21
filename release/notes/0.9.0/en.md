@@ -1,0 +1,5 @@
+- Sturdier streaming over SRTLA: the encoder shares the stream among its connections with a new sender, which sends fewer retransmissions, sets aside only a connection that stalls and copes better with a connection that drops and comes back. For whoever streams, the latency is the same.
+- In Settings › Streaming › Connections, on the screen and on the web page, each connection in use now shows its delay (RTT) and its losses (NAKs per second), and says when the encoder is setting it aside.
+- The default SRT latency of a new destination is now 2 seconds, with SRT too (before, 0.2 s): on mobile networks a short latency cuts the stream. If you chose it yourself, it does not change.
+- Smaller packets (1,128 bytes): some mobile networks and phones sharing their data break big packets.
+- If the relay's name does not resolve (DNS), the encoder uses its last good address and keeps streaming, instead of waiting for it to come back.

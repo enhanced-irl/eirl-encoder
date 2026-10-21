@@ -1,4 +1,4 @@
-> **Status:** IN PROGRESS — released and updating itself over the air (latest: v0.7.0, Oct 16, also as a microSD image); see [Status](#status)
+> **Status:** IN PROGRESS — released and updating itself over the air (latest: v0.8.0, Oct 19, also as a microSD image); see [Status](#status)
 > **Updated:** 2026-10-16
 
 # eirl-encoder
@@ -219,7 +219,7 @@ operating, the bugs found and the history of the test board.
 | Over-the-air updates | ✅ Released in 0.1.0; the test board updates itself from GitHub Releases like any device | [`UPDATES.md`](UPDATES.md) |
 | Fan control | ✅ Released in 0.6.0 (one curve); profiles next | [`FAN.md`](FAN.md) |
 | Boot splash | ✅ Released | [`SPLASH.md`](SPLASH.md) |
-| microSD image | ✅ Published with 0.7.0: the whole card, signed with the updates' key. The one-time firmware update is still to be seen on a board with older firmware | [`IMAGE.md`](IMAGE.md) |
+| microSD image | ✅ Published with 0.7.0 and 0.8.0: the whole card, signed with the updates' key. The one-time firmware update is still to be seen on a board with older firmware | [`IMAGE.md`](IMAGE.md) |
 
 ### HDMI capture: how it was brought up
 
@@ -438,7 +438,8 @@ below, in `/etc/default/eirl-engine` and `/etc/eirl-encoder/engine.env`. Stream 
 | `RES=WxH FPS=fps` | Resolution and fps. With `hdmi`, by default the signal's |
 | `VBITRATE=kbps GOP=frames` | CBR bitrate and GOP. By default 6000 and 2 s |
 | `ABITRATE=kbps AENC=voaacenc\|avenc_aac` | Audio |
-| `SRT_URL=srt://… SRT_MODE=caller\|listener SRT_LATENCY=ms SRT_PASSPHRASE SRT_STREAMID` | SRT destination |
+| `SRT_URL=srt://… SRT_MODE=caller\|listener SRT_LATENCY=ms SRT_PASSPHRASE SRT_STREAMID` | SRT destination (`srtla://…` for SRTLA). `SRT_LATENCY` 2000 by default |
+| `SRTLA_SENDER=irlserver\|belabox SRTLA_MODE=classic\|enhanced SRT_PAYLOAD=1128\|1316` | Board settings of the SRT and SRTLA output: which SRTLA sender, its scheduler, and the bytes of TS per SRT packet ([`SRTLA.md`](SRTLA.md) §9.2) |
 | `AUDIO=test\|silence\|i2s` | Audio. By default `test` with the `test` source and `i2s` (real HDMI) with `hdmi` |
 | `OUTPUT=on\|off` | `off` = not streaming: capture, preview and meters keep running, without the main encoder or a sender (no destination needed). `eirl-enginectl output on\|off` switches it live |
 | `LIVE=1 LIVE_SIZE=640x360 LIVE_VBITRATE=800 LIVE_ABITRATE=96 LIVE_VPORT=5006 LIVE_APORT=5008` | Live preview for the management app (WebRTC): a second, small H.264 encode + Opus, over RTP to localhost (branches of the `tee`, see [`MANAGER.md`](MANAGER.md) §4). `0` = without them |

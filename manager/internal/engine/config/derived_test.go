@@ -34,31 +34,31 @@ func TestTransportAndTarget(t *testing.T) {
 		{name: "no destination", env: map[string]string{}, trans: "srt"},
 		{name: "no destination with OUTPUT=on is fine with the mixer", env: map[string]string{"OUTPUT": "on"}, trans: "srt"},
 		{name: "caller", env: map[string]string{"SRT_URL": "srt://relay.example.com:9000"}, trans: "srt",
-			target: "srt://relay.example.com:9000?mode=caller&latency=200",
-			masked: "srt://relay.example.com:9000?mode=caller&latency=200"},
+			target: "srt://relay.example.com:9000?mode=caller&latency=2000&payloadsize=1128",
+			masked: "srt://relay.example.com:9000?mode=caller&latency=2000&payloadsize=1128"},
 		{name: "listener without host", env: map[string]string{"SRT_URL": "srt://:9000", "SRT_MODE": "listener", "SRT_LATENCY": "500"},
-			trans: "srt", target: "srt://:9000?mode=listener&latency=500", masked: "srt://:9000?mode=listener&latency=500"},
+			trans: "srt", target: "srt://:9000?mode=listener&latency=500&payloadsize=1128", masked: "srt://:9000?mode=listener&latency=500&payloadsize=1128"},
 		{name: "listener with host is not checked by the launcher", env: map[string]string{"SRT_URL": "srt://h:9000", "SRT_MODE": "listener"},
-			trans: "srt", target: "srt://h:9000?mode=listener&latency=200", masked: "srt://h:9000?mode=listener&latency=200"},
+			trans: "srt", target: "srt://h:9000?mode=listener&latency=2000&payloadsize=1128", masked: "srt://h:9000?mode=listener&latency=2000&payloadsize=1128"},
 		{name: "caller without host is not checked either", env: map[string]string{"SRT_URL": "srt://:9000"},
-			trans: "srt", target: "srt://:9000?mode=caller&latency=200", masked: "srt://:9000?mode=caller&latency=200"},
+			trans: "srt", target: "srt://:9000?mode=caller&latency=2000&payloadsize=1128", masked: "srt://:9000?mode=caller&latency=2000&payloadsize=1128"},
 		{name: "ipv6", env: map[string]string{"SRT_URL": "srt://[fe80::1]:9000"}, trans: "srt",
-			target: "srt://[fe80::1]:9000?mode=caller&latency=200", masked: "srt://[fe80::1]:9000?mode=caller&latency=200"},
+			target: "srt://[fe80::1]:9000?mode=caller&latency=2000&payloadsize=1128", masked: "srt://[fe80::1]:9000?mode=caller&latency=2000&payloadsize=1128"},
 		{name: "port is not range-checked", env: map[string]string{"SRT_URL": "srt://h:99999"}, trans: "srt",
-			target: "srt://h:99999?mode=caller&latency=200", masked: "srt://h:99999?mode=caller&latency=200"},
+			target: "srt://h:99999?mode=caller&latency=2000&payloadsize=1128", masked: "srt://h:99999?mode=caller&latency=2000&payloadsize=1128"},
 		{name: "secrets", env: map[string]string{"SRT_URL": "srt://h:9000", "SRT_PASSPHRASE": "s3cretpass", "SRT_STREAMID": "publish:live:key"},
 			trans:  "srt",
-			target: "srt://h:9000?mode=caller&latency=200&passphrase=s3cretpass&pbkeylen=16&streamid=publish:live:key",
-			masked: "srt://h:9000?mode=caller&latency=200&passphrase=***&pbkeylen=16&streamid=***"},
+			target: "srt://h:9000?mode=caller&latency=2000&payloadsize=1128&passphrase=s3cretpass&pbkeylen=16&streamid=publish:live:key",
+			masked: "srt://h:9000?mode=caller&latency=2000&payloadsize=1128&passphrase=***&pbkeylen=16&streamid=***"},
 		{name: "srtla", env: map[string]string{"SRT_URL": "srtla://relay.example.com:5000", "SRT_LATENCY": "2000", "SRT_STREAMID": "publish:k"},
 			exec: true, trans: "srtla",
-			target:  "srt://127.0.0.1:6000?mode=caller&latency=2000&streamid=publish:k&conntimeo=10000",
-			masked:  "srt://127.0.0.1:6000?mode=caller&latency=2000&streamid=***&conntimeo=10000",
+			target:  "srt://127.0.0.1:6000?mode=caller&latency=2000&payloadsize=1128&streamid=publish:k&conntimeo=10000",
+			masked:  "srt://127.0.0.1:6000?mode=caller&latency=2000&payloadsize=1128&streamid=***&conntimeo=10000",
 			srtlaHP: "relay.example.com:5000"},
 		{name: "srtla local port", env: map[string]string{"SRT_URL": "srtla://1.2.3.4:5000", "SRTLA_LOCAL_PORT": "6100"},
 			exec: true, trans: "srtla",
-			target:  "srt://127.0.0.1:6100?mode=caller&latency=200&conntimeo=10000",
-			masked:  "srt://127.0.0.1:6100?mode=caller&latency=200&conntimeo=10000",
+			target:  "srt://127.0.0.1:6100?mode=caller&latency=2000&payloadsize=1128&conntimeo=10000",
+			masked:  "srt://127.0.0.1:6100?mode=caller&latency=2000&payloadsize=1128&conntimeo=10000",
 			srtlaHP: "1.2.3.4:5000"},
 		{name: "srtla requires caller", env: map[string]string{"SRT_URL": "srtla://h:5000", "SRT_MODE": "listener"}, exec: true, errKey: "SRT_MODE"},
 		{name: "srtla requires srtla_send", env: map[string]string{"SRT_URL": "srtla://h:5000"}, errKey: "SRTLA_BIN"},
@@ -234,7 +234,7 @@ func TestAppRoundTrip(t *testing.T) {
 	c := mustLoad(t, fake{env: map[string]string{"EIRL_CONF": confPath, "SOURCE": "test"}, conf: &content})
 	if c.SRTURL != "srt://relay.example.com:9000" || c.SRTStreamID.Reveal() != "publish:live:k" ||
 		c.SRTPassphrase.Reveal() != "0123456789ab" || !c.ABR || c.VBitrateMin != 1500 || c.OutputAtBoot ||
-		c.Source != "hdmi" || c.VBitrate != 6000 || c.ABitrate != 128 || c.SRTLatencyMs != 200 || c.SRTMode != "caller" ||
+		c.Source != "hdmi" || c.VBitrate != 6000 || c.ABitrate != 128 || c.SRTLatencyMs != 2000 || c.SRTMode != "caller" ||
 		c.EDIDPreferred != "1080p30" || c.VideoDevice != "auto" || c.AudioSource != "auto" {
 		t.Fatalf("%+v", *c)
 	}
@@ -482,7 +482,7 @@ func TestSecretsNeverLeak(t *testing.T) {
 	leaks("json", string(j))
 	leaks("elog", elog.Format("engine", "srt_target", "target", c.SRTTarget(), "sid", c.SRTStreamID, "cfg", c))
 	leaks("MaskedTarget", c.MaskedTarget())
-	if c.MaskedTarget() != "srt://h:9000?mode=caller&latency=200&passphrase=***&pbkeylen=16&streamid=***" {
+	if c.MaskedTarget() != "srt://h:9000?mode=caller&latency=2000&payloadsize=1128&passphrase=***&pbkeylen=16&streamid=***" {
 		t.Errorf("masked %s", c.MaskedTarget())
 	}
 
@@ -515,5 +515,74 @@ func TestSecretsNeverLeak(t *testing.T) {
 	if c.SRTStreamID.Reveal() != sid || c.SRTPassphrase.Reveal() != pass ||
 		!strings.Contains(c.SRTTarget().Reveal(), sid) {
 		t.Fatal("Reveal lost the value")
+	}
+}
+
+// SRTLA.md §9.2: either sender makes srtla valid (the output falls back to the one that is installed);
+// with neither, SRTLA_BIN is reported, as before.
+func TestSRTLAEitherSender(t *testing.T) {
+	env := map[string]string{"SRT_URL": "srtla://h:5000"}
+	for _, bins := range [][]string{{srtlaBin}, {"/usr/local/bin/srtla_send_rs"}} {
+		f := fake{env: env, exec: map[string]bool{}}
+		for _, b := range bins {
+			f.exec[b] = true
+		}
+		if _, err := load(t, f); err != nil {
+			t.Errorf("only %v installed: %v", bins, err)
+		}
+	}
+	_, err := load(t, fake{env: env, exec: map[string]bool{}})
+	wantInvalid(t, err, "SRTLA_BIN")
+}
+
+// SRTLA.md §9.5 and §9.7: the payload and the mux alignment, and the relay's host for each kind of target.
+func TestPayloadAndRelayHost(t *testing.T) {
+	exec := map[string]bool{srtlaBin: true}
+	cases := []struct {
+		env      map[string]string
+		host     string
+		tsPer    int
+		targetAt string // SRTTargetAt("192.0.2.7"), without the query
+	}{
+		{map[string]string{"SRT_URL": "srt://relay.example.com:5000"}, "relay.example.com", 6, "srt://192.0.2.7:5000"},
+		{map[string]string{"SRT_URL": "srt://relay.example.com:5000", "SRT_PAYLOAD": "1316"}, "relay.example.com", 7, "srt://192.0.2.7:5000"},
+		{map[string]string{"SRT_URL": "srt://h:9000", "SRT_MODE": "listener"}, "", 6, "srt://h:9000"},
+		{map[string]string{"SRT_URL": "srt://:9000"}, "", 6, "srt://:9000"},
+		{map[string]string{"SRT_URL": "srt://[fe80::1]:9000"}, "", 6, "srt://[fe80::1]:9000"},
+		{map[string]string{"SRT_URL": "srtla://relay.example.com:5001"}, "relay.example.com", 6, "srt://127.0.0.1:6000"},
+		{map[string]string{"OUTPUT_PROTOCOL": "udp", "OUTPUT_URL": "udp://h:5000"}, "", 7, ""},
+	}
+	for _, tc := range cases {
+		c, err := load(t, fake{env: tc.env, exec: exec})
+		if err != nil {
+			t.Fatal(tc.env, err)
+		}
+		if got := c.RelayHost(); got != tc.host {
+			t.Errorf("%v: host %q, want %q", tc.env, got, tc.host)
+		}
+		if got := c.TSPerPacket(); got != tc.tsPer {
+			t.Errorf("%v: TS per packet %d, want %d", tc.env, got, tc.tsPer)
+		}
+		got, _, _ := strings.Cut(c.SRTTargetAt("192.0.2.7").Reveal(), "?")
+		if got != tc.targetAt {
+			t.Errorf("%v: target %q, want %q", tc.env, got, tc.targetAt)
+		}
+	}
+}
+
+// 🔴 srt-live-transmit's file://con sends a whole -chunk even after a short read (the tail of the previous packet
+// goes out as TS): every write of the mux must be exactly one chunk. So for srt and srtla the mux's alignment and
+// the chunk come from the same SRT_PAYLOAD, always a whole number of TS packets.
+func TestChunkIsWholeMuxWrites(t *testing.T) {
+	for _, payload := range []string{"1128", "1316"} {
+		for _, url := range []string{"srt://relay.example.com:5000", "srtla://relay.example.com:5001"} {
+			c, err := load(t, fake{env: map[string]string{"SRT_URL": url, "SRT_PAYLOAD": payload}, exec: map[string]bool{srtlaBin: true}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.TSPerPacket()*tsPacket != c.SRTPayloadBytes() || !strings.Contains(c.SRTQuery().Reveal(), "payloadsize="+payload) {
+				t.Errorf("%s %s: %d TS per write, chunk %d, query %s", url, payload, c.TSPerPacket(), c.SRTPayloadBytes(), c.SRTQuery().Reveal())
+			}
+		}
 	}
 }

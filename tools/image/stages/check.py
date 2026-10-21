@@ -307,7 +307,8 @@ def main():
     def dest(n):
         top, _, rest = n.partition("/")
         if not rest:
-            if n in ("eirl-encoderd", "srtla_send", "mediamtx", "srt-live-transmit", "eirl-send", "ristsender"):  # OUTPUTS.md §4
+            if n in ("eirl-encoderd", "srtla_send", "srtla_send_rs", "mediamtx", "srt-live-transmit", "eirl-send",
+                     "ristsender"):  # OUTPUTS.md §4, SRTLA.md §9
                 return "usr/local/bin/" + n
             if n in ("eirl-netsetup", "eirl-update", "eirl-fan"):
                 return "usr/local/sbin/" + n
@@ -412,7 +413,7 @@ def main():
         ok(f + " without the Ubuntu name", len(names) == 2 and not any("Ubuntu" in x for x in names), names[0] if names else "")
 
     # --- libraries resolve (ldd in the chroot)
-    bins = ["usr/lib/eirl-encoder/engine/eirl-engine-go", "usr/local/bin/srtla_send"]
+    bins = ["usr/lib/eirl-encoder/engine/eirl-engine-go", "usr/local/bin/srtla_send", "usr/local/bin/srtla_send_rs"]
     bins += [b for b in ("usr/local/bin/srt-live-transmit",) if os.path.exists(os.path.join(R, b))]
     for d in ("usr/lib/eirl-encoder/bin", "usr/lib/eirl-encoder/lib"):
         if os.path.isdir(os.path.join(R, d)):

@@ -11,6 +11,7 @@ import (
 //
 //	settings-dest · settings-dest-reveal · settings-dest-edited · settings-dest-managed · settings-dest-pending ·
 //	settings-dest-error · settings-uplinks · settings-uplinks-single · settings-uplinks-none · settings-uplinks-health ·
+//	settings-uplinks-stats (the Rust SRTLA sender's figures per link, SRTLA.md §9.4) ·
 //	settings-uplinks-modems · settings-uplinks-modem-page · settings-uplinks-modem-pin · settings-uplinks-modem-unlock · settings-pause ·
 //	settings-cloud · settings-cloud-pairing · settings-cloud-linked · settings-cloud-unlink · settings-account ·
 //	settings-account-kb ·
@@ -59,6 +60,17 @@ func streamState(variant, lang string, now time.Time, snap *ui.AppSnapshot) {
 			{Name: "wwan0", IP: "10.64.12.7", Kind: "modem", Label: "Movistar", InUse: true, TxKbps: 2400, Health: "good", HealthCode: "ok"},
 			{Name: "wwan1", IP: "10.70.3.9", Kind: "modem", Label: "Vodafone", InUse: true, TxKbps: 700, Health: "weak", HealthCode: "signal_weak"},
 			{Name: "enx0c5b8f279a64", IP: "192.168.9.100", Kind: "modem", Label: "Orange", InUse: true, Health: "bad", HealthCode: "signal_minimal"},
+		}
+	case variant == "settings-uplinks-stats": // streaming with the Rust SRTLA sender: its view of each link
+		snap.Status.Uplinks = []ui.UplinkInfo{
+			{Name: "eth0", IP: "192.168.1.20", Kind: "ethernet", InUse: true, TxKbps: 2200, Health: "good", HealthCode: "ok",
+				HasStats: true, RTTMs: 38, SendKbps: 2150, NakPerSec: 0.1, Bond: "active"},
+			{Name: "wwan0", IP: "10.64.12.7", Kind: "modem", Label: "Movistar", InUse: true, TxKbps: 2500, Health: "good",
+				HealthCode: "ok", HasStats: true, RTTMs: 74, SendKbps: 2410, NakPerSec: 1.4, Bond: "active"},
+			{Name: "eth1", IP: "172.20.10.2", Kind: "usb", InUse: true, TxKbps: 300, Health: "good", HealthCode: "ok",
+				HasStats: true, RTTMs: 812, SendKbps: 40, NakPerSec: 12.3, Bond: "stalled"},
+			{Name: "wlan0", IP: "10.12.0.33", Kind: "wifi", InUse: true, TxKbps: 900, Health: "weak", HealthCode: "signal_weak",
+				HasStats: true, RTTMs: 160, SendKbps: 880, NakPerSec: 3.2, Bond: "weak"},
 		}
 	case variant == "settings-uplinks-none":
 		snap.Status.Uplinks = nil

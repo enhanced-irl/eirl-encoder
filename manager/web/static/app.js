@@ -1314,7 +1314,11 @@ function renderUplinks(st, running) {
     // A modem: its operator (or alias) as the title, its interface on the second line (MODEMS.md §4.2)
     const [dot, title] = info.firstChild.children;
     title.textContent = u.label || u.name;
-    info.lastChild.textContent = u.label ? `${kindLabel(u.kind)} · ${u.name}` : `${kindLabel(u.kind)} · ${u.ip}`;
+    // While streaming with the Rust SRTLA sender, its view of the link (SRTLA.md §9.4): RTT and NAKs per second
+    const stats = typeof u.rttMs === 'number' && typeof u.nakPerSec === 'number'
+      ? ' · ' + t('uplinks.stats', { rtt: u.rttMs, nak: num(u.nakPerSec, 1) }) : '';
+    info.lastChild.textContent = (u.label ? `${kindLabel(u.kind)} · ${u.name}` : `${kindLabel(u.kind)} · ${u.ip}`) + stats;
+    const bond = ['stalled', 'weak', 'down'].includes(u.bond) ? u.bond : '';
     const health = HEALTH.includes(u.health) ? u.health : '';
     dot.hidden = !health;
     dot.className = `hdot ${health}`;
@@ -1322,10 +1326,12 @@ function renderUplinks(st, running) {
     // With the app's judgement, the reason of an amber or red dot; else (an older app) as before. No internet (the
     // client Wi-Fi behind a captive portal): out of the share until it comes back (WIFI.md §13)
     const why = (health === 'weak' || health === 'bad') && u.healthCode && u.healthCode !== 'ok' ? t('health.' + u.healthCode) : '';
+    // What the sender put on the link when it says (more exact than the interface's counter, which counts all traffic)
+    const kbps = typeof u.sendKbps === 'number' ? u.sendKbps : u.txKbps;
     rate.textContent = why || (u.conflict ? t('uplinks.dupIp') : u.disabled ? t('uplinks.disabled') : u.noInternet ? t('uplinks.noInternet')
-      : live && !u.inUse ? t('common.connecting') : t('uplinks.rate', { v: num(u.txKbps / 1000, 1) }));
-    rate.classList.toggle('warn', why ? health === 'weak' : !!u.conflict || (!u.disabled && !!u.noInternet));
-    rate.classList.toggle('bad', !!why && health === 'bad');
+      : live && !u.inUse ? t('common.connecting') : bond ? t('uplinks.bond.' + bond) : t('uplinks.rate', { v: num(kbps / 1000, 1) }));
+    rate.classList.toggle('warn', why ? health === 'weak' : !!u.conflict || (!u.disabled && !!u.noInternet) || bond === 'stalled' || bond === 'weak');
+    rate.classList.toggle('bad', why ? health === 'bad' : bond === 'down'); // as the screen: a link the sender lost is red
   });
   renderModemsOff(st);
   renderModemPanel(st);

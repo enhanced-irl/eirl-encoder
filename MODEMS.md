@@ -16,7 +16,10 @@ connected modem is one more interface that the NetworkManager dispatcher turns i
 - A modem only worked if it showed up as an Ethernet card (HiLink, an Android phone sharing its data, a
   router by cable). The app knew links as `ethernet | usb | wifi` with an on/off switch, and nothing about
   their signal, operator, SIM or technology.
-- `srtla_send` gives no per-link statistics: per link there is only the traffic (sysfs).
+- `srtla_send` gives no per-link statistics: per link there is only the traffic (sysfs). *(Since Oct 19 the
+  default SRTLA sender is irlserver's, in Rust, and it does: RTT, what it sent, NAKs per second and whether it holds
+  the link back, in `/status` `uplinks[]`, the web and the screen; SRTLA.md §9.3-§9.4. They are data for the dot's
+  `link_weak` in M5: the dot itself does not use them yet.)*
 - The screen only knew how many links there were (`output.LinkInfo()`), plus the client Wi-Fi's antenna.
 
 ## 2. The board (read-only inventory, Oct 14)
@@ -170,7 +173,7 @@ what a real stream holds.
 | HTTPS to the relay fails | bad | `no_internet` |
 | Radio below/within the thresholds above | bad / weak | `signal_minimal`, `signal_weak`, `slow_tech` |
 | Streaming, switched on, and SRTLA does not use it yet | weak | `connecting` |
-| SRTLA says it is struggling (patched `srtla_send`, M5) | weak | `link_weak` |
+| SRTLA says it is struggling (the sender's figures per link, M5) | weak | `link_weak` |
 
 **No internet** (`links.Internet`): every 30 s, HTTPS to the stream's relay from each modem's or phone's own
 IP, with the Wi-Fi client's hysteresis (two results in a row and 60 s since the last change; WIFI.md §13). A

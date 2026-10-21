@@ -101,9 +101,9 @@ func classify(line string) (connState, string) {
 	return connNone, ""
 }
 
-// classifySRTLA is why srtla_send gives up (BELABOX 37862da, what it prints before exiting), or "".
-// «warning: no available connections» does not count: it says so without exiting while no uplink
-// answers, and it cannot tell a relay that is down from uplinks without internet.
+// classifySRTLA is why srtla_send gives up (what it prints before exiting: BELABOX 37862da, and irlserver's
+// Rust sender, SRTLA.md §9.1), or "". «warning: no available connections» does not count: it says so without
+// exiting while no uplink answers, and it cannot tell a relay that is down from uplinks without internet.
 func classifySRTLA(line string) string {
 	switch {
 	case strings.Contains(line, "Failed to establish any initial connections"),
@@ -112,10 +112,25 @@ func classifySRTLA(line string) string {
 		return ReasonRelayUnreachable
 	case strings.Contains(line, "source ip list"),
 		strings.Contains(line, "Failed to parse any IP addresses"),
-		strings.Contains(line, "Failed to open and bind to any of the IP addresses"):
+		strings.Contains(line, "Failed to open and bind to any of the IP addresses"),
+		strings.Contains(line, "no uplinks available"),
+		strings.Contains(line, "no IPs in list"):
 		return ReasonNoUplinks
+	case strings.Contains(line, "bind local SRT UDP listener"):
+		return ReasonInternal
 	}
 	return ""
+}
+
+var (
+	reANSI     = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+	reRustTime = regexp.MustCompile(`^\d{4}-\d\d-\d\dT[0-9:.]+Z\s+`)
+)
+
+// plainSRTLA is a line of a sender without colours and without the Rust sender's timestamp (the journal has
+// its own): «WARN …», «ERROR …» stay.
+func plainSRTLA(line string) string {
+	return reRustTime.ReplaceAllString(reANSI.ReplaceAllString(line, ""), "")
 }
 
 // normalize is the same libsrt line without the time, the socket or the thread: so that it is not
@@ -135,10 +150,10 @@ func cut(s string, n int) string {
 
 // --- statistics ---
 
-// statsInterval is srt-live-transmit's -s, which counts packets (1316 bytes): ~perSecond samples per
+// statsInterval is srt-live-transmit's -s, which counts packets (of payload bytes): ~perSecond samples per
 // second at kbps + abitrate.
-func statsInterval(kbps, abitrate, perSecond int) int {
-	return (kbps+abitrate)*1000/8/1316/perSecond + 1
+func statsInterval(kbps, abitrate, perSecond, payload int) int {
+	return (kbps+abitrate)*1000/8/payload/perSecond + 1
 }
 
 type rateSample struct {

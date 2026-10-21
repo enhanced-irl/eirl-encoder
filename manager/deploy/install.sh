@@ -80,6 +80,7 @@ list_files() {
   for l in "$SRC"/libsrt.so.*; do [ -f "$l" ] && echo "$LIB/lib/$(basename "$l")"; done
   [ -f "$SRC/srt-live-transmit" ] && echo /usr/local/bin/srt-live-transmit
   [ -f "$SRC/srtla_send" ] && echo /usr/local/bin/srtla_send
+  [ -f "$SRC/srtla_send_rs" ] && echo /usr/local/bin/srtla_send_rs
   [ -f "$SRC/eirl-send" ] && echo /usr/local/bin/eirl-send
   [ -f "$SRC/ristsender" ] && echo /usr/local/bin/ristsender
   echo /etc/NetworkManager/dispatcher.d/90-eirl-uplinks
@@ -230,10 +231,12 @@ put 0755 "$SRC/eirl-encoderd" /usr/local/bin/eirl-encoderd
 for l in "$SRC"/libsrt.so.*; do [ -f "$l" ] && put 0644 "$l" "$LIB/lib/$(basename "$l")"; done
 [ -f "$SRC/srt-live-transmit" ] && put 0755 "$SRC/srt-live-transmit" /usr/local/bin/srt-live-transmit
 
-# 3b. SRTLA: srtla_send and the NetworkManager dispatcher that sets the source routing of each link and
-#     leaves the list in /run/eirl-uplinks/available (SRTLA.md). It is run once now (step 5) for the
-#     links already up; afterwards NetworkManager runs it on every change.
+# 3b. SRTLA: the senders (srtla_send_rs, irlserver's, the default; srtla_send, BELABOX's, the way back: SRTLA.md
+#     §9.2) and the NetworkManager dispatcher that sets the source routing of each link and leaves the list in
+#     /run/eirl-uplinks/available (SRTLA.md). It is run once now (step 5) for the links already up; afterwards
+#     NetworkManager runs it on every change.
 [ -f "$SRC/srtla_send" ] && put 0755 "$SRC/srtla_send" /usr/local/bin/srtla_send
+[ -f "$SRC/srtla_send_rs" ] && put 0755 "$SRC/srtla_send_rs" /usr/local/bin/srtla_send_rs
 put 0755 "$D/90-eirl-uplinks" /etc/NetworkManager/dispatcher.d/90-eirl-uplinks
 
 # 3b'. The other output protocols (OUTPUTS.md §4): eirl-send (RTMP, RTMPS) and ristsender (RIST), which the
@@ -482,8 +485,8 @@ else
   echo "WARNING: the package has no splash/: the boot splash is not installed or updated" >&2
 fi
 
-# 7c. Licences of what is installed (the package's doc/: ours, the Go modules, MediaMTX, srtla_send and
-#     where its source is)
+# 7c. Licences of what is installed (the package's doc/: ours, the Go modules, MediaMTX, the SRTLA senders, SRT and
+#     the rest, with where their source is)
 if [ -d "$SRC/doc" ]; then
   (cd "$SRC/doc" && find . -type f) | while read -r f; do put 0644 "$SRC/doc/$f" "$DOC/${f#./}"; done
 fi

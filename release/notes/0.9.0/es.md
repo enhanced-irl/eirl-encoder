@@ -1,0 +1,5 @@
+- Emisión más robusta por SRTLA: el codificador reparte la emisión entre las conexiones con un emisor nuevo, que manda menos reenvíos, aparta solo una conexión que se atasca y sigue mejor una conexión que se cae y vuelve. Para quien emite, la latencia es la misma.
+- En Ajustes › Emisión › Conexiones, en la pantalla y en la web, cada conexión en uso enseña ahora su retardo (RTT) y sus pérdidas (NAK por segundo), y avisa si el codificador la está apartando.
+- La latencia SRT por defecto de un destino nuevo pasa a 2 segundos, también con SRT (antes 0,2 s), porque en redes móviles una latencia corta corta la emisión. Si ya la elegiste tú, no cambia.
+- Paquetes más pequeños (1.128 bytes): algunas redes móviles y móviles compartiendo datos rompen los paquetes grandes.
+- Si falla el nombre del relay (DNS), el codificador usa la última dirección buena y sigue emitiendo, en vez de esperar a que vuelva.

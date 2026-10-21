@@ -1,4 +1,4 @@
-> **Status:** IN PROGRESS (I1-I4 done: the first image, of 0.7.0, published on Oct 16; next: the screen message and a board with older firmware for the one-time update, a GitHub workflow)
+> **Status:** IN PROGRESS (I1-I4 done: the first image, of 0.7.0, published on Oct 16; the image of 0.8.0, with an iPhone over USB, on Oct 19; next: the screen message and a board with older firmware for the one-time update, a GitHub workflow)
 > **Updated:** 2026-10-19
 
 # A minimal microSD image for the Jetson Nano
@@ -19,6 +19,7 @@ recipe (B0-B3), applied from scratch to NVIDIA's own base instead of by hand on 
 | I2 First boot and uniqueness | ✅ Oct 14-16 | Two boots from scratch on the test board, with different identities, and later boots (§10.4, §10.6) |
 | I3 Test on a real card | ✅ Oct 14-15 | Wizard, sources, a stream, a real OTA (0.1.1 → 0.3.0) and reboots (§10.4). The maintainer chose to back up the board's own card and use it; the board **keeps the image** |
 | I4 Publish | ✅ Oct 16 | The image of 0.7.0, with its notices, its sources and the written offer (§9.3); flashing and verification in the README; booted from scratch on the test board (§10.6); signed and published as assets of release v0.7.0 with the maintainer's OK (§10.5): recipe `0f07c8317eb5`, `.img.xz` 299,307,788 bytes (sha256 `20f07ac5…b193`), raw 2,506,096,640 bytes. Downloaded from GitHub again and checked as a user would (signature, image and raw image) |
+| Image of 0.8.0 | ✅ Oct 19 | The first image since I4: `usbmuxd` (4 packages) and `ipheth` for an iPhone over USB (MODEMS.md §12). Product image of recipe `b3418e73352d`, 0 of the checks failed; signed and published as assets of release v0.8.0: `.img.xz` 299,188,780 bytes (sha256 `d249df0a…44d9`), raw 2,507,145,216 bytes (sha256 `cde4025e…ddd3`). Downloaded from GitHub again and checked as a user would. **Not booted before publishing**, the maintainer's choice: the differences with the image of 0.7.0, which was, were tried on the test board by hand (MODEMS.md §12.1) |
 
 ## 1. Scope
 
@@ -506,7 +507,8 @@ affect your rights under any open source licence…". Our image is a modified Ub
   the source of every installed package, and the offer, the commit and the release.
 - **Availability**: the maintainers keep copies of everything the directions point to (the pinned downloads and every
   Ubuntu source package of each published image, initrd included), outside the repository. For 0.7.0: 328 source
-  packages, checked against their `.dsc` (Oct 17). 🪤 Launchpad's file server (`launchpadlibrarian.net`) did not take
+  packages, checked against their `.dsc` (Oct 17). For 0.8.0, the 4 new ones (`usbmuxd`, `libimobiledevice`, `libplist`,
+  `libusbmuxd`), from `archive.ubuntu.com`, checked the same way (Oct 19). 🪤 Launchpad's file server (`launchpadlibrarian.net`) did not take
   connections from the maintainers' home address on Oct 16-17, while its API did: the superseded versions were fetched
   from another network.
 

@@ -10,10 +10,13 @@ import (
 // uplinks (seconds over a mobile network), sh:486-489.
 const srtlaConnTimeoutMs = 10000
 
-// SRTQuery is the query of the SRT target (sh:481-483):
-// mode=<SRT_MODE>&latency=<SRT_LATENCY>[&passphrase=<…>&pbkeylen=16][&streamid=<…>].
+// tsPacket is the size of an MPEG-TS packet: an SRT packet carries a whole number of them.
+const tsPacket = 188
+
+// SRTQuery is the query of the SRT target (sh:481-483, SRTLA.md §9.5):
+// mode=<SRT_MODE>&latency=<SRT_LATENCY>&payloadsize=<SRT_PAYLOAD>[&passphrase=<…>&pbkeylen=16][&streamid=<…>].
 func (c *Config) SRTQuery() Secret {
-	q := "mode=" + c.SRTMode + "&latency=" + strconv.Itoa(c.SRTLatencyMs)
+	q := "mode=" + c.SRTMode + "&latency=" + strconv.Itoa(c.SRTLatencyMs) + "&payloadsize=" + strconv.Itoa(c.srtPayload())
 	if !c.SRTPassphrase.IsZero() {
 		q += "&passphrase=" + c.SRTPassphrase.Reveal() + "&pbkeylen=16"
 	}
@@ -28,7 +31,11 @@ func (c *Config) SRTQuery() Secret {
 //   - srtla: srt://127.0.0.1:<SRTLA_LOCAL_PORT>?<query>&conntimeo=10000 (the local srtla_send)
 //
 // It carries the stream id and the passphrase: pass it to the output by environment, never argv.
-func (c *Config) SRTTarget() Secret {
+func (c *Config) SRTTarget() Secret { return c.SRTTargetAt("") }
+
+// SRTTargetAt is SRTTarget with the relay's host replaced by addr, an IPv4 address the output resolved
+// (SRTLA.md §9.7): only for srt, whose target names the relay; "" keeps the URL as it is.
+func (c *Config) SRTTargetAt(addr string) Secret {
 	if c.SRTURL == "" {
 		return Secret{}
 	}
@@ -37,7 +44,54 @@ func (c *Config) SRTTarget() Secret {
 		return NewSecret("srt://127.0.0.1:" + strconv.Itoa(c.SRTLALocalPort) + "?" + q +
 			"&conntimeo=" + strconv.Itoa(srtlaConnTimeoutMs))
 	}
-	return NewSecret(c.SRTURL + "?" + q)
+	u := c.SRTURL
+	if host := c.RelayHost(); addr != "" && host != "" {
+		u = "srt://" + addr + strings.TrimPrefix(u, "srt://"+host)
+	}
+	return NewSecret(u + "?" + q)
+}
+
+// RelayHost is the name (or address) of the relay srt and srtla send to: the host of srtla://host:port,
+// and of srt://host:port in caller mode. "" when there is none to resolve: other protocols, a listener,
+// srt://:port, or an IPv6 address in brackets (sent as it is).
+func (c *Config) RelayHost() string {
+	switch {
+	case c.SRTURL == "":
+		return ""
+	case c.Transport == "srtla":
+		return c.SRTLAHost()
+	case c.Transport != "srt" || c.SRTMode != "caller":
+		return ""
+	}
+	hp := strings.TrimPrefix(c.SRTURL, "srt://")
+	i := strings.LastIndex(hp, ":")
+	if i <= 0 || strings.HasPrefix(hp, "[") {
+		return ""
+	}
+	return hp[:i]
+}
+
+// DefaultSRTPayload is SRT_PAYLOAD when it is not set: 6 TS packets (SRTLA.md §9.5).
+const DefaultSRTPayload = 6 * tsPacket
+
+// srtPayload is SRT_PAYLOAD, DefaultSRTPayload when unset (a Config built by hand, in tests).
+func (c *Config) srtPayload() int {
+	if c.SRTPayload <= 0 {
+		return DefaultSRTPayload
+	}
+	return c.SRTPayload
+}
+
+// SRTPayloadBytes is the payload of each SRT packet: srt-live-transmit's -chunk.
+func (c *Config) SRTPayloadBytes() int { return c.srtPayload() }
+
+// TSPerPacket is how many TS packets each write of the output's mux carries (its alignment): an SRT
+// packet's worth for srt and srtla (SRTLA.md §9.5), 7 for the other protocols.
+func (c *Config) TSPerPacket() int {
+	if c.Transport == ProtoSRT || c.Transport == ProtoSRTLA {
+		return c.srtPayload() / tsPacket
+	}
+	return 7
 }
 
 var reMaskTarget = regexp.MustCompile(`(passphrase|streamid)=[^&]*`)

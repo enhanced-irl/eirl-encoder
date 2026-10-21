@@ -15,3 +15,8 @@ SOURCE=hdmi
 #GOGC=50
 # How the board's HDMI is captured: nvcam (default) or v4l2 (MIXER.md §17)
 #MIXER_HDMI_CAPTURE=nvcam
+# The SRTLA sender (SRTLA.md §9.2): irlserver (Rust, the default) or belabox (C, the way back); the Rust one's
+# scheduler, classic or enhanced; and the SRT payload of srt and srtla, 1128 (6 TS packets, the default) or 1316
+#SRTLA_SENDER=irlserver
+#SRTLA_MODE=classic
+#SRT_PAYLOAD=1128

@@ -215,6 +215,12 @@ func TestOutputVariants(t *testing.T) {
 			t.Errorf("h265 output has %q:\n%s", bad, got)
 		}
 	}
+	// srt and srtla at 1,128 bytes (SRTLA.md §9.5): six TS packets per write of the mux to the FIFO
+	srt := base
+	srt.TSPackets = 6
+	if got := Tegra.Output(srt); !strings.Contains(got, "mpegtsmux name=mux alignment=6 ! filesink location="+FIFOPlaceholder) {
+		t.Errorf("1128-byte srt output:\n%s", got)
+	}
 	rtp := base
 	rtp.OutWidth, rtp.OutHeight = 1920, 1080 // the program's size: no scaling caps
 	rtp.Sink = Sink{Kind: "rtp", Host: "239.1.1.1", Port: 5004}

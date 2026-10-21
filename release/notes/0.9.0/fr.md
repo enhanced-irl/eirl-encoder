@@ -1,0 +1,5 @@
+- Diffusion plus robuste en SRTLA : l'encodeur répartit la diffusion entre ses connexions avec un nouvel émetteur, qui envoie moins de retransmissions, n'écarte qu'une connexion bloquée et gère mieux une connexion qui tombe puis revient. Pour qui diffuse, la latence reste la même.
+- Dans Réglages › Diffusion › Connexions, sur l'écran et sur la page web, chaque connexion utilisée affiche maintenant son délai (RTT) et ses pertes (NAK par seconde), et indique quand l'encodeur l'écarte.
+- La latence SRT par défaut d'une nouvelle destination passe à 2 secondes, en SRT aussi (avant 0,2 s) : sur les réseaux mobiles, une latence courte coupe la diffusion. Si vous l'avez choisie vous-même, elle ne change pas.
+- Des paquets plus petits (1 128 octets) : certains réseaux mobiles et téléphones en partage de connexion cassent les gros paquets.
+- Si le nom du relais ne se résout pas (DNS), l'encodeur utilise sa dernière bonne adresse et continue de diffuser, au lieu d'attendre qu'il revienne.

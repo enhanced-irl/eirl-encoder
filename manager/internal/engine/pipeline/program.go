@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 )
@@ -126,6 +127,9 @@ type Output struct {
 	AEnc                string // voaacenc | avenc_aac
 	Record              string // optional local copy (diagnostics)
 	Sink                Sink
+	// TSPackets is how many TS packets each write of the mux carries (its alignment, 0 = 7): one SRT packet's
+	// worth for srt and srtla, read whole by srt-live-transmit from the FIFO (SRTLA.md §9.5)
+	TSPackets int
 }
 
 // Sink is where the muxed TS goes. Host is validated by the config (a DNS name or an IP address, without
@@ -180,8 +184,8 @@ func (p Platform) Output(c Output) string {
 		`appsrc name=oa is-live=true format=time do-timestamp=false max-bytes=0 block=false `+
 		`caps="audio/x-raw,format=S16LE,rate=48000,channels=2,layout=interleaved" `+
 		`! queue max-size-buffers=100 leaky=downstream ! audioconvert ! %s bitrate=%d ! aacparse ! queue ! mux. `+
-		`mpegtsmux name=mux alignment=7`,
-		p.Mem, c.Width, c.Height, fps, p.Convert, p.Mem, size, enc, c.AEnc, c.AKbps*1000)
+		`mpegtsmux name=mux alignment=%d`,
+		p.Mem, c.Width, c.Height, fps, p.Convert, p.Mem, size, enc, c.AEnc, c.AKbps*1000, cmp.Or(c.TSPackets, 7))
 	var sink string
 	switch c.Sink.Kind {
 	case "udp":

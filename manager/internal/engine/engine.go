@@ -673,7 +673,8 @@ func (e *Engine) outputDesc(c *config.Config, sink pipeline.Sink) string {
 	}
 	return e.plat.Output(pipeline.Output{Width: e.width, Height: e.height, FPS: e.fps, OutWidth: ow, OutHeight: oh,
 		Half: c.OutputHalf, Codec: c.VCodec, VKbps: c.VBitrate, AKbps: c.ABitrate, GOP: gop, Profile: c.Profile,
-		Preset: c.H264Preset, TwoPass: c.H264TwoPass, QPRange: c.H264QPRange, AEnc: c.AENC, Record: c.Record, Sink: sink})
+		Preset: c.H264Preset, TwoPass: c.H264TwoPass, QPRange: c.H264QPRange, AEnc: c.AENC, Record: c.Record, Sink: sink,
+		TSPackets: c.TSPerPacket()})
 }
 
 // SetReadyState is the state file's ready write (main's), for output_config to rewrite it with the new

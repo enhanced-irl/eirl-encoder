@@ -1,5 +1,5 @@
 > **Status:** IN PROGRESS — v1 complete and deployed (phases 0-4, Oct 8); phase 5 (WebRTC preview with audio) deployed on Oct 8; in `main` (MR !1); pending: testing it on a real phone and the items in §12
-> **Updated:** 2026-10-15 (saved destinations and output protocols, §3 and §10: [`OUTPUTS.md`](OUTPUTS.md), released in v0.5.0)
+> **Updated:** 2026-10-19 (the SRTLA sender's figures per link in `/status`, §3: [`SRTLA.md`](SRTLA.md) §9)
 >
 > SRTLA and adaptive bitrate (branch `feat/srtla`, not deployed): design in [`SRTLA.md`](SRTLA.md); here, what changes in the API.
 >
@@ -224,7 +224,10 @@ none, to save the output chosen on the touch screen (see `PUT /output`).
       "label": "Movistar",        // the modem's operator (or its alias); absent = name it by its kind
       "health": "good",           // good | weak | bad | off
       "healthCode": "ok",         // why: closed list in MODEMS.md §5, translated by the web and the screen
-      "modemId": "h-9b2c41d07e5a" } // the modem behind it (modems[])
+      "modemId": "h-9b2c41d07e5a", // the modem behind it (modems[])
+      // Only for a link in use while streaming with the Rust SRTLA sender (SRTLA.md §9.3-§9.4), all or none:
+      "rttMs": 74, "sendKbps": 2410, "nakPerSec": 1.4, // its RTT, what it sent over the link, NAKs per second
+      "bond": "active" }          // active | stalled (left out by the stall guard) | weak (held back) | down
   ],
   "modems": [ … ],                // cellular modems, also those without a usable link (no SIM, PIN…): GET /modems
   "bitrate": { "kbps": 3200, "minKbps": 1000, "maxKbps": 6000 },  // only with ABR running

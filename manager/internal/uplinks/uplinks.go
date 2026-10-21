@@ -6,6 +6,8 @@
 //   - /run/eirl-engine/uplinks: "<interface> <ipv4>" of the links the running stream uses (internal/engine/output).
 //   - /etc/eirl-encoder/uplinks-disabled: interfaces not to use. Written by the app; the engine
 //     re-reads it every 2 s and reloads srtla_send without cutting the stream.
+//   - /run/eirl-engine/srtla-links.json: the Rust SRTLA sender's statistics per link while it streams (SRTLA.md
+//     §9.3), written by the engine; read as data, optional.
 //
 // Each link's traffic comes from /sys/class/net/<if>/statistics (srtla_send is not touched).
 package uplinks
@@ -51,6 +53,12 @@ type Uplink struct {
 	HealthCode string `json:"healthCode,omitempty"`
 	// ModemID: the modem behind this link (Status.Modems), if any
 	ModemID string `json:"modemId,omitempty"`
+	// The SRTLA sender's view of a link in use (SRTLA.md §9.3-§9.4), only with the Rust sender while streaming:
+	// its RTT, what it sent over the link, the NAKs per second it took, and Bond (active | stalled | weak | down)
+	RTTMs     *int     `json:"rttMs,omitempty"`
+	SendKbps  *int     `json:"sendKbps,omitempty"`
+	NakPerSec *float64 `json:"nakPerSec,omitempty"`
+	Bond      string   `json:"bond,omitempty"`
 }
 
 // Addr: an available link's interface and IPv4.
@@ -80,7 +88,9 @@ type Reader struct {
 	Disabled  string // /etc/eirl-encoder/uplinks-disabled
 	// NoInternet: /run/eirl-encoder/uplinks-nointernet (written by the app; the engine leaves them out of the share)
 	NoInternet string
-	SysNet     string // /sys/class/net
+	// LinkStats: the engine's srtla-links.json ("" = next to InUse)
+	LinkStats string
+	SysNet    string // /sys/class/net
 
 	mu   sync.Mutex
 	prev map[string]sample
@@ -113,11 +123,13 @@ func (r *Reader) Read(now time.Time, inUse bool) []Uplink {
 		return nil
 	}
 	used := map[string]bool{}
+	var stats map[string]LinkStat
 	if inUse {
 		pairs, _ := readPairs(r.InUse)
 		for _, p := range pairs {
 			used[p.name] = true
 		}
+		stats = ReadLinkStats(r.linkStatsPath(), now)
 	}
 	off := map[string]bool{}
 	names, _ := ReadDisabled(r.Disabled)
@@ -142,6 +154,10 @@ func (r *Reader) Read(now time.Time, inUse bool) []Uplink {
 			sm := nextSample(r.prev[p.name], c)
 			next[p.name] = sm
 			u.TxKbps, u.RxKbps = sm.tx, sm.rx
+		}
+		if st, ok := stats[p.name]; ok && u.InUse && st.IP == p.ip {
+			rtt, kbps, nak := st.RTTMs, st.SendKbps, st.NakPerSec
+			u.RTTMs, u.SendKbps, u.NakPerSec, u.Bond = &rtt, &kbps, &nak, st.Bond
 		}
 		out = append(out, u)
 	}

@@ -2,8 +2,11 @@ package output
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -22,9 +25,10 @@ import (
 )
 
 const (
-	streamID   = "publish:SECRETO"
-	passphrase = "abcdefghijk"
-	testDesc   = "appsrc name=ov ! nvvidconv ! nvv4l2h264enc name=venc bitrate=1 ! h264parse ! mux. " +
+	testRelayIP = "203.0.113.20" // what every relay name resolves to in these tests
+	streamID    = "publish:SECRETO"
+	passphrase  = "abcdefghijk"
+	testDesc    = "appsrc name=ov ! nvvidconv ! nvv4l2h264enc name=venc bitrate=1 ! h264parse ! mux. " +
 		"appsrc name=oa ! voaacenc ! mux. mpegtsmux name=mux ! filesink location=" + "@FIFO@"
 )
 
@@ -155,15 +159,23 @@ func newRig(t *testing.T, edit func(c *config.Config)) *rig {
 	t.Setenv(fakeSLTMode, "connect")
 	t.Setenv(fakeSRTLA, "run")
 	t.Setenv("EIRL_ENGINE_SRT_TARGET", "srt://leak?streamid="+streamID) // a child must not inherit it
-	oldBin, oldStdbuf := sltBin, stdbufArgv
+	oldBin, oldStdbuf, oldLookup := sltBin, stdbufArgv, lookupIPv4
 	sltBin, stdbufArgv = os.Args[0], nil
-	t.Cleanup(func() { sltBin, stdbufArgv = oldBin, oldStdbuf })
+	// Every relay name resolves to one address (SRTLA.md §9.7): the tests never ask a real resolver
+	lookupIPv4 = func(_ context.Context, host string) ([]net.IP, error) {
+		if host == "unresolvable.example" {
+			return nil, errors.New("no such host")
+		}
+		return []net.IP{net.ParseIP(testRelayIP)}, nil
+	}
+	t.Cleanup(func() { sltBin, stdbufArgv, lookupIPv4 = oldBin, oldStdbuf, oldLookup })
 	r.cfg = &config.Config{
 		SRTURL: "srt://127.0.0.1:9", SRTMode: "caller", SRTLatencyMs: 2000,
 		SRTStreamID: config.NewSecret(streamID), SRTPassphrase: config.NewSecret(passphrase),
 		Transport: "srt", VBitrate: 6000, VBitrateMin: 1000, ABitrate: 128,
 		SRTStats: filepath.Join(dir, "srt-stats.json"), RunDir: dir,
-		SRTLABin: os.Args[0], SRTLALocalPort: 6000, UplinkWait: 1,
+		SRTLABin: os.Args[0], SRTLALocalPort: 6000, UplinkWait: 1, SRTLASender: "belabox", SRTLARSBin: os.Args[0],
+		SRTLAMode: "classic", StateDir: dir,
 		UplinksFile: filepath.Join(dir, "available"), UplinksDisabled: filepath.Join(dir, "disabled"),
 		UplinksNoInternet: filepath.Join(dir, "nointernet"),
 	}
@@ -308,7 +320,8 @@ func TestSessionConnectsAndStops(t *testing.T) {
 		}
 	}
 	args := read(t, filepath.Join(r.dir, "slt.args"))
-	if !strings.HasPrefix(args, "-chunk:1316\n-s:583\n-pf:json\n-statsout:/dev/fd/3\nfile://con\nsrt://127.0.0.1:9?") {
+	// 1,128-byte packets by default (SRTLA.md §9.5): the stats interval counts more of them per second
+	if !strings.HasPrefix(args, "-chunk:1128\n-s:680\n-pf:json\n-statsout:/dev/fd/3\nfile://con\nsrt://127.0.0.1:9?") {
 		t.Errorf("args %q", args)
 	}
 	waitFor(t, "srt-stats.json", func() bool {
@@ -506,10 +519,10 @@ func TestSRTLASession(t *testing.T) {
 		t.Errorf("uplinks %q", got)
 	}
 	args := read(t, filepath.Join(r.dir, "srtla.args"))
-	if args != "6000\nrelay.example\n5000\n"+filepath.Join(r.dir, "srtla-ips") {
+	if args != "6000\n"+testRelayIP+"\n5000\n"+filepath.Join(r.dir, "srtla-ips") {
 		t.Errorf("srtla args %q", args)
 	}
-	if a := read(t, filepath.Join(r.dir, "slt.args")); !strings.Contains(a, "srt://127.0.0.1:6000?mode=caller&latency=2000&passphrase=") {
+	if a := read(t, filepath.Join(r.dir, "slt.args")); !strings.Contains(a, "srt://127.0.0.1:6000?mode=caller&latency=2000&payloadsize=1128&passphrase=") {
 		t.Errorf("slt args %q", a)
 	}
 	write(t, r.cfg.UplinksDisabled, "wwan0\n")
@@ -567,7 +580,7 @@ func TestABRLowersTheEncoder(t *testing.T) {
 	t.Setenv(fakeStatsEnv, `{"link":{"rtt":45},"send":{"msBuf":50,"packetsDropped":3,"bytes":1316}}`)
 	r.out.Set(true)
 	r.waitState(StateOn, "")
-	if a := read(t, filepath.Join(r.dir, "slt.args")); !strings.Contains(a, "-s:27\n") {
+	if a := read(t, filepath.Join(r.dir, "slt.args")); !strings.Contains(a, "-s:32\n") {
 		t.Errorf("args %q", a)
 	}
 	waitFor(t, "minimum", func() bool { return r.output().El("venc").Prop("bitrate") == "1000000" })

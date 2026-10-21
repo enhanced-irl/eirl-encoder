@@ -18,7 +18,10 @@ type StreamStrings struct {
 	UplinksHint, UplinksLastConfirm                 string
 	UplinkDupIP, UplinkDisabled, UplinkNoInternet   string
 	UplinkRateF                                     string // %s Mbps
-	UplinkKind                                      map[string]string
+	UplinkStatsF                                    string // RTT %d ms, %s NAKs per second (SRTLA.md §9.4)
+	// UplinkBond: why the SRTLA sender holds a link back (bond: stalled | weak | down)
+	UplinkBond map[string]string
+	UplinkKind map[string]string
 	// UplinkHealth: why a connection has its dot (the app's healthCode, MODEMS.md §5)
 	UplinkHealth map[string]string
 	// Pause
@@ -44,6 +47,8 @@ var (
 		UplinkDisabled:     "Fuera del reparto",
 		UplinkNoInternet:   "Sin internet",
 		UplinkRateF:        "↑ %s Mbps",
+		UplinkStatsF:       "RTT %d ms · %s NAK/s",
+		UplinkBond:         map[string]string{"stalled": "atascado: fuera del reparto", "weak": "débil: lleva poco", "down": "no responde"},
 		UplinkKind:         map[string]string{"ethernet": "Ethernet", "usb": "USB (módem o móvil)", "wifi": "Wifi", "modem": "Módem"},
 		UplinkHealth: map[string]string{"ok": "bien", "off": "apagada", "ip_conflict": "IP repetida",
 			"disconnected": "desconectada", "searching": "buscando red", "sim_missing": "sin SIM",
@@ -95,6 +100,8 @@ var (
 		UplinkDisabled:     "Out of the share",
 		UplinkNoInternet:   "No internet",
 		UplinkRateF:        "↑ %s Mbps",
+		UplinkStatsF:       "RTT %d ms · %s NAK/s",
+		UplinkBond:         map[string]string{"stalled": "stalled: out of the share", "weak": "weak: carries little", "down": "not answering"},
 		UplinkKind:         map[string]string{"ethernet": "Ethernet", "usb": "USB (modem or phone)", "wifi": "Wi-Fi", "modem": "Modem"},
 		UplinkHealth: map[string]string{"ok": "fine", "off": "off", "ip_conflict": "repeated IP",
 			"disconnected": "disconnected", "searching": "searching for a network", "sim_missing": "no SIM",
@@ -146,6 +153,8 @@ var (
 		UplinkDisabled:     "Hors répartition",
 		UplinkNoInternet:   "Pas d'Internet",
 		UplinkRateF:        "↑ %s Mbit/s",
+		UplinkStatsF:       "RTT %d ms · %s NAK/s",
+		UplinkBond:         map[string]string{"stalled": "bloquée : hors du partage", "weak": "faible : transporte peu", "down": "ne répond pas"},
 		UplinkKind:         map[string]string{"ethernet": "Ethernet", "usb": "USB (modem ou téléphone)", "wifi": "Wi-Fi", "modem": "Modem"},
 		UplinkHealth: map[string]string{"ok": "OK", "off": "désactivée", "ip_conflict": "IP en double",
 			"disconnected": "déconnectée", "searching": "recherche du réseau", "sim_missing": "pas de SIM",

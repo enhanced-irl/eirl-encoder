@@ -79,7 +79,7 @@ type Options struct {
 	LookupEnv func(string) (string, bool)
 	// ReadFile reads EIRL_CONF (os.ReadFile).
 	ReadFile func(string) ([]byte, error)
-	// Executable is the launcher's `[ -x path ]`, used for SRTLA_BIN (access(2) with X_OK).
+	// Executable is the launcher's `[ -x path ]`, used for SRTLA_BIN and SRTLA_RS_BIN (access(2) with X_OK).
 	Executable func(string) bool
 	// FindVDEV returns the TC358743 capture node when VDEV is empty (sysfs scan, sh:142-147).
 	FindVDEV func() string
@@ -158,7 +158,7 @@ type Config struct {
 
 	SRTURL        string // SRT_URL ("" = no destination)
 	SRTMode       string // SRT_MODE: caller | listener (caller)
-	SRTLatencyMs  int    // SRT_LATENCY (200)
+	SRTLatencyMs  int    // SRT_LATENCY (2000: SRTLA.md §9.6)
 	SRTPassphrase Secret // SRT_PASSPHRASE ("")
 	SRTStreamID   Secret // SRT_STREAMID ("")
 	// Transport is the output protocol (OUTPUTS.md §3): OUTPUT_PROTOCOL, or srt / srtla from SRT_URL when it
@@ -173,14 +173,19 @@ type Config struct {
 	RISTProfile      string // RIST_PROFILE: simple | main (main)
 	OutputLatencyMs  int    // OUTPUT_LATENCY: RIST's buffer (1000)
 	// Encoding (OUTPUTS.md §7)
-	VCodec            string // OUTPUT_VCODEC: h264 | h265 (h264)
-	OutputSize        string // OUTPUT_SIZE: "" (the program's) | 1280x720 | 960x540
-	OutputHalf        bool   // OUTPUT_FPS=half: half the program's frame rate
-	SendBin           string // SEND_BIN (/usr/local/bin/eirl-send), the RTMP sender
-	RISTBin           string // RIST_BIN (/usr/local/bin/ristsender)
-	RISTLocalPort     int    // RIST_LOCAL_PORT (6100): where the output pipeline hands the TS to ristsender
-	LinksFile         string // LINKS_FILE (/run/eirl-encoder/links.json with EIRL_CONF): the links' health, to pick RTMP's
-	SRTLABin          string // SRTLA_BIN (/usr/local/bin/srtla_send)
+	VCodec        string // OUTPUT_VCODEC: h264 | h265 (h264)
+	OutputSize    string // OUTPUT_SIZE: "" (the program's) | 1280x720 | 960x540
+	OutputHalf    bool   // OUTPUT_FPS=half: half the program's frame rate
+	SendBin       string // SEND_BIN (/usr/local/bin/eirl-send), the RTMP sender
+	RISTBin       string // RIST_BIN (/usr/local/bin/ristsender)
+	RISTLocalPort int    // RIST_LOCAL_PORT (6100): where the output pipeline hands the TS to ristsender
+	LinksFile     string // LINKS_FILE (/run/eirl-encoder/links.json with EIRL_CONF): the links' health, to pick RTMP's
+	SRTLABin      string // SRTLA_BIN (/usr/local/bin/srtla_send): BELABOX's sender, in C
+	// The SRTLA sender and its scheduler (SRTLA.md §9.2): board settings, never from the app's file
+	SRTLASender       string // SRTLA_SENDER: irlserver | belabox (irlserver)
+	SRTLAMode         string // SRTLA_MODE: classic | enhanced (classic), the irlserver sender's
+	SRTLARSBin        string // SRTLA_RS_BIN (/usr/local/bin/srtla_send_rs): irlserver's sender, in Rust
+	SRTPayload        int    // SRT_PAYLOAD: 1128 | 1316 (1128), bytes of TS per SRT packet for srt and srtla (SRTLA.md §9.5)
 	SRTLALocalPort    int    // SRTLA_LOCAL_PORT (6000)
 	UplinksFile       string // UPLINKS_FILE (/run/eirl-uplinks/available)
 	UplinkWait        int    // UPLINK_WAIT s (30)
@@ -232,6 +237,9 @@ var (
 	reStreamID    = regexp.MustCompile(`^([A-Za-z0-9_:./-]{1,512})?$`)
 	rePassphrase  = regexp.MustCompile(`^([A-Za-z0-9_.~-]{10,79})?$`)
 	reSRTLAURL    = regexp.MustCompile(`^srtla://[A-Za-z0-9.-]{1,253}:[0-9]{1,5}$`)
+	reSRTLASender = regexp.MustCompile(`^(irlserver|belabox)$`)
+	reSRTLAMode   = regexp.MustCompile(`^(classic|enhanced)$`)
+	reSRTPayload  = regexp.MustCompile(`^(1128|1316)$`)
 	reSRTURL      = regexp.MustCompile(`^srt://(\[[0-9A-Fa-f:.]{2,45}\]|[A-Za-z0-9.-]{1,253})?:[0-9]{1,5}$`)
 	reThumbSize   = regexp.MustCompile(`^[0-9]{2,4}x[0-9]{2,4}$`)
 
@@ -383,12 +391,16 @@ func Load(o Options) (*Config, error) {
 		"AENC":               e.or("AENC", "voaacenc"),
 		"SRT_URL":            e.or("SRT_URL", ""),
 		"SRT_MODE":           e.or("SRT_MODE", "caller"),
-		"SRT_LATENCY":        e.or("SRT_LATENCY", "200"),
+		"SRT_LATENCY":        e.or("SRT_LATENCY", "2000"),
 		"SRT_PASSPHRASE":     e.or("SRT_PASSPHRASE", ""),
 		"SRT_STREAMID":       e.or("SRT_STREAMID", ""),
 		"ABR":                e.or("ABR", "0"),
 		"VBITRATE_MIN":       e.or("VBITRATE_MIN", "1000"),
 		"SRTLA_BIN":          e.or("SRTLA_BIN", "/usr/local/bin/srtla_send"),
+		"SRTLA_SENDER":       e.or("SRTLA_SENDER", "irlserver"),
+		"SRTLA_MODE":         e.or("SRTLA_MODE", "classic"),
+		"SRTLA_RS_BIN":       e.or("SRTLA_RS_BIN", "/usr/local/bin/srtla_send_rs"),
+		"SRT_PAYLOAD":        e.or("SRT_PAYLOAD", strconv.Itoa(DefaultSRTPayload)),
 		"SRTLA_LOCAL_PORT":   e.or("SRTLA_LOCAL_PORT", "6000"),
 		"UPLINKS_FILE":       e.or("UPLINKS_FILE", "/run/eirl-uplinks/available"),
 		"UPLINK_WAIT":        e.or("UPLINK_WAIT", "30"),
@@ -484,7 +496,7 @@ func validate(raw map[string]string, o Options) error {
 	if raw["EDID"] == "" {
 		raw["EDID"] = o.ScriptDir + "/edid-" + raw["EDID_PREFERRED"] + "-lpcm48k.bin"
 	}
-	for _, k := range []string{"VDEV", "EDID", "ALSA_CARD", "STATE_DIR", "RUN_DIR", "SRTLA_BIN", "UPLINKS_FILE", "PROBE_BIN"} {
+	for _, k := range []string{"VDEV", "EDID", "ALSA_CARD", "STATE_DIR", "RUN_DIR", "SRTLA_BIN", "SRTLA_RS_BIN", "UPLINKS_FILE", "PROBE_BIN"} {
 		re(k, rePath)
 	}
 	re("SOURCE", reSource)
@@ -507,6 +519,9 @@ func validate(raw map[string]string, o Options) error {
 	re("SRT_MODE", reSRTMode)
 	re("SRT_STREAMID", reStreamID)
 	re("SRT_PASSPHRASE", rePassphrase)
+	re("SRTLA_SENDER", reSRTLASender)
+	re("SRTLA_MODE", reSRTLAMode)
+	re("SRT_PAYLOAD", reSRTPayload)
 	if err != nil {
 		return err
 	}
@@ -527,8 +542,9 @@ func validate(raw map[string]string, o Options) error {
 		if raw["SRT_MODE"] != "caller" {
 			return invalid("SRT_MODE", "SRTLA only sends to a relay: caller")
 		}
-		if !o.Executable(raw["SRTLA_BIN"]) {
-			return invalid("SRTLA_BIN", "srtla_send is not installed")
+		// Either sender will do: the output falls back to the other one (SRTLA.md §9.2)
+		if !o.Executable(raw["SRTLA_BIN"]) && !o.Executable(raw["SRTLA_RS_BIN"]) {
+			return invalid("SRTLA_BIN", "no SRTLA sender is installed")
 		}
 	} else if u != "" {
 		re("SRT_URL", reSRTURL)
@@ -631,6 +647,10 @@ func (c *Config) fill(raw map[string]string) {
 	c.RISTLocalPort = num("RIST_LOCAL_PORT")
 	c.LinksFile = raw["LINKS_FILE"]
 	c.SRTLABin = raw["SRTLA_BIN"]
+	c.SRTLASender = raw["SRTLA_SENDER"]
+	c.SRTLAMode = raw["SRTLA_MODE"]
+	c.SRTLARSBin = raw["SRTLA_RS_BIN"]
+	c.SRTPayload = num("SRT_PAYLOAD")
 	c.SRTLALocalPort = num("SRTLA_LOCAL_PORT")
 	c.UplinksFile = raw["UPLINKS_FILE"]
 	c.UplinkWait = num("UPLINK_WAIT")

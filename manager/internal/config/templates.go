@@ -87,7 +87,7 @@ func NewDestination(t Template, protocol string) Destination {
 	case ProtoSRT:
 		d.LatencyMs = Defaults().LatencyMs
 	case ProtoSRTLA:
-		d.LatencyMs = SRTLALatencyMs
+		d.LatencyMs = DefaultLatencyMs
 	case ProtoRIST:
 		d.LatencyMs, d.RISTProfile = RISTLatencyDefault, "main"
 	}

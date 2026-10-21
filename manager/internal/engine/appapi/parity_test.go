@@ -162,9 +162,11 @@ func TestParityReads(t *testing.T) {
 	a.route("GET /status", 200, map[string]any{"service": map[string]any{"state": "active"}, "transport": "srtla",
 		"output": "on", "pendingRestart": false,
 		"uplinks": []any{
-			map[string]any{"name": "usb0", "ip": "192.168.8.100", "kind": "usb", "inUse": true, "disabled": false, "txKbps": 2480},
+			map[string]any{"name": "usb0", "ip": "192.168.8.100", "kind": "usb", "inUse": true, "disabled": false, "txKbps": 2480,
+				"rttMs": 57, "sendKbps": 2400, "nakPerSec": 0.2, "bond": "stalled"},
 			map[string]any{"name": "bad name;", "ip": "x"},
-			map[string]any{"name": "wlan0", "kind": "wifi", "noInternet": true, "conflict": true}},
+			map[string]any{"name": "wlan0", "kind": "wifi", "noInternet": true, "conflict": true, "rttMs": 70000, "sendKbps": 1,
+				"nakPerSec": 0, "bond": "active"}},
 		"input": map[string]any{"source": "usb", "device": "/dev/v4l/by-id/usb-Cam-video-index0", "format": "NV12",
 			"mode": "1920x1080@30", "audio": "alsa:Cam", "edidPreferred": "1080p30",
 			"active": map[string]any{"state": "ready", "source": "usb", "name": "Cam Link", "format": "NV12", "mode": "1920x1080@30"}}})
@@ -173,6 +175,11 @@ func TestParityReads(t *testing.T) {
 	if st == nil || !st.HasUplinks || len(st.Uplinks) != 2 || st.Uplinks[0].TxKbps != 2480 || !st.Uplinks[1].Conflict ||
 		st.Input.Source != "usb" || st.Input.Format != "NV12" || st.Input.Audio != "alsa:Cam" || st.Input.ActiveState != "ready" || st.Input.ActiveSource != "usb" {
 		t.Fatalf("%+v", st)
+	}
+	// The sender's figures (SRTLA.md §9.4): all of them in range, or none (wlan0's RTT is out of range)
+	if u := st.Uplinks[0]; !u.HasStats || u.RTTMs != 57 || u.SendKbps != 2400 || u.NakPerSec != 0.2 || u.Bond != "stalled" ||
+		st.Uplinks[1].HasStats || st.Uplinks[1].Bond != "" {
+		t.Errorf("figures %+v", st.Uplinks)
 	}
 	a.route("GET /sources", 200, map[string]any{
 		"sources": []any{

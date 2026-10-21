@@ -361,3 +361,19 @@ type countRebooter struct{ n int }
 
 func (r *countRebooter) CanReboot(context.Context) error { return nil }
 func (r *countRebooter) Reboot(context.Context) error    { r.n++; return nil }
+
+// SRTLA.md §9.4: the Rust sender's figures per link reach the cloud, optional, only where they exist.
+func TestCloudStatusPassesLinkStats(t *testing.T) {
+	rtt, kbps, nak := 57, 5400, 0.2
+	st := Status{Service: ServiceView{State: "active"}, Uplinks: []uplinks.Uplink{
+		{Name: "eth0", Kind: "ethernet", InUse: true, RTTMs: &rtt, SendKbps: &kbps, NakPerSec: &nak, Bond: "active"},
+		{Name: "wwan0", Kind: "modem"},
+	}}
+	b, _ := json.Marshal(CloudStatus(st, time.Now()).Uplinks)
+	want := `[{"name":"eth0","kind":"ethernet","inUse":true,"disabled":false,"conflict":false,"txKbps":0,` +
+		`"rttMs":57,"sendKbps":5400,"nakPerSec":0.2,"bond":"active"},` +
+		`{"name":"wwan0","kind":"usb","inUse":false,"disabled":false,"conflict":false,"txKbps":0}]`
+	if string(b) != want {
+		t.Errorf("uplinks\n got %s\nwant %s", b, want)
+	}
+}

@@ -241,7 +241,7 @@ func TestApplyOutputConfig(t *testing.T) {
 		{"hot", "", `{"videoCodec":"h265","apply":true}`, true, false},
 		{"older engine", "unknown_command", `{"videoCodec":"h265","apply":true}`, true, true},
 		{"restart_required", "restart_required", `{"latencyMs":900,"apply":true}`, true, true},
-		{"nothing changed", "", `{"latencyMs":200,"apply":true}`, false, false},
+		{"nothing changed", "", `{"latencyMs":2000,"apply":true}`, false, false},
 		{"without apply", "", `{"videoCodec":"h265"}`, false, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {

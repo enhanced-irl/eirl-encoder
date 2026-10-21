@@ -196,10 +196,15 @@ func (u *UI) drawUplinksPage(d *dc, app *AppSnapshot) {
 		if ul.Label != "" { // a modem: its operator, and the interface goes to the second line
 			title = ul.Label
 			parts = append(parts, ul.Name)
-		} else if ul.IP != "" {
+		} else if ul.IP != "" && !ul.HasStats { // with the sender's figures there is no room for the address
 			parts = append(parts, ul.IP)
 		}
-		sub = strings.Join(append(parts, sub), tx.Sep)
+		parts = append(parts, sub)
+		if ul.HasStats { // the Rust SRTLA sender's view of the link (SRTLA.md §9.4)
+			nak := strings.ReplaceAll(sprintf("%.1f", ul.NakPerSec), ".", u.Tx.Decimal)
+			parts = append(parts, sprintf(st.UplinkStatsF, ul.RTTMs, nak))
+		}
+		sub = strings.Join(parts, tx.Sep)
 		on := !ul.Disabled
 		kn := knob(on)
 		busy := pend && u.uplinkPend == ul.Name
@@ -271,8 +276,16 @@ func (u *UI) uplinkState(ul UplinkInfo, live bool) (string, string) {
 		return st.UplinkNoInternet, "warn"
 	case live && !ul.InUse:
 		return u.Tx.NetConnecting, "quiet"
+	case ul.Bond == "down":
+		return st.UplinkBond["down"], "bad"
+	case ul.Bond == "stalled" || ul.Bond == "weak":
+		return st.UplinkBond[ul.Bond], "warn"
 	}
-	mb := strings.ReplaceAll(sprintf("%.1f", float64(ul.TxKbps)/1000), ".", u.Tx.Decimal)
+	kbps := ul.TxKbps
+	if ul.HasStats { // what the sender put on the link: the interface's counter counts all its traffic
+		kbps = ul.SendKbps
+	}
+	mb := strings.ReplaceAll(sprintf("%.1f", float64(kbps)/1000), ".", u.Tx.Decimal)
 	return sprintf(st.UplinkRateF, mb), "good"
 }
 

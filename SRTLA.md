@@ -1,4 +1,4 @@
-> **Status:** IN PROGRESS — implemented (phases 2-4), tested over loopback and **deployed on the board** (Oct 9: a real stream over SRTLA to eu1 with one link). Pending: tests with several real links (they need the 5 V 4 A power supply and modems), §7
+> **Status:** IN PROGRESS — implemented (phases 2-4), tested over loopback and **deployed on the board** (Oct 9: a real stream over SRTLA to eu1 with one link). Pending: tests with several real links, §7. **Hardening of the link (Oct 19, §9): the Rust sender, 1,128-byte payload, 2 s latency, cached relay address — in progress**
 > **Updated:** 2026-10-19
 
 # Streaming over SRTLA (bonding several links) from the encoder
@@ -264,12 +264,15 @@ need source-based routing) → local `srtla_rec` → SRT listener.
 ## 8. Install and undo
 
 Install: the engine with `tools/deploy-engine.sh` (it refuses while streaming), and then
-`JETSON=<board> manager/build.sh`. `install.sh` puts in place `srtla_send`, the dispatcher and the tmpfiles entry for
-`/run/eirl-uplinks`, and runs the dispatcher once. **It does not restart the stream.**
+`JETSON=<board> manager/build.sh`. `install.sh` puts in place `srtla_send` and `srtla_send_rs` (§9), the dispatcher
+and the tmpfiles entry for `/run/eirl-uplinks`, and runs the dispatcher once. **It does not restart the stream.**
+To go back to the C sender without reinstalling: `SRTLA_SENDER=belabox` in `/etc/default/eirl-engine` (§9.2) and a
+restart of `eirl-engine` (it reads that file when it starts: a slot with the owner, never while streaming).
 
 Undo (as root):
 ```bash
-rm /etc/NetworkManager/dispatcher.d/90-eirl-uplinks /usr/local/bin/srtla_send
+rm /etc/NetworkManager/dispatcher.d/90-eirl-uplinks /usr/local/bin/srtla_send /usr/local/bin/srtla_send_rs
+rm -f /var/lib/eirl-engine/relay-addr.json
 ip -4 rule del priority 999
 for p in $(ip -4 rule show | awk -F: '$1 >= 1000 && $1 <= 30999 {print $1}'); do ip -4 rule del priority "$p"; done
 for t in $(ip -4 route show table all | grep -o 'table 1[0-9]\{4\}' | sort -u | cut -d' ' -f2); do ip -4 route flush table "$t"; done
@@ -283,3 +286,223 @@ link: the dispatcher excludes it by name (`ap*`) and by type (`iw dev <if> info`
 it ever had a gateway. A Wi-Fi client with a gateway is one (that is the point: a phone
 sharing its data). In `/etc/eirl-encoder/engine.env`, set
 `SRT_URL` to `srt://…` and `ABR=0` (or from the app).
+
+## 9. Hardening the link (Oct 19): the Rust sender, smaller packets, more latency, a cached relay address
+
+> **Status:** IN PROGRESS — implemented, bench done (§9.9: the default is Rust classic) and tested on the board with one link (§9.10); waiting for its release.
+
+Four changes, decided on Oct 19 after a review of SRT, SRTLA and RIST for IRL use:
+
+1. **The sender.** BELABOX's `srtla_send` (C, AGPL-3.0, frozen since April 2025, no statistics per link) is
+   replaced, as an interim step, by irlserver's Rust `srtla_send` (MIT): per-link congestion control, exclusion
+   of stalled links, statistics per link over a control socket. The C sender stays in the bundle for one more
+   release as the way back, then leaves it (and with it the AGPL notice).
+2. **1,128-byte SRT payload** (6 TS packets instead of 7): below the MTU of the APNs and phone hotspots that
+   fragment 1,316-byte packets (a lost fragment is a lost packet). What Moblin sends with "Big packets" off.
+3. **2,000 ms SRT latency by default**, for SRT as for SRTLA (§9.6).
+4. **The last good address of the relay is cached**, so that a session can start while name resolution
+   fails (§9.7): in the night test of the Go engine a recovery waited two minutes only for DNS.
+
+### 9.1 The Rust sender, pinned
+
+`irlserver/srtla_send` at **59a7d8b** (2026-10-17), nine commits after v4.1.0: it carries the fix that makes
+the RTT floor a window in time and lets a stall-latched link rejoin, which is what the bufferbloat report
+(upstream issue #25: a bloated leg capturing the stream) needed. Built by `build/srtla-rs.sh` (§9.8) with one
+change: the local socket listens on 127.0.0.1, not `[::]`. Like the C sender, it answers whoever wrote to it
+last, so a datagram from the LAN or from a modem's network would take the relay's answers (§7, the same
+change in `build/srtla.sh`).
+
+What it keeps from the C sender, so the engine's side barely changes:
+
+| | BELABOX (C) | irlserver (Rust) |
+|---|---|---|
+| Arguments | `PORT HOST PORT IPS_FILE` | the same, plus options |
+| IPs file | one IPv4 per line | the same (`<ip> [weight]` accepted, not used) |
+| New uplinks | SIGHUP rereads the file | the same |
+| Giving up | prints `Failed to establish any initial connections` / `Failed to re-establish any connections` and exits | prints `Failed to re-establish any connections` (ERROR) every second while every uplink is lost, but **never exits**, and never gives up its first registration either: it keeps trying, which saves rebuilding the session after a short cut. The engine stops it after 60 s of that (`event=srtla_gave_up`), and ends a session that has not registered in 15 s (below), so that the next one resolves the relay's name again |
+| No uplink answers | `warning: no available connections` | the same |
+| Name of the relay | resolved once at start (`Failed to resolve`) | resolved for every uplink it adds; with an address (§9.7) nothing to resolve |
+| Log | `printf` to stdout (hence `stdbuf -oL`) | `tracing` to stdout, line by line; `RUST_LOG=warn`, `NO_COLOR=1`. It warns once per NAK, and once per packet while it has no uplink: the engine classifies every line but writes each kind (its numbers aside) to the journal at most once every 30 s, with how many it left out |
+| Statistics | none | JSON-RPC over a Unix socket (`--control-socket`), `subscribe` to `stats`: one snapshot per second |
+
+How the engine starts it: `env RUST_LOG=warn NO_COLOR=1 TOKIO_WORKER_THREADS=2 <SRTLA_RS_BIN> --mode <SRTLA_MODE>
+[--no-rehome] --control-socket <RUN_DIR>/srtla.sock <SRTLA_LOCAL_PORT> <relay> <port> <RUN_DIR>/srtla-ips`, where
+the relay is its address (§9.7) and `--no-rehome` goes with it; when the name could not be resolved at all the
+sender gets the name, and keeps its re-home.
+srt-live-transmit starts only once the sender has registered its uplinks with the relay (the C sender's
+`connection established`; for the Rust sender, the first connected uplink in its statistics, asked with `get_stats`
+every 100 ms until then, since its pushes come once a second; at most 15 s, then it starts anyway,
+`event=srtla_register_slow`; with the Rust sender, whose statistics say it has not registered, the session
+ends with `relay_unreachable` instead, as the C sender does by exiting, and the retry resolves the relay's name
+again: otherwise a cached address that is no longer the relay's would hold the session for ever). 🪤 The relays' SRT stack (gosrt, in MediaMTX) starts its delivery clock when
+the handshake arrives and does not discount how long the caller had been connecting (libsrt does, from the
+handshake's timestamp): every second `srt-live-transmit` spent waiting for the bond was a second more of latency for
+the whole session. Measured on the bench with the old order: +1.8 s end to end with the Rust sender, which takes
+~2 s to register (an RTT probe of 1 s, then REG1 and REG2), against ~0.4 s for the C one.
+`--no-rehome`: the relay is given as an address, so there is nothing to follow; when every uplink is dead for
+10 s the sender exits, and the engine's next session resolves the name again (§9.7), which is the same
+"re-home" one level up. Lines the engine classifies besides the C ones: `no uplinks available` and
+`no IPs in list` → `no_uplinks`; `bind local SRT UDP listener` → `internal`. ANSI escapes are stripped anyway.
+
+### 9.2 Board settings (the way back)
+
+In `/etc/default/eirl-engine` (root; the app cannot set them):
+
+| Key | Values | Default | |
+|---|---|---|---|
+| `SRTLA_SENDER` | `irlserver` \| `belabox` | `irlserver` | which sender; `belabox` is the C one of §3 |
+| `SRTLA_MODE` | `classic` \| `enhanced` | chosen with the bench (§9.9) | the Rust sender's scheduler; `classic` is the C one's |
+| `SRTLA_RS_BIN` | path | `/usr/local/bin/srtla_send_rs` | the Rust sender |
+| `SRTLA_BIN` | path | `/usr/local/bin/srtla_send` | the C sender (unchanged) |
+| `SRT_PAYLOAD` | `1128` \| `1316` | `1128` | SRT payload for `srt` and `srtla` (§9.5) |
+
+If the chosen sender is not installed and the other one is, the engine uses the other one and says so
+(`event=srtla_sender_fallback`): an update that lands half-way never leaves the encoder without SRTLA. With
+neither, the configuration is invalid as before (`SRTLA_BIN`).
+
+### 9.3 Statistics per link: `srtla-links.json` (engine → app)
+
+While a session runs with the Rust sender, the engine subscribes to its `stats` and writes, atomically and at most
+once a second, `<RUN_DIR>/srtla-links.json` (`/run/eirl-engine/srtla-links.json`, 0644). It is removed when the
+session ends; the C sender never writes it. The app reads it as data: a file older than 5 s, or one that does not
+validate, counts as absent.
+
+```json
+{"v": 1, "sender": "irlserver", "mode": "classic",
+ "links": [{"iface": "eth0", "ip": "192.168.1.20", "bond": "active",
+            "rttMs": 57, "sendKbps": 5400, "nakPerSec": 0.2}]}
+```
+
+| Field | | |
+|---|---|---|
+| `iface`, `ip` | the uplink (the IP the sender reports, matched to the interface of `uplinks`) | required |
+| `bond` | `active` \| `stalled` \| `weak` \| `down` | `down`: not connected or timed out; `stalled`: excluded by the stall guard; `weak`: held back by the enhanced scheduler; else `active` |
+| `rttMs` | integer, 0-60000 | the sender's smoothed RTT on that uplink |
+| `sendKbps` | integer, 0-1000000 | what the sender put on that uplink, kbit/s |
+| `nakPerSec` | number, 0-100000, one decimal | NAKs attributed to that uplink per second, from the difference of its cumulative count |
+
+At most 16 links. Unknown fields are ignored (additive contract).
+
+### 9.4 Where the statistics go (all optional)
+
+- **App, `GET /api/v1/status`, `uplinks[]`**: `rttMs`, `sendKbps`, `nakPerSec` and `bond`, only for a link in a
+  fresh `srtla-links.json`. Absent otherwise: with the C sender, with SRT or while not streaming.
+- **Screen** (`ui.UplinkInfo`, read by `appapi` from `/status`) and **web** ("Connections"): a second line under a
+  link in use, "RTT 57 ms · 0.2 NAK/s", and `bond` other than `active` as the reason (es/en/fr).
+- **Cloud** (`status.uplinks[]`): the same four fields. Today's backend keeps only the fields it knows (it ignores
+  these); showing them in the dashboard is a later change there.
+- The health of a link (the dot, `MODEMS.md` §5) does not change: these figures are data for it, for a later phase.
+
+### 9.5 1,128-byte payload
+
+For `srt` and `srtla` with `SRT_PAYLOAD=1128`: `mpegtsmux alignment=6` (each write of the unbuffered filesink is
+one SRT packet), `srt-live-transmit -chunk:1128` and `payloadsize=1128` in the SRT URL; the statistics interval
+counts packets of that size. RIST, UDP and RTMP keep 7 TS packets. Cost: ~17 % more packets per second and
+~0.6 % more headers.
+
+🪤 The chunk and the mux's alignment must change together, and they come from the same `SRT_PAYLOAD`
+(`config.TSPerPacket`, `config.SRTPayloadBytes`, and a test that ties them). `srt-live-transmit`'s `file://con` reads
+stdin non-blocking and, after a read shorter than `-chunk`, still sends a whole chunk with the tail of the previous
+packet in it (SRT 1.5.7, `apps/transmitmedia.cpp`, `ConsoleSource::Read`): corrupt TS that SRT carries without a
+complaint. With every write of the unbuffered filesink exactly one chunk (atomic on a pipe, under `PIPE_BUF`), every
+read is whole.
+
+### 9.6 Latency: 2,000 ms by default, one value
+
+SRT's latency is fixed by the handshake for the whole session, but the links change during it (the cable is
+unplugged and a modem carries on), so the default cannot depend on the kind of link. Too much latency only adds
+delay; too little cuts the stream on a mobile network (5-8 × RTT). So: new SRT destinations get 2,000 ms, as SRTLA
+already did, and the cloud's "automatic" latency is 2,000 ms for both (the backend, `ENCODER_CLOUD.md` §5). A value
+someone set is kept.
+
+### 9.7 The relay's address, cached
+
+At the start of every `srt`/`srtla` session the engine resolves the relay's name itself (IPv4, 5 s budget):
+
+- resolved: the first address (or the cached one, if it is among the answers: round-robin does not move the bond),
+  saved in `<STATE_DIR>/relay-addr.json` (`/var/lib/eirl-engine/`, kept across reboots), `event=relay_resolved`;
+- not resolved: the cached address of that name, whatever its age, `event=relay_dns_cached` with its age; without one,
+  the sender gets the name and resolves it itself, as before (`event=relay_dns_failed`): the cache only ever adds a
+  way to connect (an IPv6-only name, for plain SRT, still works).
+
+The senders and `srt-live-transmit` are given the address, never the name (SRT carries no name: no TLS, the stream
+id is in the handshake). The file holds at most 8 names: `{"v": 1, "hosts": {"<name>": {"ip": "<ipv4>", "at": <unix s>}}}`.
+
+### 9.8 Build
+
+`build/srtla-rs.sh`: the same Ubuntu 18.04 arm64 container as the other tools (glibc 2.27), the pinned Rust
+toolchain of the project (`rust-toolchain.toml`) installed by a rustup-init verified by sha256, the codeload tarball
+of the pinned commit verified by sha256, `cargo build --release --locked`. It checks that the binary needs no glibc
+symbol newer than 2.27, and leaves `build/out/srtla_send_rs`, its version, its MIT licence and those of the crates it
+links. Installed as `/usr/local/bin/srtla_send_rs`, next to the C one.
+
+### 9.9 Bench before choosing the default mode
+
+C sender against Rust classic against Rust enhanced, on a Linux bench with network namespaces and `netem`: two or
+three links with 50/150/800 ms RTT, deep queues (the bufferbloat case), loss bursts, a link that dies and comes
+back, a marginal link swinging between 100 and 1,200 ms. Measured: cuts, NAKs, retransmissions, sustained
+bitrate, the share per link and the sender's CPU and memory.
+
+**Results (Oct 19-20).** A Linux bench in Docker on an Apple Silicon Mac (arm64): `srt-live-transmit` → the sender →
+three links in network namespaces (`netem` + `tbf`) → `srtla_rec` (irlserver 39e324a, as the relays) → MediaMTX
+1.21.0 (gosrt, as the relays) → an SRT reader. 300 s per run, latency 2000 ms, srt-live-transmit started once the
+sender registered (as the engine does now). Means of 3 seeds (enhanced: 1); *frozen* is the seconds with the
+reader's video stopped for more than 250 ms.
+
+| Scenario | Sender | Frozen s | Loss % | Retransmissions | Lost in the links' queues |
+|---|---|---|---|---|---|
+| Bufferbloat (upstream #25: 4.2/1.5/2.0 Mbit/s, queues 150/800/600 ms) | C | 44.6 (one seed: 134) | 9.1 | 285k | 175k |
+| | Rust classic | 7.2 | 0.9 | 74k | 7.6k |
+| | Rust enhanced | 0 | 0 | 143k | 50k |
+| A link goes down 30 s, another is removed 20 s, short outages | C | 4.1 | 1.3 | 212k | 69k |
+| | Rust classic | 1.0 | 0.3 | 104k | 33k |
+| | Rust enhanced | 202 | 50 | 384k | 364k |
+| Loss bursts on two of three links | C | 0 | 0 | 250k | 132k |
+| | Rust classic | 0 | 0 | 124k | 64k |
+| | Rust enhanced | 212 | 54 | 489k | 463k |
+| A link swinging 100 ↔ 1,200 ms (upstream PR #17) | C | 0 | 0 | 136k | 16k |
+| | Rust classic | 0.1 | 0 | 80k | 12k |
+| | Rust enhanced | 189 | 44 | 264k | 228k |
+| RTT 50/150/800 ms, 5 Mbit/s that needs the three | C | 294 | 62 | 1,673k | 1,502k |
+| | Rust classic | 190 | 47 | 457k | 358k |
+| | Rust enhanced | 296 | 78 | 1,317k | 1,044k |
+
+- **The default is Rust classic.** It is never clearly worse than the C sender, sends half the retransmissions or
+  fewer, and loses far less in the links' queues; the C sender had one bufferbloat run that froze for 134 s.
+- **Enhanced is not a default**: it collapsed in 4 of 5 scenarios (loss 44-78 %, the SRT sender dropping packets too
+  late), likely its NAK penalties and loss-driven caps against the spurious NAKs of the relays' SRT stack (gosrt sends
+  a NAK for every gap, and with several links of different delay most gaps are only reordering).
+- No sender carries a link of 800 ms RTT that the stream needs: it is beyond SRTLA with today's relays.
+- **1,128 against 1,316 bytes** (the link-down scenario with both): no systematic difference, only noise between seeds,
+  as expected with a 1,500-byte MTU. 1,128 is for carriers whose MTU fragments 1,316-byte packets (a lost fragment is a
+  lost packet); the bench shows it costs nothing measurable.
+- **Cost on the Mac**: Rust classic 7.5-8.5 % of a core and ~8 MB, the C sender ~4 % and 1.6 MB. On the board: §9.10.
+- Same latency with every sender (~2.4 s end to end) once srt-live-transmit waits for the registration (before: +1.8 s
+  with the Rust sender, §9.1).
+
+### 9.10 On the board (Oct 21)
+
+The test board (Jetson Nano, the 1080p60 program, H.265 at 6 Mbit/s over SRTLA to the test relay, **Ethernet only**),
+10 minutes with the C sender and 30 with the Rust one (classic), then a cut of the relay's UDP of 20 s and of 75 s
+(an iptables rule on the board: the link "dies" and comes back).
+
+| | C sender | Rust sender (classic) |
+|---|---|---|
+| Sender's CPU (of one core) | 3.7 % | 7.9 % |
+| Sender's memory | 0.5 MB | 6.9 MB |
+| Engine's CPU | 82 % | 82.5 % |
+| Whole board (of 400 %) | 138 % | 146 % |
+| CPU / GPU temperature | 42.8 / 40.7 °C | 43.0 / 41.0 °C |
+| Registration | 0.2 s | 3.0 s (srt-live-transmit waits for it, §9.1: no latency added) |
+| Streaming | no cut, RTT 57-59 ms | no cut, RTT median 67 ms, 6.5 Mbit/s sent |
+
+- `srtla-links.json` and `/status` `uplinks[]` carry the link's figures (`rttMs` 64, `sendKbps` 6515, `nakPerSec` 0,
+  `bond` `active`); the stream reads back from the relay; the sender listens on 127.0.0.1 only; the relay's address
+  is cached in `/var/lib/eirl-engine/relay-addr.json`.
+- **Cut of 20 s**: the Rust sender kept trying without exiting and was back on air 9 s after the cut ended, without
+  rebuilding the session. Found: a warning per packet into the journal (761 lines) → each kind of line at most once
+  every 30 s (§9.1). **Cut of 75 s** (with that fix): 119 journal lines in 3 minutes, the engine stopped the sender
+  after 60 s (`srtla_gave_up`), the next session ended because it could not register (15 s), and once the cut ended
+  it registered in 4 s and was on air 5 s later.
+- Not tested on the board: several real links (Wi-Fi, an iPhone, modems), unplugging them by hand. The bench covers
+  bonding (§9.9); real links go with the modems' M0.

@@ -567,8 +567,8 @@ func (d *Destination) normalize(cur Destination, p DestinationPatch, urlLatency 
 		}
 	case ProtoSRTLA:
 		// With mobile uplinks the LAN SRT latency falls short: up to 2000 ms unless this request set another one
-		if !latencySet && cur.Protocol != ProtoSRTLA && d.LatencyMs < SRTLALatencyMs {
-			d.LatencyMs = SRTLALatencyMs
+		if !latencySet && cur.Protocol != ProtoSRTLA && d.LatencyMs < DefaultLatencyMs {
+			d.LatencyMs = DefaultLatencyMs
 		}
 	case ProtoRIST:
 		if !latencySet && switched {

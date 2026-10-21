@@ -474,7 +474,8 @@ func CloudStatus(st Status, now time.Time) cloud.EncoderStatus {
 			kind = "usb" // the cloud contract knows ethernet | usb | wifi; modems reach it in phase M6 (MODEMS.md)
 		}
 		out.Uplinks = append(out.Uplinks, cloud.StatusUplink{Name: u.Name, Kind: kind, InUse: u.InUse,
-			Disabled: u.Disabled, Conflict: u.Conflict, TxKbps: u.TxKbps, NoInternet: u.NoInternet})
+			Disabled: u.Disabled, Conflict: u.Conflict, TxKbps: u.TxKbps, NoInternet: u.NoInternet,
+			RTTMs: u.RTTMs, SendKbps: u.SendKbps, NakPerSec: u.NakPerSec, Bond: u.Bond})
 	}
 	if st.Bitrate != nil {
 		out.Bitrate = &cloud.StatusBitrate{Kbps: st.Bitrate.Kbps, MinKbps: st.Bitrate.MinKbps, MaxKbps: st.Bitrate.MaxKbps}

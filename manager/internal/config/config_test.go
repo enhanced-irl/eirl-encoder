@@ -175,7 +175,7 @@ func TestPatchSRTLA(t *testing.T) {
 	cur := dest(s)
 	// The form sends the previous latency: switching to SRTLA raises it to 2000
 	d, err := patch(t, cur, `{"url": "srtla://eu1.relay.example.com:5001", "latencyMs": 200}`)
-	if err != nil || d.LatencyMs != SRTLALatencyMs || d.Mode != "caller" || d.Protocol != "srtla" {
+	if err != nil || d.LatencyMs != DefaultLatencyMs || d.Mode != "caller" || d.Protocol != "srtla" {
 		t.Fatalf("switch to SRTLA: %+v %v", d, err)
 	}
 	// Same host: no need to type the key again

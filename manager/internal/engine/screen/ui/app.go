@@ -443,6 +443,13 @@ type UplinkInfo struct {
 	Label      string // the modem's operator or its alias: the row's title instead of the interface
 	Health     string // good | weak | bad | off: the row's dot
 	HealthCode string // why: the closed list of MODEMS.md §5, translated by Stream.UplinkHealth
+	// The Rust SRTLA sender's view of a link in use (SRTLA.md §9.4); HasStats false = none (another sender, or
+	// not streaming)
+	HasStats  bool
+	RTTMs     int
+	SendKbps  int
+	NakPerSec float64
+	Bond      string // "" | active | stalled | weak | down
 }
 
 // InputInfo is the saved input (GET /status input) and what runs now.

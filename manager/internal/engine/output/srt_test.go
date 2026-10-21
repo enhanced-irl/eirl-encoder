@@ -42,6 +42,13 @@ func TestClassifySRTLA(t *testing.T) {
 		"Failed to open and bind to any of the IP addresses in /run/x/srtla-ips": ReasonNoUplinks,
 		"warning: no available connections":                                      "", // it does not exit: not a reason
 		"192.168.1.232: connection established":                                  "",
+		// irlserver's Rust sender, after plainSRTLA (SRTLA.md §9.1)
+		"ERROR Failed to re-establish any connections":                                       ReasonRelayUnreachable,
+		"Error: srtla_send failed":                                                           "",
+		"    no uplinks available":                                                           ReasonNoUplinks,
+		"Error: no IPs in list: /run/eirl-engine/srtla-ips":                                  ReasonNoUplinks,
+		"Caused by: bind local SRT UDP listener: Address in use":                             ReasonInternal,
+		" WARN failed to add uplink 192.168.1.232 -> 203.0.113.20:5000: Network unreachable": "",
 	} {
 		if got := classifySRTLA(line); got != want {
 			t.Errorf("classifySRTLA(%q) = %q, want %q", line, got, want)
@@ -68,13 +75,17 @@ func TestMask(t *testing.T) {
 // MessagesTest.test_stats_interval: ~1 sample per second at 6000 + 128 kbps; with ABR, ~4 per second
 // at the minimum
 func TestStatsInterval(t *testing.T) {
-	if got := statsInterval(6000, 128, 1); got != 583 {
+	if got := statsInterval(6000, 128, 1, 1316); got != 583 {
 		t.Errorf("got %d", got)
 	}
-	if got := statsInterval(1000, 128, 4); got != 27 {
+	if got := statsInterval(1000, 128, 4, 1316); got != 27 {
 		t.Errorf("got %d", got)
 	}
-	if statsInterval(0, 0, 1) <= 0 {
+	// 1,128-byte packets (SRTLA.md §9.5): more of them per second
+	if got := statsInterval(6000, 128, 1, 1128); got != 680 {
+		t.Errorf("1128: got %d", got)
+	}
+	if statsInterval(0, 0, 1, 1128) <= 0 {
 		t.Error("not positive")
 	}
 }
@@ -162,5 +173,17 @@ func TestCutCountsCharacters(t *testing.T) {
 	}
 	if cut("abc", 200) != "abc" {
 		t.Error("short string changed")
+	}
+}
+
+func TestPlainSRTLA(t *testing.T) {
+	for in, want := range map[string]string{
+		"\x1b[2m2026-10-19T18:00:11.123456Z\x1b[0m \x1b[31mERROR\x1b[0m Failed to establish any initial connections": "ERROR Failed to establish any initial connections",
+		"2026-10-19T18:00:11.123456Z  WARN 203.0.113.20:5000 via 10.0.0.2 timed out":                                 "WARN 203.0.113.20:5000 via 10.0.0.2 timed out",
+		"192.168.1.232: connection established":                                                                      "192.168.1.232: connection established",
+	} {
+		if got := plainSRTLA(in); got != want {
+			t.Errorf("plainSRTLA(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

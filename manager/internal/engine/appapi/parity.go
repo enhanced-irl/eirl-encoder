@@ -336,6 +336,7 @@ var (
 	reTail        = regexp.MustCompile(`^[0-9A-Fa-f]{4}$`)
 	// MODEMS.md §5: a level and its code (closed lists: anything else is dropped and the row shows no dot)
 	healthLevels = set("good", "weak", "bad", "off")
+	bonds        = set("active", "stalled", "weak", "down")
 	healthCodes  = set("ok", "off", "ip_conflict", "disconnected", "searching", "sim_missing", "sim_pin", "sim_puk",
 		"sim_error", "modem_failed", "denied", "roaming_off", "no_internet", "signal_minimal", "signal_weak", "slow_tech",
 		"connecting", "link_weak")
@@ -550,6 +551,14 @@ func statusInfo(v any) *ui.StatusInfo {
 			u.Health = oneOf(um, "health", healthLevels)
 			if u.Health != "" {
 				u.HealthCode = oneOf(um, "healthCode", healthCodes)
+			}
+			// The Rust SRTLA sender's figures (SRTLA.md §9.4): all three or none
+			rtt, ok1 := intIn(um["rttMs"], 0, 60000)
+			kbps, ok2 := intIn(um["sendKbps"], 0, 1000000)
+			nak, ok3 := floatIn(um["nakPerSec"], 0, 100000)
+			if ok1 && ok2 && ok3 {
+				u.HasStats, u.RTTMs, u.SendKbps, u.NakPerSec = true, rtt, kbps, nak
+				u.Bond = oneOf(um, "bond", bonds)
 			}
 			st.Uplinks = append(st.Uplinks, u)
 		}

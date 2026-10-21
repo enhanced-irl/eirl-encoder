@@ -178,6 +178,12 @@ type StatusUplink struct {
 	TxKbps   int    `json:"txKbps"`
 	// NoInternet: the client Wi-Fi without internet (a captive portal), left out of the SRTLA split (WIFI.md §13)
 	NoInternet bool `json:"noInternet,omitempty"`
+	// The Rust SRTLA sender's figures for a link in use (SRTLA.md §9.3-§9.4; ENCODER_CLOUD.md §4.1). Today's backend
+	// keeps only the uplink fields it knows, so these are ignored until it learns them.
+	RTTMs     *int     `json:"rttMs,omitempty"`
+	SendKbps  *int     `json:"sendKbps,omitempty"`
+	NakPerSec *float64 `json:"nakPerSec,omitempty"`
+	Bond      string   `json:"bond,omitempty"`
 }
 
 type StatusBitrate struct {

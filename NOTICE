@@ -40,6 +40,15 @@ The release bundles built from this repository also contain:
     AGPL-3.0. It is built from a pinned upstream commit with one change, applied
     by build/srtla.sh (the local socket listens on 127.0.0.1 instead of all
     interfaces). That script and the pinned commit are its corresponding source.
+  - srtla_send_rs, the SRTLA sender of irlserver/srtla_send (https://github.com/irlserver/srtla_send), MIT
+    licence, with the Rust crates it links statically (MIT, Apache-2.0 and similar permissive licences, each
+    shipped with the release). It is built from a pinned upstream commit with one change, applied by
+    build/srtla-rs.sh (the local socket listens on 127.0.0.1 instead of all interfaces).
+  - ristsender from librist (https://code.videolan.org/rist/librist), BSD-2-Clause licence, statically linked
+    with the copies of mbedtls (Apache-2.0), cJSON (MIT) and LZ4 (BSD-2-Clause) it bundles. It is built without
+    changes from a pinned release by build/rist.sh.
+  - BlueALSA (bluez-alsa, https://github.com/arkq/bluez-alsa), MIT licence, built by build/bluealsa.sh, with
+    libsbc (LGPL-2.1-or-later) linked statically into its daemon; the release ships libsbc's source.
   - srt-live-transmit and the libsrt shared library from Haivision SRT
     (https://github.com/Haivision/srt), Mozilla Public License 2.0. They are
     built without changes from a pinned upstream tag by build/srt.sh; the
