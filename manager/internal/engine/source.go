@@ -76,6 +76,7 @@ type Source struct {
 	usbDev    string    // USB: its device (1-2.1), to cut its port's power if it hangs
 	usbIdent  string    // USB: which device that is (usbhub.Sys.Ident), to tell it from another on its port
 	unplugged time.Time // USB: since when it has been unplugged (zero = it is not): the actor frees its slot
+	held      bool      // USB: streaming with its frames held, no signal at its input (signalWatch)
 	lastFrame time.Time // the last time it gave frames (usb_on_air's "recently live")
 	// USB: the camera's image settings as last read (SOURCES.md §7) and the node they were read from
 	controls []camera.Control
@@ -95,6 +96,8 @@ type Source struct {
 	noImage   int
 	net       netcam.Path
 	recovery  *usbhub.Recovery // USB: power cut of a hung capture card (MIXER.md §16)
+	sig       *signalWatch     // USB: its card's signal flag, while it streams (SOURCES.md §9)
+	sigLogged string           // what openSignal last logged
 }
 
 func newSource(e *Engine, slot int, id, kind, name, node string) *Source {
@@ -541,9 +544,11 @@ func (s *Source) stream(desc string) detail.D {
 		s.close(pipe, snk)
 		return reason
 	}
+	defer s.closeSignal(snk) // after close: no black frame between releasing them and detaching
 	defer s.close(pipe, snk)
 	t0 := time.Now()
 	nextCheck := t0.Add(checkEvery)
+	sigTried := s.kind != "usb"
 	for !s.stopping() {
 		msg := pipe.Pop(200*time.Millisecond, gst.MessageError|gst.MessageEOS)
 		now := time.Now()
@@ -560,6 +565,12 @@ func (s *Source) stream(desc string) detail.D {
 			}
 			return reason
 		}
+		if got && !sigTried {
+			// Its flag, once the card streams: no HID request while it starts (SOURCES.md §9.2)
+			sigTried = true
+			s.openSignal()
+		}
+		s.checkSignal(snk, now)
 		if got {
 			s.noImage = 0
 			s.mu.Lock()
@@ -569,8 +580,13 @@ func (s *Source) stream(desc string) detail.D {
 			if s.recovery != nil {
 				s.recovery.Update(true, now, dev)
 			}
-			if cur, _, _ := s.snapshot(); cur != StateLive {
-				s.setState(StateLive, detail.D{})
+			want, d := StateLive, detail.D{}
+			if s.held {
+				// Frames, but none from its HDMI input: the slate, as for the board's HDMI (SOURCES.md §9)
+				want, d = StateNoSignal, detail.New("hdmi_no_signal")
+			}
+			if cur, _, _ := s.snapshot(); cur != want {
+				s.setState(want, d)
 			}
 			if age := m.Monotonic() - st.LastFrame; age > watchdog {
 				// It stops without an error (the Cam Link with -71): there is no other way to know

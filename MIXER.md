@@ -264,6 +264,10 @@ pieces today (`manager/internal/engine/…`):
   **pending:** translate it according to the encoder's language. A hidden source, or one that has been opening
   for less than 2 s, stays black. In the web, a thumbnail without a picture shows the same bars,
   dimmed.
+- A USB capture card that streams without a signal (the MS2109 sends black) gets the slate too: the engine reads
+  what the card says (the MS2109's "no signal" flag, over HID) or, for any other card, sees its picture still and
+  nearly uniform for 5 s; it holds its frames in the bridge and puts the source in `no_signal` (Oct 21,
+  [`SOURCES.md`](SOURCES.md) §9).
 
 **Screen.**
 - It runs in its own pipeline: if it fails or is unplugged, the stream carries on.

@@ -532,7 +532,7 @@ additive: `detail` keeps its Spanish text byte for byte for whoever already read
 
 | Code | Arguments | Spanish `detail` today |
 |---|---|---|
-| `hdmi_no_signal` | | sin señal HDMI |
+| `hdmi_no_signal` | | sin señal HDMI (the board's HDMI, and a USB capture card that says so: SOURCES.md §9) |
 | `hdmi_signal_lost` | | señal HDMI perdida |
 | `hdmi_locking` | | la señal HDMI se está enganchando |
 | `hdmi_mode_changed` | `from` (`1080p60`), `to` (`1280x720@60`) | la señal HDMI ha cambiado: {from} -> {to} |

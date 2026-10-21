@@ -75,6 +75,7 @@ void eg_bridge_thumb(EgBridge *b, GstElement *thumb_dst, gint64 every_ns);
 void eg_bridge_every(EgBridge *b, int every);
 void eg_bridge_dst(EgBridge *b, GstElement *dst);
 void eg_bridge_attach(EgBridge *b, GstElement *appsink);
+void eg_bridge_hold_if(EgBridge *b, GstElement *appsink, int hold);
 void eg_bridge_detach(EgBridge *b);
 // Detach only if appsink is still the bridge's input (a newer one may have attached since)
 void eg_bridge_detach_if(EgBridge *b, GstElement *appsink);

@@ -468,7 +468,8 @@ func (e *Engine) chooseUSB(id string) (probe.Result, error) {
 				continue
 			}
 			s.mu.Lock()
-			if s.state == StateLive && s.choice != nil {
+			// Held (no signal at its input) it still takes its share of the bus: it keeps streaming
+			if (s.state == StateLive || s.held) && s.choice != nil {
 				keep = append(keep, "-keep", probe.KeepArg(s.id, s.choice.Probe))
 			}
 			s.mu.Unlock()

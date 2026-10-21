@@ -11,7 +11,8 @@
 # What it does (and how to undo it, in MANAGER.md §11):
 #   system user eirl-encoder (groups video, i2c, systemd-journal) · /etc/eirl-encoder · udev rule of the
 #   USB capture devices (no autosuspend; the board's hub writable by the group eirl-usbhub, which only
-#   eirl-engine has, to recover a hung device) · app binary · the SRT output (srt-live-transmit and its
+#   eirl-engine has, to recover a hung device, and the MS2109's hidraw node, to read its signal) · app
+#   binary · the SRT output (srt-live-transmit and its
 #   libsrt in /usr/lib/eirl-encoder/lib) · srtla_send + NetworkManager dispatcher (SRTLA) · eirl-send (RTMP)
 #   and ristsender (RIST) · narrow
 #   sudoers · polkit · tmpfiles of the power readings and /run/eirl-uplinks · network cameras
@@ -306,6 +307,15 @@ if [ -z "$IMAGE" ]; then
     case "$(cat "$h/idProduct" 2>/dev/null)" in 5411|0411) ;; *) continue ;; esac
     n=$(printf '/dev/bus/usb/%03d/%03d' "$(cat "$h/busnum")" "$(cat "$h/devnum")") || continue
     [ -c "$n" ] && chgrp eirl-usbhub "$n" && chmod 0664 "$n"
+  done
+  # The MS2109 capture cards already plugged in: their hidraw node for eirl-usbhub, as the rule will do
+  for h in /sys/class/hidraw/hidraw*; do
+    case "$(sed -n 's/^HID_ID=//p' "$h/device/uevent" 2>/dev/null || true)" in
+      0003:0000534D:00002109|0003:0000345F:00002109) ;;
+      *) continue ;;
+    esac
+    n=/dev/$(basename "$h")
+    [ -c "$n" ] && chgrp eirl-usbhub "$n" && chmod 0660 "$n"
   done
 fi
 

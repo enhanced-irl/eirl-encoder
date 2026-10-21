@@ -421,6 +421,7 @@ type Bridge struct {
 	stats    gst.BridgeStats
 	Freed    bool
 	Every    int
+	Held     bool
 }
 
 func (b *Bridge) SetParams(p gst.BridgeParams) { b.mu.Lock(); b.Params = p; b.mu.Unlock() }
@@ -448,6 +449,7 @@ func (b *Bridge) SetThumb(dst gst.Element, _ time.Duration) {
 func (b *Bridge) Attach(appsink gst.Element) {
 	b.mu.Lock()
 	b.Attached = appsink.(*Element).name
+	b.Held = false
 	b.stats.Judge, b.stats.Lag = -1, -1
 	b.mu.Unlock()
 }
@@ -460,6 +462,17 @@ func (b *Bridge) SetDst(dst gst.Element) {
 		b.Dst = dst.(*Element).name
 	}
 }
+
+func (b *Bridge) HoldIf(appsink gst.Element, hold bool) {
+	b.mu.Lock()
+	if appsink != nil && b.Attached == appsink.(*Element).name {
+		b.Held = hold
+	}
+	b.mu.Unlock()
+}
+
+// IsHeld says whether the input's frames are held.
+func (b *Bridge) IsHeld() bool { b.mu.Lock(); defer b.mu.Unlock(); return b.Held }
 
 func (b *Bridge) Detach() { b.mu.Lock(); b.Attached = ""; b.mu.Unlock() }
 

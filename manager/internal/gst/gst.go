@@ -400,6 +400,14 @@ func (b *bridge) SetEvery(n int) { C.eg_bridge_every(b.p, C.int(n)) }
 
 func (b *bridge) Attach(appsink Element) { C.eg_bridge_attach(b.p, raw(appsink)) }
 
+func (b *bridge) HoldIf(appsink Element, hold bool) {
+	h := C.int(0)
+	if hold {
+		h = 1
+	}
+	C.eg_bridge_hold_if(b.p, raw(appsink), h)
+}
+
 func (b *bridge) Detach() { C.eg_bridge_detach(b.p) }
 
 func (b *bridge) DetachIf(appsink Element) { C.eg_bridge_detach_if(b.p, raw(appsink)) }

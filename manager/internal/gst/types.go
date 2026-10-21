@@ -215,6 +215,10 @@ type Bridge interface {
 	SetEvery(n int)
 	// Attach makes appsink the bridge's input; frames of a previous appsink are dropped.
 	Attach(appsink Element)
+	// HoldIf keeps appsink's frames out of the program and the screen while hold (they still count in
+	// Stats: the device is alive, and the thumbnail still gets them), only if appsink is still the input.
+	// Attach releases it.
+	HoldIf(appsink Element, hold bool)
 	Detach()
 	// DetachIf detaches only if appsink is still the input: a source that is closing must not take the
 	// bridge from the one that replaced it in the slot.

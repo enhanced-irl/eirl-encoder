@@ -1,5 +1,5 @@
-> **Status:** IN PROGRESS — **in `main` (MR !5)**, phase 0 measured (1080p60 over USB fits), installed and tested on the board on Oct 12 (hot unplugging too). Still missing: per-source A/V sync and a long test. Camera image settings (§7): released in v0.4.0. Plugging and unplugging while running, and the audio following the video slots (§8): released in v0.6.0
-> **Updated:** 2026-10-15
+> **Status:** IN PROGRESS — **in `main` (MR !5)**, phase 0 measured (1080p60 over USB fits), installed and tested on the board on Oct 12 (hot unplugging too). Still missing: per-source A/V sync and a long test. Camera image settings (§7): released in v0.4.0. Plugging and unplugging while running, and the audio following the video slots (§8): released in v0.6.0. "NO SIGNAL" for a USB capture card without a signal (§9; the MS2109 by its flag, any other by its picture): in progress (Oct 21)
+> **Updated:** 2026-10-21
 
 # Encoder video sources (board HDMI, capture cards and USB cameras)
 
@@ -193,7 +193,8 @@ launcher with `.bak-20261012-sources` backups and the udev rule.
   with `avsync_ball.py` per source, **long test** (2 h, MJPEG through NVJPG included) and temperature.
 - The Cam Link shows up fine if it is already plugged in at boot (several boots on Oct 12, also
   cold).
-- MS2130: untested (none available). The MS2109 works in the mixer (MJPEG 1080p60 at 60 fps over USB 2).
+- MS2130: untested (none available). The MS2109 works in the mixer (MJPEG 1080p60 at 60 fps over USB 2); without a
+  signal it streams black, which §9 turns into the slate.
 - **Capture card connected but without a picture** (camera off): if it does not deliver frames, the watchdog stops
   the stream after 3 s and systemd relaunches it, in a loop (like BELABOX), with a log line every few
   seconds and SRT reconnecting. See in F0 what each device does without a signal (some send a
@@ -419,3 +420,136 @@ hidden, back to its own slot (placed before a new one), the camera waiting for a
 stale probe, the four "unplugged" cases, by-path and the second probe, black in the empty slots; the audio following
 the video slots (a slot off, a slot pinned to a waiting camera, the loose microphone giving up its slot, the audio on
 air kept, an audio chosen by hand, a camera's audio kept while its video keeps its slot).
+
+## 9. A capture card without a signal ("NO SIGNAL" for USB)
+
+Asked for on Oct 21: an MS2109 with nothing on its HDMI input showed **black** in its slot, and the engine took it
+for a live source. The MS2109 keeps streaming at its full rate without a signal (black frames, MJPEG), so the
+frames alone cannot tell; the slot should show the slate with "NO SIGNAL", as the board's HDMI does. And not only for
+the MS2109: for any USB capture card. Two ways, the first that applies: **what the card says**, when it says it in a
+way we know (the MS2109's flag, exact), and otherwise **its picture** (generic, any card).
+
+### 9.1 No standard way
+
+Looked into on Oct 21 (descriptors of the board's cards and published `lsusb -v` dumps; the Linux sources):
+
+- UVC has a control for it (the processing unit's *analog video lock status*), but **no card found offers it**: the
+  MS2109 and the Logi (read on the board), the Cam Link 4K, the HD60 X, the MS2130 and the GC553 (dumps) do not set its
+  bit. And `uvcvideo` would not let us read it anyway: it has no V4L2 mapping (4.9 nor today's), its raw query only
+  takes extension units, and usbfs refuses class requests to an interface `uvcvideo` holds.
+- `VIDIOC_ENUMINPUT` never fills `status` in `uvcvideo`; the status interrupts are only logged in 4.9; a payload with
+  the error bit is silently dropped (4.9).
+- Capture cards cannot be told from webcams by their descriptors either: the MS2109 calls its input a camera.
+- Without a signal each card does its own thing: black at full rate (the MS2109), its own "No signal" picture (the
+  MS2130 for about a minute, Magewell's chosen status picture), frames stop (reported for some Elgato and AVerMedia
+  models; the Cam Link 4K is unknown), or a vendor channel (the MS2109's HID, reverse-engineered; Magewell's SDK, closed
+  and x86).
+
+### 9.2 The MS2109's flag (HID)
+
+The MS2109 has a vendor HID interface besides its video and audio (`1-2.1:1.4`, `/dev/hidrawN`): its ROM answers
+9-byte feature reports that read the 8051's memory (`0xB5` + a 16-bit address → one byte; the protocol of
+the open-source *ms-tools*, its "RAM" region, where IRAM is `0x00-0xFF`). **IRAM `0x20`, bit 4 (`0x10`), is set while
+the HDMI input has no signal.** Measured on the test board on Oct 21 (chip `0xA7` at `0xF800`, `534d:2109`,
+capture running), plugging a source in and out:
+
+| HDMI input | IRAM `0x20` | IRAM `0x23` |
+|---|---|---|
+| Nothing (since boot) | `30` | `02` |
+| Plugged in (1-3 s to lock) | `26` → `02` → `00` | `06` → `0e` → `06` |
+| Unplugged | `18` | `02` |
+
+The same bit was found by an MS2109 LED project on chip `0xD7` (`0x94` without a signal, `0x84` with one). Only bit 4
+is read; `0x23` bit 2 (set with a signal) is the same information and is not used. Notes:
+
+- **Only while it streams.** That project saw the flag stale with the capture idle, so it is read only while the
+  source's pipeline runs, which is when it matters.
+- A read is a HID control transfer (~0.25 ms). Reading the whole IRAM and 8 KB of XDATA in a row while it streamed
+  did not disturb the capture (30 fps throughout).
+- Only reads are sent (`0xB5`). The same interface can **write** the card's memory and EEPROM, so its node is not
+  world-readable (9.5).
+- Other chips are not read this way: a wrong "no signal" would put the slate over a live picture. They go by their
+  picture (9.3).
+
+### 9.3 Any other card: its picture
+
+What a card sends without a signal (black, blue, its own "No signal" picture) is **the same picture again and again,
+nearly uniform**. A camera never sends two identical pictures (its sensor's noise), not even in the dark. So
+`usbsignal.Picture` looks at the slot's **thumbnail**, the 320x180 JPEG the engine already makes once a second for the
+web: two identical thumbnails are two identical pictures (same frames, same conversion, same encoder). It costs one
+comparison of a few KB a second; a picture is decoded only once, when it repeats, to see whether it is nearly uniform
+(≥ 90 % of its pixels within 8 levels of luma of the most common one: black, blue, or with a small box of text).
+
+- **No signal** once the picture has been **still and nearly uniform for 5 s** (`StillLimit`), then the two reads of
+  9.4: the slate ~6-7 s after the signal goes.
+- **A signal** as soon as a thumbnail differs (then the two reads: ~2-3 s), and also whenever it cannot tell: no
+  thumbnail for 3 s (no frames: the watchdog's case) or none yet.
+- While held, the bridge still sends its frames to the thumbnail (and only there): it is how the picture is seen to
+  come back.
+- A card that stops sending frames needs nothing of this: the watchdog already shows the slate (3 s, "no image").
+
+**Its blind spot** (a decision of design, not a bug): an HDMI source that really sends a still, nearly uniform picture
+(a console's black loading screen, a blank or black desktop) gets the slate after 5 s, until the picture changes. A
+camera on HDMI does not (noise); a webcam in total darkness with heavy noise reduction might (no picture either).
+The board's MS2109 goes by its flag, which has no such blind spot.
+
+### 9.4 What the engine does
+
+`internal/engine/usbsignal`: `Sys.Open` finds the MS2109's hidraw node from its USB device (`1-2.1`: idVendor `534d`
+or `345f`, idProduct `2109`), checks the chip (`0xA7` or `0xD7`) and reads the flag; `Picture` is the generic way.
+The source (`usbsig.go`), at each opening of a USB source:
+
+- With the **first frame** of the opening, not before (no HID request while the card starts its stream): the card's
+  flag if it has one, otherwise its picture. `event=usb_signal_watch method=flag chip=a7 node=/dev/hidraw1` or
+  `method=picture`; a flag that cannot be read (without the udev rule: permission) adds `flag_err` and the picture
+  stands in. Logged when the way changes.
+- Reads it **once a second** while the pipeline runs. The first read counts at once; then a change needs **two
+  equal reads in a row** (while it locks, one read of the flag can catch it halfway: `0x26`).
+- **Without a signal**: the bridge **holds** the frames (`gst.Bridge.HoldIf`: they still count, so the watchdog
+  sees the device alive, but they reach neither the program nor the screen; only the thumbnail), and the source goes
+  to `no_signal` with the detail `hdmi_no_signal` ("no HDMI signal", already translated everywhere). The slate tick
+  (250 ms) puts the slate in its slot, on air too, as for any source without a picture. The web's tile shows the state
+  instead of the thumbnail.
+- **The signal comes back**: the frames are released and the source goes `live`. The MS2109 may still give black for
+  a few seconds after a stream starts (an observation of protoHDMIcapture); here the stream does not restart, so it is
+  the card's own lock time.
+- The capture stays open without a signal: both ways need it, and so the picture is back with no reopening. It keeps
+  its share of the USB bus too: a held source counts as live when the bus is shared out (`probe -all -keep`).
+- Three failed reads of the flag in a row (unplugged, hung): the flag is given up for that opening
+  (`event=usb_signal_failed`) and the source goes by its frames, as before. Unplugging is handled as always (§8).
+
+The source's event in the log is `source_state` (the board's HDMI says `signal_lost`, which the app forwards to the
+cloud; a USB card's loss is not forwarded for now).
+
+### 9.5 Permission and install
+
+The engine runs without root. The capture cards' udev rule (`manager/deploy/70-eirl-capture.rules`) gives the MS2109's
+hidraw node to the group `eirl-usbhub` with mode `0660` (the group only `eirl-engine` has: the same one that may cut
+the hub's power, MIXER.md §16). `install.sh` applies it to the cards already plugged in. Without the rule the engine
+goes by the card's picture (9.3), as for any other card.
+
+Undo: remove the last rule from the file, `sudo udevadm control --reload` and `sudo chgrp root /dev/hidrawN`.
+
+### 9.6 Tested on the board (Oct 21)
+
+Engine and rule installed by hand for the test (then the board went back to its previous build), with the MS2109 on air
+and the output off, the owner watching the screen: with nothing plugged in, the slate in the program and on the screen,
+"No HDMI signal" in its tile; a source plugged in, its picture (`state=live`); unplugged, the slate again
+(`state=no_signal code=hdmi_no_signal`). The delays were not timed: expected, the card's lock (1-3 s, 9.1) plus up to
+two reads (1-2 s). The rule only touched the MS2109's node (not the touch screen's or the Logi's
+hidraw), and `eirl-engine` could open it.
+
+At that test's engine start, the MS2109's first opening gave no image for 6 s (`no_image`, reopened fine after 1.5 s).
+It is known to do that sometimes after a restart (`needsJPEGParse`), but the four restarts before that day had gone
+straight to live, and that build read the chip right after the stream started. Since then the flag is opened only
+after the first frame (9.4). Still to be seen over more restarts.
+
+The picture way is not tested on the board yet (it can be, on the MS2109, without the udev rule).
+
+### 9.7 Tests
+
+`go test ./internal/engine/usbsignal` (finding the node, the chip, only reads, the board's values, the two-read rule;
+flatness of black, blue, a small box, a big box, a dark camera; still for 5 s, a new picture, stale thumbnails, a
+still picture with detail, a camera) and `go test ./internal/engine/ -run 'USBCard|USBSignal'` (the flag: held and
+`no_signal` without a signal, live again after two reads, given up after three failures, released at the end of an
+opening; the picture: a webcam stays live, still black thumbnails → `no_signal`, a moving picture → live).

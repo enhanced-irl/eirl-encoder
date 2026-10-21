@@ -34,6 +34,7 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/sysx"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/tcaudio"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/usbhub"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/usbsignal"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/gst"
 )
 
@@ -64,6 +65,8 @@ type Options struct {
 	InputALSA string
 	// USB is where the USB recovery finds sysfs and the hubs (zero value = the real system)
 	USB usbhub.Sys
+	// Signal is where the USB capture cards' signal flag is read (zero value = the real system)
+	Signal usbsignal.Sys
 }
 
 // Engine is the running engine.
@@ -75,6 +78,7 @@ type Engine struct {
 	net    *netcam.Client
 	srv    *server.Server
 	hubs   *usbhub.Hubs
+	usbSig usbsignal.Sys
 	nslots int
 	tc     bool
 	out    *output.Output // the hot output (F3): SRT, SRTLA, RTMP(S), RIST or UDP, with ABR (OUTPUTS.md)
@@ -108,6 +112,7 @@ type Engine struct {
 	pauseBridge gst.Bridge
 	thumbsMu    sync.Mutex // thumbs is set by its own goroutine at start (startThumbs) and taken by Stop
 	thumbs      gst.Pipeline
+	pictures    []*usbsignal.Picture // per slot, from its thumbnails: a capture card's generic signal (SOURCES.md §9)
 	slate       gst.Buffer
 	black       gst.Buffer
 	pauseBuf    gst.Buffer
@@ -183,6 +188,7 @@ func New(o Options) *Engine {
 		stopped:    make(chan struct{}),
 		pauseSlot:  c.MixerSlots,
 		hubs:       usbhub.NewHubs(o.USB),
+		usbSig:     o.Signal,
 		tc:         o.TC358743,
 		inALSA:     o.InputALSA,
 		loadConfig: func() (*config.Config, error) { return config.Load(config.Options{}) },
@@ -198,6 +204,10 @@ func New(o Options) *Engine {
 		e.runDir = ""
 	}
 	e.sources = make([]*Source, e.nslots)
+	e.pictures = make([]*usbsignal.Picture, e.nslots)
+	for i := range e.pictures {
+		e.pictures[i] = usbsignal.NewPicture()
+	}
 	e.loadSlots()
 	e.loadScene()
 	return e
@@ -445,6 +455,7 @@ func (e *Engine) startThumbs() {
 			b.SetThumb(p.ByName(fmt.Sprintf("th%d", i)), thumbEvery)
 			snk := p.ByName(fmt.Sprintf("thj%d", i))
 			path := filepath.Join(e.runDir, fmt.Sprintf("source-%d.jpg", i+1))
+			pic := e.pictures[i]
 			e.wg.Add(1) // this goroutine still counts: never from zero
 			go func() {
 				defer e.wg.Done()
@@ -456,6 +467,7 @@ func (e *Engine) startThumbs() {
 					}
 					if jpg := snk.PullBytes(500 * time.Millisecond); jpg != nil {
 						_ = sysx.WriteAtomic(path, jpg, 0o644)
+						pic.Add(jpg, time.Now())
 					}
 				}
 			}()

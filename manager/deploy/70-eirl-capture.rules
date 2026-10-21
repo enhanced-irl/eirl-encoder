@@ -18,3 +18,9 @@ SUBSYSTEM=="sound", KERNEL=="card*", ENV{ID_USB_INTERFACES}=="*:0e01??:*", ENV{P
 # alimentación de un puerto, lo único que recupera una capturadora colgada con `-71`
 # (internal/engine/usbhub, MIXER.md §16). Ni los hubs raíz ni otros hubs ni ningún otro aparato.
 SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="0bda", ATTR{idProduct}=="5411|0411", GROUP="eirl-usbhub", MODE="0664"
+
+# The MacroSilicon MS2109 capture card (534d:2109, and the same chip as 345f:2109): its factory HID interface
+# says whether its HDMI input has a signal, which its frames do not tell (it streams black without one;
+# internal/engine/usbsignal, SOURCES.md §9). Its hidraw node for eirl-usbhub (only eirl-engine), which only
+# sends it reads. Not world-readable: the same interface can rewrite the card's EEPROM.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="534d|345f", ATTRS{idProduct}=="2109", GROUP="eirl-usbhub", MODE="0660"

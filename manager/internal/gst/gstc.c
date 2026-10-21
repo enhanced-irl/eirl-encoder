@@ -233,6 +233,7 @@ struct EgBridge {
 	int judge_n;
 	gint64 judge_min;
 	int every;            // pass bridges: one frame of every `every` (the output at half the rate); ≤ 1 = all
+	int hold;             // the input's frames count but go nowhere (no signal at a capture card's input)
 	EgBridgeStats st;
 };
 
@@ -429,6 +430,22 @@ static GstFlowReturn on_sample(GstAppSink *snk, gpointer data)
 	gint64 now = (gint64)gst_clock_get_time(b->clock);
 	b->st.frames++;
 	b->st.last_frame_ns = mono_ns();
+	if (b->hold) {
+		// Counted (the device is alive: no watchdog) but out of the program and the screen: the slot
+		// gets the slate from Go. The thumbnail still goes: it is how Go sees the picture come back
+		// (SOURCES.md §9)
+		gint64 mono = b->st.last_frame_ns;
+		if (b->thumb_dst != NULL && b->thumb_every_ns > 0 && mono - b->thumb_last >= b->thumb_every_ns) {
+			b->thumb_last = mono;
+			// The program's timeline, as the thumbnails always get it
+			set_pts(buf, next_pts(b, now, b->kind == 0 ? b->sync_ns + b->extra_ns : b->extra_ns));
+			gst_app_src_push_buffer(GST_APP_SRC(b->thumb_dst), buf);
+		} else {
+			gst_buffer_unref(buf);
+		}
+		g_mutex_unlock(&b->lock);
+		return GST_FLOW_OK;
+	}
 
 	if (b->kind == 2) {
 		timing_add(b, now, FALSE, 0);
@@ -498,6 +515,7 @@ void eg_bridge_attach(EgBridge *b, GstElement *appsink)
 {
 	g_mutex_lock(&b->lock);
 	swap_ref(&b->current, appsink);
+	b->hold = 0;
 	b->judge_n = 0;
 	b->judge_min = G_MAXINT64;
 	b->st.judge = -1;
@@ -508,6 +526,15 @@ void eg_bridge_attach(EgBridge *b, GstElement *appsink)
 	memset(&cb, 0, sizeof(cb));
 	cb.new_sample = on_sample;
 	gst_app_sink_set_callbacks(GST_APP_SINK(appsink), &cb, b, NULL);
+}
+
+// Hold (or release) the frames of appsink, only if it is still the input; a new attach releases them
+void eg_bridge_hold_if(EgBridge *b, GstElement *appsink, int hold)
+{
+	g_mutex_lock(&b->lock);
+	if (b->current == appsink)
+		b->hold = hold;
+	g_mutex_unlock(&b->lock);
 }
 
 void eg_bridge_detach(EgBridge *b)
