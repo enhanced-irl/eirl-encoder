@@ -1,0 +1,1 @@
+- Fixed: an iPhone plugged in by cable never gave the encoder an internet connection (0.8.0 SD card image and version 0.11.0). If it was plugged in when you updated, unplug it and plug it back in.

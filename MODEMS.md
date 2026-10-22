@@ -1,5 +1,5 @@
-> **Status:** IN PROGRESS — plan approved on Oct 14 (§10). M1-M3 merged (the app's modem service and the dots, the web's card, the screen's header and tab). M4 (configuration, a modem's page on the screen and the web) written from the documentation of ModemManager, NetworkManager and the HiLink API, and tested against fakes and the simulator: §11 is what M0 checks with real modems. M0 waits for the test modems and hub. An iPhone sharing its data over USB works since Oct 19 (§12), in the image from 0.8.0
-> **Updated:** 2026-10-19
+> **Status:** IN PROGRESS — plan approved on Oct 14 (§10). M1-M3 merged (the app's modem service and the dots, the web's card, the screen's header and tab). M4 (configuration, a modem's page on the screen and the web) written from the documentation of ModemManager, NetworkManager and the HiLink API, and tested against fakes and the simulator: §11 is what M0 checks with real modems. M0 waits for the test modems and hub. An iPhone sharing its data over USB works since Oct 19 (§12): over the air for every board from 0.11.1 (the image of 0.8.0 and the release 0.11.0 carry it with a usbmuxd that cannot open its session: §12.2)
+> **Updated:** 2026-10-23
 
 # Cellular modems and the health of every connection
 
@@ -391,8 +391,9 @@ Results: a line per item here (✅, or what changed and the commit).
 ## 12. iPhone over USB (Oct 19)
 
 An iPhone with **Personal Hotspot** on, plugged into the encoder by cable, is one more internet link: the
-same as an Android sharing its data, also for SRTLA. It needs two things L4T lacks: in the SD card image from
-**0.8.0**, and over the air for every board (the system layer, UPDATES.md §12) from the first release that carries it:
+same as an Android sharing its data, also for SRTLA. It needs two things L4T lacks, over the air for every board
+from **0.11.1** (the system layer, UPDATES.md §12). The SD card image of 0.8.0 and the release 0.11.0 already carry
+them, but with a drop-in that leaves usbmuxd without its session (§12.2): no link before 0.11.1.
 
 - **`ipheth`**, the kernel's driver for the iPhone's tethering interface (§4.1).
 - **`usbmuxd`** (Ubuntu's package, 1.1.0 with libimobiledevice 1.2.1). An iPhone shows up in its photos
@@ -421,7 +422,14 @@ A test iPhone 15 (`iPhone15,4`, iOS 26.7.1) on the board's USB hub, with the sof
 `idevicepair validate` (libimobiledevice-utils, not in the image) answers error -8 with this old libimobiledevice;
 it does not affect the link.
 
-### 12.2 The phone's trust is root's only
+Again on Oct 23, with what the system layer of 0.11.0 installed (the packages, `ipheth`, the drop-in of §12.2): no
+link. usbmuxd switched the phone to configuration 4 (`eth1` without carrier) and logged `Could not connect to
+lockdownd … lockdown error -8`: the drop-in had made its socket root's. With the socket given to usbmuxd's user, as
+from 0.11.1: link and address 1.1 s after plugging it in, socket `0600 usbmux:root`, records `0600`, another user of
+the board refused by the socket. The phone asked for the trust once more at the first plug; the board's record of
+Oct 19 was not rewritten, and the phone did not ask again.
+
+### 12.2 The phone's trust stays with usbmuxd and root
 
 The pairing record usbmuxd keeps reaches much more of the phone than its tethering (its files, its backups). As
 Ubuntu ships it, any user of the board could use it: usbmuxd's socket is `0666` and its records are world-readable
@@ -429,9 +437,14 @@ Ubuntu ships it, any user of the board could use it: usbmuxd's socket is `0666` 
 
 - `UMask=0077`: the records are written `0600` (usbmuxd sets its folder back to `2775` on every start, so the
   files are what is protected).
-- The socket made `0600`: usbmuxd chmods it to `0666` right after creating it (hard-coded, no option), so the
-  drop-in waits for that `0666` and then changes it. If the socket does not show up in 3 s the unit fails:
-  closed, not open. In between there are a few milliseconds while it is `0666`, right after an iPhone is plugged in.
+- The socket given to usbmuxd's own user (`usbmux`) and made `0600`: usbmuxd chmods it to `0666` right after
+  creating it (hard-coded, no option), so the drop-in waits for that `0666` and then changes it, the owner first. If
+  the socket does not show up in 3 s the unit fails: closed, not open. In between there are a few milliseconds while
+  it is `0666`, right after an iPhone is plugged in.
+
+🪤 Root-only is not enough: usbmuxd starts as root, drops to `usbmux` and opens its session with the iPhone through its
+own socket, as a client. With the socket root's (the drop-in of the image of 0.8.0 and of the release 0.11.0) that
+fails (`lockdown error -8`) and there is no link. Fixed in 0.11.1 (Oct 23): a board with either gets it over the air.
 
 None of the encoder's services talks to usbmuxd. The image's check refuses an image with records or a host
 identity in `/var/lib/lockdown`: the host identity (`SystemConfiguration.plist`) is made on each device the first
@@ -442,6 +455,8 @@ time an iPhone is plugged in.
 - usbmuxd is started by its udev rule (`SYSTEMD_WANTS`) only when the iPhone's device **appears**. Re-authorising
   the USB device (`authorized` 0/1) or `udevadm trigger` with the device already there does not start it again:
   `systemctl start usbmuxd`.
+- usbmuxd exits when the last iPhone is unplugged (its udev rule runs `usbmuxd -x`) and starts again at the next
+  plug: a change to its socket by hand lasts until the phone is unplugged.
 - `ipheth` binds as soon as the phone is in configuration 4 (`eth1` with no carrier): the interface existing
   does not mean the link is there.
 
@@ -451,7 +466,5 @@ time an iPhone is plugged in.
 - No hint when an iPhone is plugged in but has no link (not trusted, or Personal Hotspot off): the screen could say
   what to do on the phone.
 - The board's hub cut (§8) drops it, as it does the modems.
-- On the test board (Oct 19) it was installed by hand: `ipheth.ko` with `tools/modem-modules.sh`'s path
-  (`updates/eirl-modems/`), `usbmuxd` and `libimobiledevice-utils` with apt, and the drop-in of §12.2. To undo it:
-  `sudo apt-get purge usbmuxd libimobiledevice-utils`, `sudo rm -r /etc/systemd/system/usbmuxd.service.d
-  /lib/modules/$(uname -r)/updates/eirl-modems/ipheth.ko && sudo depmod -a`.
+- On the test board, what was installed there by hand on Oct 19 was replaced by the system layer of 0.11.0 on
+  Oct 22 (UPDATES.md §12.13).

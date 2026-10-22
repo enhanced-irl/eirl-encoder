@@ -1,4 +1,4 @@
-> **Status:** RELEASED (the OTA since v0.1.0, Oct 14; the system layer, §12, since 0.11.0, Oct 22) · **Updated:** 2026-10-22
+> **Status:** RELEASED (the OTA since v0.1.0, Oct 14; the system layer, §12, since 0.11.0, Oct 22) · **Updated:** 2026-10-23
 
 # Over-the-air updates
 
@@ -740,3 +740,6 @@ card was flashed with is in `/usr/lib/eirl-image/flashed` (images from the new r
   included), 4 files, nothing waiting for a restart, healthy. A release whose layer has a file that does not match:
   refused before changing anything, rolled back. A healthy one: installed. The board's fingerprint is then the new
   image's, except what its debug image adds (its SSH user, sshd) and the release's name.
+- With a real iPhone on the test board (Oct 23), on what the layer of 0.11.0 installed: no link. Its drop-in made
+  usbmuxd's socket root's, and usbmuxd, running as its own user, could not open its session with the phone through it
+  (MODEMS.md §12.2). With the drop-in of 0.11.1: link and address 1.1 s after plugging it in.

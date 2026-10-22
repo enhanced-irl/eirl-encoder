@@ -1,0 +1,1 @@
+- Arreglado: el iPhone enchufado por cable no llegaba a dar conexión a internet al codificador (imagen de tarjeta 0.8.0 y versión 0.11.0). Si lo tenías enchufado al actualizar, desenchúfalo y vuelve a enchufarlo.

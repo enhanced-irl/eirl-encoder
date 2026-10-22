@@ -1,0 +1,1 @@
+- Corrigé : un iPhone branché par câble ne donnait jamais de connexion internet à l'encodeur (image de carte 0.8.0 et version 0.11.0). S'il était branché pendant la mise à jour, débranchez-le puis rebranchez-le.

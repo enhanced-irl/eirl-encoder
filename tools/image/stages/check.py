@@ -219,12 +219,14 @@ def main():
     ok("bluez installed, bluetooth.service not enabled", "bluez" in installed and "bluetooth.service" not in w
        and not os.path.lexists(os.path.join(R, "etc/systemd/system/dbus-org.bluez.service")))
     # An iPhone's USB tethering (MODEMS.md §12): usbmuxd, started by its udev rule when an iPhone is plugged in, and
-    # our drop-in that keeps the phone's trust (its socket, its pairing records) for root only
+    # our drop-in that keeps the phone's trust (its socket, its pairing records) for usbmuxd and root only: the socket
+    # must be usbmuxd's own user's, or usbmuxd cannot open its session with the iPhone through it
     ok("usbmuxd installed, started by its udev rule", "usbmuxd" in installed
        and os.path.exists(os.path.join(R, "lib/udev/rules.d/39-usbmuxd.rules")) and "usbmuxd.service" not in w)
     dropin = os.path.join(R, "etc/systemd/system/usbmuxd.service.d/90-eirl.conf")
     dtext = open(dropin).read() if os.path.exists(dropin) else ""
-    ok("usbmuxd: socket and pairing records root-only", "UMask=0077" in dtext and "chmod 0600 /run/usbmuxd" in dtext)
+    ok("usbmuxd: socket and pairing records for usbmuxd and root only", "UMask=0077" in dtext
+       and "chown usbmux /run/usbmuxd && chmod 0600 /run/usbmuxd" in dtext)
 
     # --- per-device values and nothing of the test board
     mid = open(os.path.join(R, "etc/machine-id"), encoding="utf-8").read()
