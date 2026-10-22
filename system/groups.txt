@@ -1,0 +1,2 @@
+# system/groups.txt — system groups the system layer makes sure exist (UPDATES.md §12).
+debug    # NVIDIA's udev rules give the GPU's debug nodes to it; L4T's own image creates it with its first user

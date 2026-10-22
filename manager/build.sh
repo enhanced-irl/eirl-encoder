@@ -78,9 +78,9 @@ bluealsa_version=$(sed -n 's/^BLUEALSA_VERSION=\([^ ]*\).*/\1/p' ../build/blueal
 if ! [ -x ../build/out/bluealsa/bluealsa ] || [ "$(head -1 ../build/out/bluealsa/bluealsa.version 2>/dev/null)" != "$bluealsa_version" ]; then
   ../build/bluealsa.sh
 fi
+# Only the daemon: its ALSA plugins and their configuration are the system layer's (system/built.txt, UPDATES.md §12)
 mkdir -p dist/pkg/bluealsa
-cp ../build/out/bluealsa/bluealsa ../build/out/bluealsa/libasound_module_pcm_bluealsa.so \
-  ../build/out/bluealsa/libasound_module_ctl_bluealsa.so ../build/out/bluealsa/20-bluealsa.conf dist/pkg/bluealsa/
+cp ../build/out/bluealsa/bluealsa dist/pkg/bluealsa/
 # Update helper (UPDATES.md §7)
 build dist/pkg/eirl-update ./cmd/eirl-update
 

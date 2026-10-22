@@ -118,7 +118,9 @@ columns on a wide monitor (≥ 1700 px). What is inside each zone adapts to its 
 - camera image: the settings each USB camera has (brightness, exposure, white balance, focus…), hot, with «Factory
   settings»; only with a camera that has them (SOURCES.md §7);
 - updates: version, state, «Check now», «Update to X» with the release notes, disabled while streaming
-  (`/update`, `UPDATES.md`), and a banner when a new version is available;
+  (`/update`, `UPDATES.md`), and a banner when a new version is available; whether the download waits for Wi-Fi or a
+  cable, whether the system part of the last update failed, and «Restart now» when something of it waits for a restart
+  (`POST /update/reboot`, refused while streaming; UPDATES.md §12.5);
 - device: language, name (and its `.local` name), time zone, NTP or manual clock, and «Repeat the initial setup»
   (`/device`, `/setup/restart`);
 - live log and password change.
@@ -465,7 +467,7 @@ is, [`SETUP.md`](SETUP.md) §3). **No session or CSRF**: the
   | `GET /modems`, `PUT /modems/{id}`, `POST /modems/{id}/{pin,reset,subnet}` | Same as in the web ([`MODEMS.md`](MODEMS.md) §7). The PIN typed on the screen comes here directly, never through the engine's socket nor its state |
   | `POST /service/restart` | "Apply" (Oct 14); `start` and `stop`, `403`. It restarts the engine, the caller: the screen never sees the `202` (nor the answer of a `PUT` with `"apply": true` that restarts), and the app does not cut the restart when the socket closes |
   | `PUT /password` | Same as in the web (Oct 14), with no session to keep: **every web session is closed**. The screen's wrong attempts are counted as one caller (5 per minute, then `429`); `503 setup_required` without a password |
-  | `GET/PUT /device`, `GET /device/timezones`, `GET /setup`, `POST /setup/{password,step,complete,restart}`, `GET/PUT /sources/slots`, `GET /update`, `POST /update/{check,install}` | The device settings, the wizard (the setup code only here), the slots and the updates ([`SETUP.md`](SETUP.md) §8) |
+  | `GET/PUT /device`, `GET /device/timezones`, `GET /setup`, `POST /setup/{password,step,complete,restart}`, `GET/PUT /sources/slots`, `GET /update`, `POST /update/{check,install,reboot}` | The device settings, the wizard (the setup code only here), the slots and the updates ([`SETUP.md`](SETUP.md) §8) |
   | `GET /cloud`, `POST /cloud/pair`, `DELETE /cloud` | The link, the pairing code (`?qr=rows` → `linkQrRows`) and unlinking (Oct 14). With a destination the cloud set, unlinking restarts the engine, and the cloud is still notified when the socket closes |
   | `GET/PUT /bluetooth`, `POST /bluetooth/{scan,visible}`, `POST /bluetooth/devices/{address}/{action}`, `PUT /bluetooth/devices/{address}` | Same as in the web (Oct 15, [`BLUETOOTH.md`](BLUETOOTH.md)): no keys in them, and opening the visible window from the screen is physical access |
 
@@ -878,6 +880,7 @@ cd manager && go run ./cmd/eirl-encoder-sim -api https://api.dev.enhancedirl.com
 #   pairing code=XXXX-XXXX link=https://app.dev.enhancedirl.com/encoders/link?pairing=XXXX-XXXX
 go run ./cmd/eirl-encoder-sim -api http://localhost:3000 -state /tmp/sim1.json -json   # E2E: one JSON line per event
 go run ./cmd/eirl-encoder-sim -state /tmp/sim1.json -unlink                             # DELETE /encoders/self and deletes the state
+go run ./cmd/eirl-encoder-sim -update metered|restart|sysfailed                          # the update card's cases (UPDATES.md §12)
 ```
 
 The simulated device's identity goes in `<state>.identity` (`-identity`) and survives `-unlink`, as on the

@@ -1,6 +1,8 @@
 #!/bin/bash
 # Fake systemctl for the OTA container test: runs eirl-encoderd for real (as eirl-encoder), starts the
-# update helper for real (eirl-update.service), the engine is "inactive", everything else succeeds.
+# update helper for real (eirl-update.service), the engine is "inactive", everything else succeeds. Where the
+# container has systemd's own systemctl (moved to systemctl.real: the root filesystem of an encoder image), enable,
+# disable, mask and unmask go to it, offline: the system layer's units change for real (UPDATES.md §12).
 echo "systemctl $*" >> /var/log/fake-systemctl.log
 [ "${1:-}" = --no-block ] && shift
 cmd=${1:-}; shift || true
@@ -29,7 +31,10 @@ eng_start() {
   touch /run/fake-engine.active
 }
 case "$cmd" in
-  daemon-reload|enable|disable) exit 0 ;;
+  enable|disable|mask|unmask)
+    [ -x /bin/systemctl.real ] && exec /bin/systemctl.real --root=/ "$cmd" "$@"
+    exit 0 ;;
+  daemon-reload) exit 0 ;;
   start|restart)
     case "$1" in
       eirl-engine.service) eng_start ;;

@@ -16,7 +16,10 @@ import (
 //	settings-time-manual · settings-zones · settings-updates · settings-updates-available ·
 //	settings-updates-downloading · settings-updates-confirm · settings-updates-live · settings-updates-rolledback ·
 //	settings-updates-error · settings-updates-blocked · settings-updates-undone · settings-updates-installed ·
-//	settings-updates-testbuild ·
+//	settings-updates-testbuild · settings-updates-restart (the system layer waits for a restart) ·
+//	settings-updates-restart-confirm · settings-updates-restart-live · settings-updates-restart-notes (with a release
+//	available, its download waiting for Wi-Fi and the system layer failed: everything at once) · settings-updates-metered
+//	(the download waits for Wi-Fi or a cable) · settings-updates-sysfailed · settings-updates-sysskipped ·
 //	settings-about · settings-old (an app without the device API) · settings-sources · settings-sources-edited ·
 //	settings-sources-pick · settings-sources-alias · settings-sources-onair · settings-sources-dup ·
 //	settings-sources-oldengine · settings-sources-hidden (slot 2 hidden; hiding the one on air refused) ·
@@ -82,6 +85,27 @@ var fakeNotes = map[string]string{
 	"fr": "Réglages sous forme de liste de pages à l'écran.\nL'écran et la page web en espagnol, anglais et français.\nUn alias pour chaque source.",
 }
 
+// The app's words for the system layer and a download that waits (its i18n catalog, update.*), by language.
+var (
+	fakeMetered = map[string]string{
+		"es": "la actualización se descargará sola cuando haya wifi o cable: búscala para descargarla ya por datos móviles",
+		"en": "the update will download by itself on Wi-Fi or a cable: check for it to download it now over mobile data",
+		"fr": "la mise à jour se téléchargera d’elle-même en Wi-Fi ou par câble : recherchez-la pour la télécharger maintenant en données mobiles"}
+	fakeSysFailed = map[string]string{
+		"es": "la parte del sistema de la última actualización no se pudo instalar: sigue la anterior",
+		"en": "the system part of the last update could not be installed: the previous one stays",
+		"fr": "la partie système de la dernière mise à jour n’a pas pu être installée : la précédente reste en place"}
+)
+
+// fakeRestart is a system layer installed whose HDMI input and modems wait for a restart.
+func fakeRestart(lang string) *ui.UpdateSystem {
+	return &ui.UpdateSystem{State: "ok", RestartRequired: true, Pending: []string{"hdmi", "uplinks"},
+		RestartMessage: map[string]string{
+			"es": "reinicia el codificador para terminar la actualización (entrada HDMI, módems e iPhone)",
+			"en": "restart the encoder to finish the update (HDMI input, modems and iPhone)",
+			"fr": "redémarrez l’encodeur pour terminer la mise à jour (entrée HDMI, modems et iPhone)"}[lang]}
+}
+
 // appState is the fake device API for a variant, at the screen's clock now.
 func appState(variant, lang string, now time.Time) ui.AppSnapshot {
 	loc := time.FixedZone("CEST", 2*3600)
@@ -141,6 +165,25 @@ func appState(variant, lang string, now time.Time) ui.AppSnapshot {
 		snap.Update.LastResult = &ui.UpdateRun{State: "installed", From: "0.1.0", To: "0.2.0"}
 	case "settings-updates-testbuild":
 		snap.Update.TestBuild = true
+	case "settings-updates-restart", "settings-updates-restart-confirm", "settings-updates-restart-live":
+		snap.Update.Current = "0.2.0"
+		snap.Update.LastResult = &ui.UpdateRun{State: "installed", From: "0.1.0", To: "0.2.0"}
+		snap.Update.System = fakeRestart(lang)
+	case "settings-updates-restart-notes":
+		snap.Update.State, snap.Update.Available = "available", avail
+		snap.Update.DownloadWaits, snap.Update.DownloadWaitsMessage = "metered", fakeMetered[lang]
+		snap.Update.System = fakeRestart(lang)
+		snap.Update.System.State, snap.Update.System.Error, snap.Update.System.Message = "failed", "apt", fakeSysFailed[lang]
+	case "settings-updates-metered":
+		snap.Update.State, snap.Update.Available = "available", avail
+		snap.Update.DownloadWaits, snap.Update.DownloadWaitsMessage = "metered", fakeMetered[lang]
+	case "settings-updates-sysfailed":
+		snap.Update.System = &ui.UpdateSystem{State: "failed", Error: "apt", Message: fakeSysFailed[lang]}
+	case "settings-updates-sysskipped":
+		snap.Update.System = &ui.UpdateSystem{State: "skipped", Message: map[string]string{
+			"es": "este aparato no usa el sistema del codificador: solo se actualiza su software",
+			"en": "this device does not run the encoder's system: only its software is updated",
+			"fr": "cet appareil n’utilise pas le système de l’encodeur : seul son logiciel est mis à jour"}[lang]}
 	case "settings-old":
 		return ui.AppSnapshot{DeviceAPI: ui.No, SetupAPI: ui.No, UpdateAPI: ui.No, SlotsAPI: ui.No}
 	}

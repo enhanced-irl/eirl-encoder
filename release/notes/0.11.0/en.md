@@ -1,0 +1,5 @@
+- Updates now also bring what used to come only by writing the card with a new image: drivers, firmware and system packages. To get what is new, updating is enough; there is no need to write the card again.
+- That is why the iPhone by cable now also comes with an update, not only with the 0.8.0 SD card image.
+- Fixed: since 0.7.0, updating failed with "the update package is not valid". This version installs from any earlier version.
+- If part of an update only takes effect after a restart, the encoder says so and lets you restart it from Settings or from the web (never while streaming).
+- If the encoder reaches the internet through a modem or a phone, the update waits for Wi-Fi or a cable to download by itself. If you check for it, it downloads right away over mobile data.

@@ -108,6 +108,10 @@ type Server struct {
 	SlotsPath string
 	// Update: over-the-air updates (UPDATES.md §8; nil = /update answers 503)
 	Update UpdateControl
+	// SystemStateDir: the system layer's state (/var/lib/eirl-system, UPDATES.md §12; "" = GET /update has no
+	// "system"); BootID: this boot's id (its pending restarts are for the boot they were recorded in)
+	SystemStateDir string
+	BootID         func() string
 
 	hub   *hub
 	hosts map[string]bool

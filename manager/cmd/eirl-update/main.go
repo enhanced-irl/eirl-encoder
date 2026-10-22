@@ -8,6 +8,13 @@
 //	eirl-update rollback   the operator puts back the release kept in the backup
 //	eirl-update status     print the status of the last run
 //	eirl-update verify -manifest F -sig F [-bundle F]   check a release with the compiled-in key
+//	eirl-update system apply -layer DIR [-image]          apply a release's system layer (UPDATES.md §12;
+//	                                                      the bundle's install.sh runs it)
+//	eirl-update system plan -layer DIR                    what an apply would change, without changing it
+//	eirl-update system recover                            undo a system layer apply that was cut
+//	eirl-update system status                             print /var/lib/eirl-system/state.json
+//	eirl-update system fingerprint [-root R] [-layer DIR] what makes a root filesystem the system it is (§12.10)
+//	eirl-update system compare -a F -b F [-expected F]    the differences of two fingerprints (exit 1: unexpected ones)
 //
 // Every path can be moved under -root for tests.
 package main
@@ -28,6 +35,7 @@ import (
 
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/update"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/update/installer"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/update/syslayer"
 )
 
 var version = "dev" // -ldflags "-X main.version=…"
@@ -46,6 +54,9 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "verify" {
 		os.Exit(verify(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "system" {
+		os.Exit(systemCmd(os.Args[2:]))
 	}
 	fs := flag.NewFlagSet("eirl-update", flag.ContinueOnError)
 	fs.Usage = usage
@@ -89,6 +100,7 @@ func main() {
 		Systemd: installer.Systemctl{}, RunScript: installer.RunInstallScript,
 		AppHealth:     installer.CheckApp(rooted(*root, *appSock)),
 		HealthTimeout: *healthTimeout, Settle: *settle, Log: log,
+		System: &syslayer.Applier{Root: *root, Log: log, Proc: "/proc", Sys: "/sys"},
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

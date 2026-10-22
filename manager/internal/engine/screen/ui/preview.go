@@ -47,6 +47,11 @@ func (p Preview) OpenZones()               { p.u.openZones() }
 func (p Preview) ConfirmUpdate() {
 	p.u.confirm = &confirm{what: "update", until: p.u.now().Add(ConfirmUpdate)}
 }
+
+// ConfirmReboot is «Restart now» waiting for its second tap.
+func (p Preview) ConfirmReboot() {
+	p.u.confirm = &confirm{what: "reboot", until: p.u.now().Add(ConfirmUpdate)}
+}
 func (p Preview) ConfirmSetupAgain() {
 	p.u.confirm = &confirm{what: "setup_again", until: p.u.now().Add(ConfirmUpdate)}
 }

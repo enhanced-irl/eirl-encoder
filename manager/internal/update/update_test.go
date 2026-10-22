@@ -772,3 +772,88 @@ func TestNoReleasePublishedYet(t *testing.T) {
 		t.Errorf("manifest without its signature: %v (%s)", err, Code(err))
 	}
 }
+
+func TestUpdaterWaitsForUnmeteredLink(t *testing.T) {
+	k := newKey(t)
+	r := serveRelease(t, k, "0.2.0", []byte("x"))
+	u, _ := newUpdater(t, k, r.url(), &fakeEnv{})
+	var metered atomic.Bool
+	metered.Store(true)
+	u.cfg.Metered = metered.Load
+	// An automatic check on a modem or a phone: known, not downloaded, and it says why
+	u.checkAndDownload(context.Background(), false)
+	if st := u.Status(); st.State != StateAvailable || st.Ready || st.DownloadWaits != "metered" || r.hits.Load() != 0 {
+		t.Fatalf("metered, automatic: %+v, hits %d", st, r.hits.Load())
+	}
+	// Later, still metered: it keeps waiting
+	u.mu.Lock()
+	u.nextDL = time.Time{}
+	u.mu.Unlock()
+	u.periodic(context.Background())
+	if r.hits.Load() != 0 {
+		t.Fatal("downloaded on a metered link by itself")
+	}
+	// On Wi-Fi or a cable it downloads by itself
+	metered.Store(false)
+	u.mu.Lock()
+	u.nextDL = time.Time{}
+	u.mu.Unlock()
+	u.periodic(context.Background())
+	if st := u.Status(); st.State != StateReady || st.DownloadWaits != "" {
+		t.Errorf("unmetered: %+v", st)
+	}
+	// A manual check downloads at once, metered or not
+	r2 := serveRelease(t, k, "0.2.0", []byte("y"))
+	u2, _ := newUpdater(t, k, r2.url(), &fakeEnv{})
+	u2.cfg.Metered = func() bool { return true }
+	u2.checkAndDownload(context.Background(), true)
+	if st := u2.Status(); st.State != StateReady || st.DownloadWaits != "" {
+		t.Errorf("manual on a metered link: %+v", st)
+	}
+}
+
+func TestMeteredDefaultRoute(t *testing.T) {
+	dir := t.TempDir()
+	r4 := filepath.Join(dir, "route")
+	sys := filepath.Join(dir, "net")
+	dev := filepath.Join(dir, "devices")
+	link := func(iface, devPath, driver string, wireless bool) {
+		os.MkdirAll(filepath.Join(dev, devPath, "drv"), 0o755)
+		os.MkdirAll(filepath.Join(sys, iface), 0o755)
+		os.Symlink(filepath.Join(dev, devPath), filepath.Join(sys, iface, "device"))
+		os.Symlink("/sys/bus/usb/drivers/"+driver, filepath.Join(dev, devPath, "driver"))
+		if wireless {
+			os.MkdirAll(filepath.Join(sys, iface, "wireless"), 0o755)
+		}
+	}
+	link("eth0", "platform/eth", "eqos", false)
+	link("wlan0", "platform/wlan", "iwlwifi", true)
+	link("eth1", "platform/usb1/1-2/1-2:1.0", "ipheth", false)
+	link("eth2", "platform/usb1/1-3/1-3:1.0", "r8152", false)
+	link("usb0", "platform/usb1/1-4/1-4:1.0", "cdc_ether", false)
+	hdr := "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n"
+	route := func(rows ...string) {
+		os.WriteFile(r4, []byte(hdr+strings.Join(rows, "\n")+"\n"), 0o644)
+	}
+	for _, c := range []struct {
+		rows  []string
+		want  bool
+		iface string
+	}{
+		{[]string{"eth0\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000"}, false, "eth0"},
+		{[]string{"wlan0\t00000000\t0101A8C0\t0003\t0\t0\t600\t00000000"}, false, "wlan0"},
+		{[]string{"eth1\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000"}, true, "eth1"},  // an iPhone
+		{[]string{"usb0\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000"}, true, "usb0"},  // a HiLink modem
+		{[]string{"eth2\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000"}, false, "eth2"}, // a USB Ethernet adapter
+		{[]string{"wwan0\t00000000\t0101A8C0\t0003\t0\t0\t700\t00000000"}, true, "wwan0"},
+		// The lowest metric wins: the cable before the iPhone
+		{[]string{"eth1\t00000000\t0101A8C0\t0003\t0\t0\t300\t00000000", "eth0\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000"}, false, "eth0"},
+		{nil, false, ""},
+	} {
+		route(c.rows...)
+		got, iface := MeteredDefaultRoute(r4, sys)
+		if got != c.want || iface != c.iface {
+			t.Errorf("%v: metered %v via %q, want %v via %q", c.rows, got, iface, c.want, c.iface)
+		}
+	}
+}

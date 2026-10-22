@@ -23,6 +23,10 @@ L4T_SHA256=8e2d10fb5a582ab9802d4014740a54140bc204fcdcc29794bfa020a856d807c7
 # NVIDIA's own kernel config for the Nano: extract-ikconfig of the R32.7.6 BSP's kernel/Image, which is also the
 # /proc/config.gz of every board on that kernel (not tegra_defconfig blindly)
 KERNEL_CONFIG=build/kernel-4.9.337-tegra.config
+# NVIDIA's device tree records when it was built (nvidia,dtbbuildtime = __DATE__, __TIME__ of the C preprocessor): with
+# this fixed, the DTB is the same bytes at every build, the ones of the frozen base (the image of 0.7.0, built on Oct 16
+# 2026 at 09:00:22 UTC; UPDATES.md §12.11). The modules record no time
+SOURCE_DATE_EPOCH=1792141222
 
 mkdir -p "$CACHE" "$OUT"
 # The Realtek RTL8761B(U) Bluetooth firmware the patched btrtl loads (BLUETOOTH.md §3.8): linux-firmware 1.173 of
@@ -45,6 +49,7 @@ docker volume inspect "$VOLUME" >/dev/null 2>&1 || docker volume create "$VOLUME
 echo "$L4T_SHA256  $CACHE/public_sources.tbz2" | shasum -a 256 -c - >/dev/null
 
 docker run --rm -v "$VOLUME":/src -v "$CACHE":/cache:ro -v "$HERE":/proj:ro -v "$OUT":/out -e KERNEL_CONFIG="$KERNEL_CONFIG" \
+  -e SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
   "$IMAGE" bash -euo pipefail -c '
 K=/src/kernel/kernel-4.9; O=/src/out
 mk() { make -s -C $K ARCH=arm64 O=$O LOCALVERSION=-tegra "$@"; }

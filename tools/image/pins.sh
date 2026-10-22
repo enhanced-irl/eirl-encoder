@@ -18,3 +18,7 @@ TOOLS_BASE=ubuntu:18.04@sha256:152dc042452c496007f07ca9127571cb9c29697f42acbfad7
 # The kernel the image boots (nvidia-l4t-kernel of the BSP) and our module must agree
 KERNEL_RELEASE=4.9.337-tegra
 L4T_VERSION=32.7.6
+
+# The B01 DTB with the TC358743 (build/build.sh, reproducible): frozen with the base (UPDATES.md §12.11), these bytes are
+# the image of 0.7.0's. A change of dt/ is a change no board in the field can get over the air: check.py refuses it
+DTB_SHA256=cd2e6b99e1856f4432441e2c0bf46d47a870a6d4f63880590b86288198cb603b

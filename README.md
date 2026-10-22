@@ -212,7 +212,7 @@ operating, the bugs found and the history of the test board.
 | Output protocols and codecs | ✅ Released in 0.5.0 (SRT, SRTLA, RTMP, RTMPS, RIST, UDP; H.264/H.265; saved destinations). First version: tests with real platform keys still to come | [`OUTPUTS.md`](OUTPUTS.md) |
 | SRTLA and adaptive bitrate | ✅ Released; tested over loopback and with a real link to EnhancedIRL. Tests with several real links are next | [`SRTLA.md`](SRTLA.md) |
 | 4G/5G modems and link health | 🟡 Released in 0.3.0 as a first version (HiLink modems), tested against fakes and the simulator; real-modem tests are next | [`MODEMS.md`](MODEMS.md) |
-| iPhone over USB | ✅ In the SD card image from 0.8.0: an iPhone sharing its data by cable is one more link (not by OTA) | [`MODEMS.md`](MODEMS.md) §12 |
+| iPhone over USB | ✅ In the SD card image from 0.8.0, and over the air with the system layer: an iPhone sharing its data by cable is one more link | [`MODEMS.md`](MODEMS.md) §12 |
 | Wi-Fi (access point and client) | ✅ Released; measurements and the cloud's side are next | [`WIFI.md`](WIFI.md) |
 | Web app | ✅ Released, reviewed (code and security) | [`MANAGER.md`](MANAGER.md) |
 | Setup wizard, translations | ✅ Released in 0.1.0 | [`SETUP.md`](SETUP.md) |

@@ -1,5 +1,5 @@
-> **Status:** IN PROGRESS (I1-I4 done: the first image, of 0.7.0, published on Oct 16; the image of 0.8.0, with an iPhone over USB, on Oct 19; next: the screen message and a board with older firmware for the one-time update, a GitHub workflow)
-> **Updated:** 2026-10-19
+> **Status:** IN PROGRESS (I1-I4 done: the first image, of 0.7.0, published on Oct 16; the image of 0.8.0, with an iPhone over USB, on Oct 19; Oct 21: the recipe is the frozen base plus the release's system layer, UPDATES.md §12; next: the screen message and a board with older firmware for the one-time update, a GitHub workflow)
+> **Updated:** 2026-10-21
 
 # A minimal microSD image for the Jetson Nano
 
@@ -19,6 +19,7 @@ recipe (B0-B3), applied from scratch to NVIDIA's own base instead of by hand on 
 | I2 First boot and uniqueness | ✅ Oct 14-16 | Two boots from scratch on the test board, with different identities, and later boots (§10.4, §10.6) |
 | I3 Test on a real card | ✅ Oct 14-15 | Wizard, sources, a stream, a real OTA (0.1.1 → 0.3.0) and reboots (§10.4). The maintainer chose to back up the board's own card and use it; the board **keeps the image** |
 | I4 Publish | ✅ Oct 16 | The image of 0.7.0, with its notices, its sources and the written offer (§9.3); flashing and verification in the README; booted from scratch on the test board (§10.6); signed and published as assets of release v0.7.0 with the maintainer's OK (§10.5): recipe `0f07c8317eb5`, `.img.xz` 299,307,788 bytes (sha256 `20f07ac5…b193`), raw 2,506,096,640 bytes. Downloaded from GitHub again and checked as a user would (signature, image and raw image) |
+| Base + system layer | 🔨 Oct 21 | The recipe is the frozen base (`tools/image/base.lock`: the packages of the image of 0.7.0, exactly; the BSP; the DTB and extlinux) plus the release's system layer, applied by the bundle's `install.sh --image` with the same code as over the air (UPDATES.md §12). Our modules, firmware, the packages added since 0.7.0, the system files and the units' state moved from the recipe to the layer, so a board flashed with an older image reaches the same system by OTA. `tools/system-equiv.sh` checks it |
 | Image of 0.8.0 | ✅ Oct 19 | The first image since I4: `usbmuxd` (4 packages) and `ipheth` for an iPhone over USB (MODEMS.md §12). Product image of recipe `b3418e73352d`, 0 of the checks failed; signed and published as assets of release v0.8.0: `.img.xz` 299,188,780 bytes (sha256 `d249df0a…44d9`), raw 2,507,145,216 bytes (sha256 `cde4025e…ddd3`). Downloaded from GitHub again and checked as a user would. **Not booted before publishing**, the maintainer's choice: the differences with the image of 0.7.0, which was, were tried on the test board by hand (MODEMS.md §12.1) |
 
 ## 1. Scope
@@ -32,18 +33,21 @@ recipe (B0-B3), applied from scratch to NVIDIA's own base instead of by hand on 
 | BSP | NVIDIA **L4T R32.7.6** (the last R32 release; Ubuntu 18.04, kernel 4.9.337-tegra), the same as the test board |
 | What the user does | Flash the card (balenaEtcher or `dd`, §8.4), insert it, power on. Nothing else: no NVIDIA setup screens, no account, no password typed into a console |
 
-**What it is not.** It does not update L4T, the kernel or Ubuntu afterwards (UPDATES.md: only our software
-is updated over the air). A new L4T or kernel means a new image and reflashing.
+**What it is not.** It is only an installation medium: a board flashed with any published image reaches, over the air,
+the system of the latest image (UPDATES.md §12). What never moves after flashing is the frozen base: L4T, NVIDIA's
+kernel, the DTB and extlinux, the bootloader (UPDATES.md §12.11). A new L4T or kernel would mean a new image and
+reflashing.
 
 ## 2. What goes in
 
 | Layer | Source | Pinned by |
 |---|---|---|
 | Boot partitions on the card (p2-p14: TBC, RP1, EBT, WB0, BPF, BPF-DTB, FX, TOS, DTB, LNX, EKS, BMP, RP4) | NVIDIA's signed boot images, as `jetson-disk-image-creator.sh -b jetson-nano -r 300` lays them out. They let the card boot on **any** QSPI version (§4) | BSP sha256 + sha256 of each partition image |
-| Root filesystem (p1 `APP`, physically the last partition, grown at first boot) | Ubuntu 18.04 arm64: `ubuntu-base-18.04.5` + the packages of `tools/image/packages.txt` from `ports.ubuntu.com` (§3.2) | Ubuntu base sha256; the exact package list with versions, checked on every build (bionic no longer changes in its public pockets) |
+| Root filesystem (p1 `APP`, physically the last partition, grown at first boot) | Ubuntu 18.04 arm64: `ubuntu-base-18.04.5` + the frozen base's packages (`tools/image/base.lock`, the image of 0.7.0) from `ports.ubuntu.com`, or from the maintainers' copies with `--base-debs` (§3.2) | Ubuntu base sha256; every package at its version in `base.lock`, checked on every build |
 | NVIDIA BSP | The `nvidia-l4t-*` packages of the Driver Package, installed with `apply_binaries.sh` (§3.3), minus the ones the encoder does not use | BSP sha256 `865717ee…0212` (279 MB) |
 | Kernel | NVIDIA's stock `Image` and `initrd` (package `nvidia-l4t-kernel`), **not rebuilt** | BSP |
-| Our kernel bits | `tc358743.ko` (patched, `driver/`) in `/lib/modules/4.9.337-tegra/extra/`; the cellular modem modules (`qmi_wwan`, `cdc_mbim`, `huawei_cdc_ncm`, `option` with the Quectel IDs: MODEMS.md §4) and `ipheth` (an iPhone's tethering, from 0.8.0: MODEMS.md §12) in `updates/eirl-modems/`, which wins over the kernel's own; `btusb` and `btrtl` with the Realtek RTL8761B in `updates/eirl-bluetooth/` and its firmware in `/lib/firmware/rtl_bt/` (BLUETOOTH.md §3.8); the B01 DTB with the TC358743 (`dt/`) in `/boot/`; an extlinux entry with that `FDT` (README, "Installing on the Jetson") | `build/build.sh` (kernel sources by sha256) |
+| The B01 DTB | The B01 DTB with the TC358743 (`dt/`) in `/boot/`; an extlinux entry with that `FDT` (README, "Installing on the Jetson"). Frozen with the base (UPDATES.md §12.11) | `build/build.sh` (kernel sources by sha256, a fixed build time); its sha256 in `pins.sh` |
+| The system layer | Of the release (UPDATES.md §12): `tc358743.ko` (patched, `driver/`) in `/lib/modules/4.9.337-tegra/extra/`; the cellular modem modules (`qmi_wwan`, `cdc_mbim`, `huawei_cdc_ncm`, `option` with the Quectel IDs: MODEMS.md §4) and `ipheth` (an iPhone's tethering: MODEMS.md §12) in `updates/eirl-modems/`, which wins over the kernel's own; `btusb` and `btrtl` with the Realtek RTL8761B in `updates/eirl-bluetooth/` and its firmware in `/lib/firmware/rtl_bt/` (BLUETOOTH.md §3.8); the packages added since 0.7.0 (`usbmuxd` and its libraries); the first-boot units, the journal's, NetworkManager's and usbmuxd's drop-ins; the units' state; the system's name | The release's signed manifest (the layer is in its bundle); `system/*.lock` |
 | Our software | The **latest signed release** (the OTA bundle of UPDATES.md §4): downloaded, verified with `release/eirl-release.pub`, installed with its own `install.sh` in image mode (§3.4) | The release's signed manifest |
 | Fan | Our own controller, `eirl-fan`, in the release since 0.6.0 ([`FAN.md`](FAN.md); §12, D-I7) | The release |
 | Notices and sources | `/usr/share/doc/eirl-encoder-image/`: `NOTICE` and `SOURCES.md` with the written offer, made from what is installed (§9.3) | The build |
@@ -56,8 +60,9 @@ does not start). They are in the bundle since then, from the next release on: `s
 **first image has to carry a release after 0.1.0** (§12, D-I9).
 
 What the bundle needs from the base system: the groups `i2c` and `input`, and the packages `v4l-utils`,
-`i2c-tools`, `python3`, `libssl1.1`, `sudo` and `systemd`. What it does **not** carry, and the image does: the
-TC358743 module, the DTB and the `tc358743` extlinux entry.
+`i2c-tools`, `python3`, `libssl1.1`, `sudo` and `systemd`. What it does **not** carry, and the image does: the DTB and
+the `tc358743` extlinux entry (frozen, UPDATES.md §12.11). The TC358743 module and the rest of our kernel bits come with
+the bundle's system layer.
 
 ## 3. How it is built
 
@@ -73,6 +78,8 @@ tools/image/build.sh --release DIR --debug-ssh-key ~/.ssh/id_ed25519.pub
 tools/image/build.sh --release DIR
 # The same, but its first boot only reads the QSPI, as a test image does:
 tools/image/build.sh --release DIR --firmware-check-only
+# Any of them with the base's packages from the maintainers' copies (when Ubuntu no longer serves a version of base.lock):
+tools/image/build.sh --release DIR --base-debs DIR
 ```
 
 | File | What |
@@ -85,8 +92,11 @@ tools/image/build.sh --release DIR --firmware-check-only
 | `tools/image/stages/assemble.sh` | The card image and its `xz` (§3.6) |
 | `tools/image/stages/sources.py` | The image's `SOURCES.md` (§9.3), from the installed packages, the pins and the release's own notices |
 | `tools/image/stages/check.py` | The offline checks (§10.1); writes a report next to the image, with the `packages.txt` and `sources.md` published next to it |
-| `tools/image/packages.txt`, `packages.lock` | What is installed, and the exact result with versions (a change fails the build until `--update-lock` and a review) |
-| `tools/image/rootfs/` | Files copied into the image: the first boot (`eirl-firstboot`, `eirl-firmware` and their unit), the persistent journal, NetworkManager's cable override, the image's `NOTICE` |
+| `tools/image/base.lock`, `packages.txt` | The frozen base: its exact packages and versions (the image of 0.7.0; it never changes), and what was asked for in it |
+| `tools/image/base-debs.sh` | The maintainers' copies of the base's `.deb` files (474, ~200 MB, outside the repository), for `--base-debs` |
+| `tools/image/import-rootfs.sh` | An image's root filesystem as a Docker image, to run it as a board without the board (`tools/system-equiv.sh`, `tools/system-sim.sh`) |
+| `tools/image/rootfs/` | The image's own files: its `NOTICE` |
+| `system/` | The system layer (UPDATES.md §12.2): the first boot (`eirl-firstboot`, `eirl-firmware` and their units), the persistent journal, NetworkManager's cable override, our modules and firmware, the packages added to the base, the units' state. The image gets it from the release's bundle |
 
 A product image is built only from a committed recipe (its commit goes into `SOURCES.md` and the signed manifest);
 test and debug images of an uncommitted tree say `<commit>-dirty`. How a product image is signed and published:
@@ -128,11 +138,14 @@ the 2,178-package desktop and only runs on an x86-64 Ubuntu host. The sample roo
 same desktop. Starting from it means purging ~1,000 packages again, as B3 did on the board. Instead:
 
 1. `ubuntu-base-18.04.5-base-arm64.tar.gz` (the official Ubuntu base, ~25 MB), extracted as root.
-2. In a native arm64 chroot: `apt-get install --no-install-recommends` of `tools/image/packages.txt`, which
-   is `base/keep.txt` without the development group (D4) and without what the Python engine needed (§11),
-   plus the Ubuntu libraries the kept NVIDIA packages depend on (§3.3).
-3. The exact result (`dpkg-query -W` with versions) is compared with `tools/image/packages.lock`: any
-   difference fails the build until it is reviewed and the lock is updated.
+2. In a native arm64 chroot: `apt-get install --no-install-recommends` of every Ubuntu package of the frozen base,
+   `tools/image/base.lock`, **at its version** (nothing newer: a newer version goes through the system layer, so boards
+   already in the field get it too, UPDATES.md §12.2). The base is the image of 0.7.0: `tools/image/packages.txt`
+   (`base/keep.txt` without the development group, D4, and without what the Python engine needed, §11, plus the Ubuntu
+   libraries the kept NVIDIA packages depend on, §3.3), resolved on Oct 16. With `--base-debs DIR` the packages come
+   from the maintainers' copies of those exact `.deb` files instead of Ubuntu's archive.
+3. The exact result (`dpkg-query -W` with versions) is compared with `base.lock` plus the system layer's packages:
+   any difference fails the build.
 
 ### 3.3 NVIDIA BSP
 
@@ -177,9 +190,10 @@ same desktop. Starting from it means purging ~1,000 packages again, as B3 did on
    mismatch.
 2. Before installing, write the `tc358743` extlinux entry (our `FDT`) as `DEFAULT`: the bundle's splash copies the
    default entry into its own `eirl-splash` entry and makes that one the `DEFAULT`.
-3. Extract the bundle into the chroot and run `EIRL_IMAGE=1 ./install.sh` (or `--image`): files, users, groups
-   and an offline `systemctl enable` (`eirl-encoderd`, `eirl-engine`, `eirl-hdmi-init`, `eirl-update-recover`,
-   `eirl-ap`, the splash). It never reloads, starts or stops anything, never runs udevadm, `systemd-tmpfiles` or the
+3. Extract the bundle into the chroot and run `EIRL_IMAGE=1 ./install.sh` (or `--image`): first the release's system
+   layer (`eirl-update system apply -image`, UPDATES.md §12.3: our modules and firmware, the packages added to the base,
+   system files, the units' state), then files, users, groups and an offline `systemctl enable` (`eirl-encoderd`,
+   `eirl-engine`, `eirl-hdmi-init`, `eirl-update-recover`, `eirl-ap`, the splash). It never reloads, starts or stops anything, never runs udevadm, `systemd-tmpfiles` or the
    dispatcher, never touches `/sys` or `/dev`, and refuses if systemd manages that same root. It is tested by
    `tools/image-install-test.sh` (a real chroot in an Ubuntu 18.04 arm64 container).
 4. Check that `/usr/lib/eirl-encoder/VERSION` is the manifest's version and that every file of the bundle's
@@ -187,7 +201,9 @@ same desktop. Starting from it means purging ~1,000 packages again, as B3 did on
 
 ### 3.5 System configuration
 
-Applied as files and `systemctl` commands in the chroot, each one from the repo (`tools/image/files/`):
+Applied as files and `systemctl` commands in the chroot. What a board already in use needs as well (the units' masks,
+`nvpmodel`, the journal, the group `debug`, the system's name) is the system layer's since Oct 21 (UPDATES.md §12),
+applied in §3.4; the recipe keeps what is done once per card:
 
 - `/etc/nv_boot_control.conf`, as NVIDIA's `flash.sh` writes it for this board (`TNSPEC 3448-300-…-jetson-nano-qspi-sd-mmcblk0p1`,
   `TEGRA_CHIPID 0x21`, `/dev/mtdblock0`): the firmware check (§4) needs it.
@@ -332,8 +348,9 @@ The product image has no login user and no default password. Options (§12, D-I4
 
 **Decided (D-I4): A**, with one change that keeps the door open for §7.1: `openssh-server` **is installed but
 `ssh.service` is masked**. Nothing listens on port 22, the image has no user, no key and no password, and its host
-keys are made per device, never in the image. The reason is that the OTA cannot install Ubuntu packages: without
-the package in the image, a future remote support would need an SSH server of our own.
+keys are made per device, never in the image. The reason, on Oct 14, was that the OTA could not install Ubuntu
+packages: without the package in the image, a future remote support would need an SSH server of our own. Since the
+system layer (UPDATES.md §12) it could install it, but it stays in the base.
 
 **Test images** (I1-I3) can be built with `--debug-ssh-key <file>`: a key-only `eirl-debug` user and `ssh.service`
 unmasked. Such an image is named `…-debug`, never signed and never published; the checks refuse it.
@@ -527,7 +544,10 @@ above cover the obligation to keep it available.
 
 ### 10.1 I1, on the mounted image (no board)
 
-- Packages = `packages.lock`; none of the `base/purge-*.txt` patterns installed; every `nvidia-l4t-*` on hold.
+- Packages = `base.lock` plus the system layer's; none of the `base/purge-*.txt` patterns installed; every
+  `nvidia-l4t-*` on hold. The system layer applied (its `state.json`: the release, no error, no apply half done), the DTB
+  the frozen base's (`pins.sh`), and the system's fingerprint written to the report (`fingerprint.json`, UPDATES.md
+  §12.10).
 - Enabled and masked units = the expected lists; `default.target` = multi-user; no oem-config.
 - Size of the raw and compressed image; free space in `APP`.
 - No secret and nothing of the test board (§6).

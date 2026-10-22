@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -96,6 +97,51 @@ type Versions struct {
 	Engine  string `json:"engine,omitempty"`
 	Commit  string `json:"commit,omitempty"`
 }
+
+// MeteredDefaultRoute reports whether the way to the internet (the default route with the lowest metric in route4,
+// /proc/net/route) goes through a link that is paid by the megabyte: a cellular modem (wwan*, or a USB network
+// device that is not an Ethernet adapter: HiLink modems, phones and iPhones tethering). Wi-Fi and Ethernet are not.
+// sysNet is /sys/class/net. It also returns the interface.
+func MeteredDefaultRoute(route4, sysNet string) (bool, string) {
+	b, err := os.ReadFile(route4)
+	if err != nil {
+		return false, ""
+	}
+	best, bestMetric := "", -1
+	for _, line := range strings.Split(string(b), "\n")[1:] {
+		f := strings.Fields(line)
+		if len(f) < 7 || f[1] != "00000000" || f[0] == "lo" {
+			continue
+		}
+		m, err := strconv.Atoi(f[6])
+		if err != nil {
+			continue
+		}
+		if bestMetric < 0 || m < bestMetric {
+			best, bestMetric = f[0], m
+		}
+	}
+	if best == "" {
+		return false, ""
+	}
+	dir := filepath.Join(sysNet, best)
+	if _, err := os.Stat(filepath.Join(dir, "wireless")); err == nil {
+		return false, best
+	}
+	if strings.HasPrefix(best, "wwan") {
+		return true, best
+	}
+	dev, err := filepath.EvalSymlinks(filepath.Join(dir, "device"))
+	if err != nil || !strings.Contains(dev, "/usb") {
+		return false, best
+	}
+	drv, _ := os.Readlink(filepath.Join(dir, "device", "driver"))
+	return !usbEthernet[filepath.Base(drv)], best
+}
+
+// usbEthernet: drivers of USB Ethernet adapters (a cable, not a phone or a modem).
+var usbEthernet = map[string]bool{"r8152": true, "ax88179_178a": true, "asix": true, "smsc95xx": true, "smsc75xx": true,
+	"lan78xx": true, "dm9601": true, "sr9700": true, "mcs7830": true, "pegasus": true, "rtl8150": true}
 
 // InstalledVersions reads the version files under root ("/" on the board). app is the running binary's
 // version (main.version). A missing VERSION (an install from before the OTA) gives Release "".

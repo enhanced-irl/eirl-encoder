@@ -160,6 +160,26 @@ func (u *UI) updateInstall() {
 	u.confirm = &confirm{what: "update", until: now.Add(ConfirmUpdate)}
 }
 
+// updateReboot: «Restart now», what finishes an update (the system layer, UPDATES.md §12.5). Never while streaming;
+// a second tap within ConfirmUpdate confirms it (the app checks both again).
+func (u *UI) updateReboot() {
+	snap := u.app().AppSnapshot()
+	if !restartShown(&snap) {
+		return
+	}
+	if ok, _ := u.rebootEnabled(&snap); !ok {
+		u.confirm = nil
+		return
+	}
+	now := u.now()
+	if u.confirm != nil && u.confirm.what == "reboot" && now.Before(u.confirm.until) {
+		u.confirm = nil
+		u.appBusy(u.app().Do(AppAction{What: "update_reboot"}))
+		return
+	}
+	u.confirm = &confirm{what: "reboot", until: now.Add(ConfirmUpdate)}
+}
+
 // setupAgain: «Run the setup again» (POST /setup/restart), with a second tap; with the setup not done yet,
 // «Continue the setup» shows the wizard at once.
 func (u *UI) setupAgain() {

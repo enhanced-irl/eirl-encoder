@@ -37,7 +37,7 @@ var localRoutes = []string{
 	// Source slots and aliases (SETUP.md §5)
 	"GET /api/v1/sources/slots", "PUT /api/v1/sources/slots",
 	// Updates (UPDATES.md; the handlers are the updater's). Until they exist, the route table answers 404
-	"GET /api/v1/update", "POST /api/v1/update/check", "POST /api/v1/update/install",
+	"GET /api/v1/update", "POST /api/v1/update/check", "POST /api/v1/update/install", "POST /api/v1/update/reboot",
 	// Linking with EnhancedIRL: the state and the pairing code (?qr=rows: its QR in rows), and unlinking or cancelling a
 	// code. Never the token or the pollSecret (cloud.View does not carry them)
 	"GET /api/v1/cloud", "POST /api/v1/cloud/pair", "DELETE /api/v1/cloud",

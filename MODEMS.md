@@ -109,9 +109,9 @@ eirl-encoderd
 
 `tools/modem-modules.sh` installs them in `/lib/modules/<release>/updates/eirl-modems/` and runs `depmod`
 (Ubuntu looks in `updates/` first, so the patched `option.ko` wins over the stock one); `--check` and
-`--undo`. It loads nothing: udev loads them when a modem is plugged in. The OTA installs only our
-software, never L4T: new boards get the modules from the SD card image (IMAGE.md), the test board from this
-script.
+`--undo`. It loads nothing: udev loads them when a modem is plugged in. Since the system layer (UPDATES.md §12) the
+OTA installs them too: they are in `system/built.txt`, so every board gets them with the release, whatever image it was
+flashed with; the script is for trying a module that is not in a release yet.
 
 ### 4.2 Contract
 
@@ -391,8 +391,8 @@ Results: a line per item here (✅, or what changed and the commit).
 ## 12. iPhone over USB (Oct 19)
 
 An iPhone with **Personal Hotspot** on, plugged into the encoder by cable, is one more internet link: the
-same as an Android sharing its data, also for SRTLA. It needs two things L4T lacks, both in the SD card image
-from **0.8.0** (the OTA does not bring them: §4.1):
+same as an Android sharing its data, also for SRTLA. It needs two things L4T lacks: in the SD card image from
+**0.8.0**, and over the air for every board (the system layer, UPDATES.md §12) from the first release that carries it:
 
 - **`ipheth`**, the kernel's driver for the iPhone's tethering interface (§4.1).
 - **`usbmuxd`** (Ubuntu's package, 1.1.0 with libimobiledevice 1.2.1). An iPhone shows up in its photos

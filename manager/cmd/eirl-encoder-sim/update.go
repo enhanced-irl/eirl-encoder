@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -10,9 +11,12 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/i18n"
 )
 
-// simUpdate: a fake updater with the contract's shape (UPDATES.md; CONTRACT §4): GET /update, POST /update/check and
-// POST /update/install. A check finds 0.2.0 (checking 1.5 s → available 3 s → downloading 8 s → ready); installing
-// takes 6 s and ends idle on 0.2.0. Installing while streaming: 409 streaming; before ready: 409 not_ready.
+// simUpdate: a fake updater with the contract's shape (UPDATES.md; CONTRACT §4): GET /update, POST /update/check,
+// POST /update/install and POST /update/reboot. A check finds 0.2.0 (checking 1.5 s → available 3 s → downloading 8 s →
+// ready); installing takes 6 s and ends idle on 0.2.0, its system layer waiting for a restart (HDMI input, modems).
+// Installing while streaming: 409 streaming; before ready: 409 not_ready. Restarting: 409 streaming | nothing_pending;
+// it "restarts" at once (the pending areas are cleared). -update metered: 0.2.0 is known and waits for Wi-Fi (a check
+// downloads it); restart: on 0.2.0 with the restart pending; sysfailed: its system layer did not install.
 type simUpdate struct {
 	eng *simEngine
 
@@ -21,6 +25,9 @@ type simUpdate struct {
 	state     string // idle | checking | available | downloading | ready | installing
 	since     time.Time
 	lastCheck *time.Time
+	metered   bool     // the available release waits for Wi-Fi (until a check)
+	sysState  string   // "" (no system layer state) | ok | failed
+	pending   []string // what waits for a restart
 }
 
 const simNewVersion = "0.2.0"
@@ -31,17 +38,40 @@ var simNotes = map[string]string{
 	"fr": "Assistant de première configuration, sources avec alias et l’interface en espagnol, anglais et français.",
 }
 
-func newSimUpdate(eng *simEngine) *simUpdate {
-	return &simUpdate{eng: eng, current: "0.1.0", state: "idle", since: time.Now()}
+func newSimUpdate(eng *simEngine, scenario string) *simUpdate {
+	u := &simUpdate{eng: eng, current: "0.1.0", state: "idle", since: time.Now()}
+	switch scenario {
+	case "metered":
+		u.state, u.metered = "available", true
+	case "restart":
+		u.current, u.sysState, u.pending = simNewVersion, "ok", []string{"hdmi", "uplinks"}
+	case "sysfailed":
+		u.current, u.sysState = simNewVersion, "failed"
+	}
+	return u
 }
 
 type simUpdateView struct {
-	Current   string          `json:"current"`
-	State     string          `json:"state"`
-	Available *simUpdateAvail `json:"available"`
-	Progress  float64         `json:"progress"`
-	LastCheck *time.Time      `json:"lastCheck"`
-	Error     string          `json:"error,omitempty"`
+	Current          string          `json:"current"`
+	State            string          `json:"state"`
+	Available        *simUpdateAvail `json:"available"`
+	Progress         float64         `json:"progress"`
+	LastCheck        *time.Time      `json:"lastCheck"`
+	Error            string          `json:"error,omitempty"`
+	Streaming        bool            `json:"streaming"`
+	DownloadWaits    string          `json:"downloadWaits,omitempty"`
+	DownloadWaitsMsg string          `json:"downloadWaitsMessage,omitempty"`
+	System           *simSystemView  `json:"system,omitempty"`
+}
+
+// simSystemView is GET /update's "system" (internal/api UpdateSystemView).
+type simSystemView struct {
+	State           string   `json:"state"`
+	Error           string   `json:"error,omitempty"`
+	Message         string   `json:"message,omitempty"`
+	RestartRequired bool     `json:"restartRequired"`
+	Pending         []string `json:"pending,omitempty"`
+	RestartMessage  string   `json:"restartMessage,omitempty"`
 }
 
 type simUpdateAvail struct {
@@ -61,12 +91,13 @@ func (u *simUpdate) advance(now time.Time) {
 			} else {
 				u.state = "available"
 			}
-		case u.state == "available" && age > 3*time.Second:
+		case u.state == "available" && age > 3*time.Second && !u.metered:
 			u.state = "downloading"
 		case u.state == "downloading" && age > 8*time.Second:
 			u.state = "ready"
 		case u.state == "installing" && age > 6*time.Second:
 			u.state, u.current = "idle", simNewVersion
+			u.sysState, u.pending = "ok", []string{"hdmi", "uplinks"}
 		default:
 			return
 		}
@@ -80,7 +111,24 @@ func (u *simUpdate) view(lang string) simUpdateView {
 	defer u.mu.Unlock()
 	now := time.Now()
 	u.advance(now)
-	v := simUpdateView{Current: u.current, State: u.state, LastCheck: u.lastCheck}
+	v := simUpdateView{Current: u.current, State: u.state, LastCheck: u.lastCheck, Streaming: u.eng.streaming()}
+	if u.metered && u.state == "available" {
+		v.DownloadWaits, v.DownloadWaitsMsg = "metered", i18n.Msg(lang, "update.waits.metered")
+	}
+	if u.sysState != "" {
+		s := &simSystemView{State: u.sysState, Pending: u.pending, RestartRequired: len(u.pending) > 0}
+		if u.sysState == "failed" {
+			s.Error, s.Message = "apt", i18n.Msg(lang, "update.system.failed")
+		}
+		if s.RestartRequired {
+			names := make([]string, len(u.pending))
+			for i, a := range u.pending {
+				names[i] = i18n.Msg(lang, "update.area."+a)
+			}
+			s.RestartMessage = i18n.Msg(lang, "update.restart_required", strings.Join(names, ", "))
+		}
+		v.System = s
+	}
 	switch u.state {
 	case "available", "downloading", "ready", "installing":
 		v.Available = &simUpdateAvail{Version: simNewVersion, Notes: simNotes[lang], Size: 12_345_678}
@@ -119,7 +167,7 @@ func (u *simUpdate) handler(dev *device.Store) http.Handler {
 			u.advance(time.Now())
 			if u.state == "idle" || u.state == "available" {
 				now := time.Now().UTC().Truncate(time.Second)
-				u.state, u.since, u.lastCheck = "checking", time.Now(), &now
+				u.state, u.since, u.lastCheck, u.metered = "checking", time.Now(), &now, false // a check downloads at once
 			}
 			u.mu.Unlock()
 			reply(202, u.view(lang))
@@ -140,6 +188,21 @@ func (u *simUpdate) handler(dev *device.Store) http.Handler {
 				return
 			}
 			reply(202, u.view(lang))
+		case "POST /api/v1/update/reboot":
+			u.mu.Lock()
+			pending := len(u.pending) > 0
+			u.mu.Unlock()
+			switch {
+			case !pending:
+				fail(409, "nothing_pending", "update.nothing_pending")
+			case u.eng.streaming():
+				fail(409, "streaming", "update.reboot_streaming")
+			default:
+				u.mu.Lock()
+				u.pending = nil // the simulator "restarts" at once
+				u.mu.Unlock()
+				reply(202, map[string]bool{"rebooting": true})
+			}
 		default:
 			fail(404, "not_found", "common.unknown_route")
 		}

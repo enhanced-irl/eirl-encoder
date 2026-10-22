@@ -27,6 +27,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/update"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/update/syslayer"
 )
 
 // Units the helper restarts.
@@ -60,9 +61,14 @@ type Installer struct {
 	HealthTimeout time.Duration // 90 s
 	Settle        time.Duration // the units must stay up this long after the check (10 s)
 	Poll          time.Duration // 1 s
-	ScriptTimeout time.Duration // install.sh (10 min)
-	Log           *slog.Logger
-	Now           func() time.Time
+	ScriptTimeout time.Duration // install.sh, with the system layer it applies (20 min)
+	// System undoes a system layer apply that was cut (UPDATES.md §12.4): install.sh applies the layer, and a
+	// power cut in the middle is undone here, at boot or before the next install. nil = none (tests)
+	System *syslayer.Applier
+	// MinFree: the free space left after the backup and the extracted bundle (200 MB)
+	MinFree int64
+	Log     *slog.Logger
+	Now     func() time.Time
 }
 
 // Defaults fills what is not set.
@@ -80,7 +86,10 @@ func (in *Installer) defaults() {
 		in.Poll = time.Second
 	}
 	if in.ScriptTimeout == 0 {
-		in.ScriptTimeout = 10 * time.Minute
+		in.ScriptTimeout = 20 * time.Minute
+	}
+	if in.MinFree == 0 {
+		in.MinFree = 200 << 20
 	}
 	if in.Log == nil {
 		in.Log = slog.New(slog.DiscardHandler)
@@ -188,6 +197,7 @@ func (in *Installer) Install(ctx context.Context) error {
 	st := &update.HelperStatus{State: update.HelperInstalling, Phase: "verify", From: installed, StartedAt: in.Now().UTC()}
 	in.writeStatus(st)
 	in.Log.Info("update requested", "installed", orNone(installed))
+	in.recoverSystem(ctx)
 	if _, err := os.Stat(in.markerPath()); err == nil {
 		// A previous run was interrupted and not recovered at boot: put the old release back first
 		in.Log.Warn("a previous update was interrupted: restoring its backup first")
@@ -214,6 +224,9 @@ func (in *Installer) Install(ctx context.Context) error {
 		return in.refuse(st, f)
 	}
 	oldFiles := in.oldFiles()
+	if f := in.checkSpace(dir, union(oldFiles, newFiles)); f != nil {
+		return in.refuse(st, f)
+	}
 
 	// Backup of every path of the old and the new release, then the marker: from here on, any failure
 	// (or a power cut) brings the old release back
@@ -639,6 +652,7 @@ func (in *Installer) lastBackup() (string, error) {
 // not started yet: only daemon-reload).
 func (in *Installer) Recover(ctx context.Context, restart bool) error {
 	in.defaults()
+	in.recoverSystem(ctx)
 	if _, err := os.Stat(in.markerPath()); err != nil {
 		in.Log.Info("no interrupted update")
 		return nil
@@ -670,6 +684,46 @@ func (in *Installer) Recover(ctx context.Context, restart bool) error {
 	}
 	st.FinishedAt = in.Now().UTC()
 	in.writeStatus(st)
+	return nil
+}
+
+// recoverSystem undoes a system layer apply that a power cut (or a crash) left half done: before the release's
+// files are restored, so the old release starts on the system it had (UPDATES.md §12.4).
+func (in *Installer) recoverSystem(ctx context.Context) {
+	if in.System == nil || !in.System.Interrupted() {
+		return
+	}
+	in.Log.Warn("a system layer apply was interrupted: undoing it")
+	if _, err := in.System.Recover(ctx); err != nil {
+		in.Log.Error("undoing the interrupted system layer failed (tried again at the next boot)", "err", err)
+	}
+}
+
+// checkSpace refuses an update that would fill the card (UPDATES.md §11): the backup of every path and the
+// extracted bundle, twice, plus a margin. The system layer checks its own needs when it applies.
+func (in *Installer) checkSpace(bundleDir string, paths []string) *Failure {
+	var need int64
+	for _, p := range paths {
+		if fi, err := os.Lstat(in.p(p)); err == nil && fi.Mode().IsRegular() {
+			need += fi.Size()
+		}
+	}
+	filepath.WalkDir(bundleDir, func(_ string, d os.DirEntry, err error) error {
+		if err == nil && d.Type().IsRegular() {
+			if fi, err := d.Info(); err == nil {
+				need += fi.Size()
+			}
+		}
+		return nil
+	})
+	var sfs unix.Statfs_t
+	if err := unix.Statfs(in.p(in.StateDir), &sfs); err != nil {
+		return nil
+	}
+	free := int64(sfs.Bavail) * int64(sfs.Bsize)
+	if free < 2*need+in.MinFree {
+		return fail("no_space", "%d MB free, the update needs %d MB", free>>20, (2*need+in.MinFree)>>20)
+	}
 	return nil
 }
 

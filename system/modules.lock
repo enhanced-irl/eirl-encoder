@@ -1,0 +1,10 @@
+# system/modules.lock — the sha256 of each module build/build.sh builds (its builds are reproducible). A change
+# here is a change on every board: review it (eirl-release layer -update-modules-lock rewrites it).
+38716d7c4c31089833bb88966856f4e52ccc9b0c0df70bad9da9955c75658751  modules-bt/btrtl.ko
+27498e606fa197d14e22d73d9c724e4a9af44b88721d3762d1dae118e9f7b5ee  modules-bt/btusb.ko
+ee826ba06f8d7e306586623571779ec84d445654f075c84bb479617764aa001a  modules/cdc_mbim.ko
+5d498d8d7c0317b557ae7c88baaa4b013da600e8388e69b02a3ed7db41c753a4  modules/huawei_cdc_ncm.ko
+255665ad6249c50e88e2811dc6ed4ed965b161b8b6e2507e70a3738f92fe30b2  modules/ipheth.ko
+3ebe576e0f6e662bdb11c534f710fa47d7682a3b8eda622ccc4d4c8c430ec1ec  modules/option.ko
+5915257d73836af7bbf9446ce1d2668d2730d0c65ccebfbf1b450f9e210af340  modules/qmi_wwan.ko
+90cef92fef62317ed869f9f5e2c10e98c8670026a7fa5cb8cbf51c0d684b496d  tc358743.ko

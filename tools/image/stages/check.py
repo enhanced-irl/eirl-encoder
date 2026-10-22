@@ -4,8 +4,9 @@ from and on the assembled raw image. Runs in the linux/arm64 work container (Pyt
 walrus). Prints one line per check and a report; exits 1 if any check fails.
 
   check.py --rootfs DIR --image IMG --bootparts DIR --release DIR --bundle NAME --version V
-           --mode product|test|debug --firmware-mode update|check --commit SHA12 --lock FILE --report-dir DIR
-           [--update-lock]
+           --mode product|test|debug --firmware-mode update|check --commit SHA12 --lock BASE.LOCK --report-dir DIR
+--lock is the frozen base (tools/image/base.lock); the system layer's packages come from the bundle. A missing
+bootparts.lock is written by a test build (review its diff); a product image needs it.
 """
 import argparse
 import fnmatch
@@ -104,7 +105,6 @@ def main():
     for a in ("rootfs", "image", "bootparts", "bootparts-lock", "release", "bundle", "version", "mode", "firmware-mode",
               "commit", "lock", "report-dir", "repo"):
         ap.add_argument("--" + a, required=True)
-    ap.add_argument("--update-lock", action="store_true")
     a = ap.parse_args()
     R = a.rootfs
     debug = a.mode == "debug"
@@ -121,18 +121,31 @@ def main():
             srcv = src[1].strip("()") if len(src) > 1 else installed[p]["Version"]
             f.write("%s %s %s %s\n" % (p, installed[p]["Version"], src[0], srcv))
     note("packages", "%d installed (report %s)" % (len(installed), report))
-    if a.mode == "product" and (a.update_lock or not os.path.exists(a.lock)):
-        ok("a product image has a reviewed packages.lock (no --update-lock)", False)
-    elif a.update_lock or not os.path.exists(a.lock):
-        with open(a.lock, "w", encoding="utf-8") as f:
-            f.write("# tools/image/packages.lock — the image's exact packages and versions (check.py --update-lock).\n")
-            f.write("\n".join(lock_lines) + "\n")
-        note("packages.lock", "written (%s): review its diff" % a.lock)
-    else:
-        want = [l for l in open(a.lock).read().splitlines() if l and not l.startswith("#")]
-        extra, missing = sorted(set(lock_lines) - set(want)), sorted(set(want) - set(lock_lines))
-        ok("packages = packages.lock", not extra and not missing,
-           "new/changed: %s; gone: %s" % (", ".join(extra[:12]) or "-", ", ".join(missing[:12]) or "-"))
+    # The packages are the frozen base (tools/image/base.lock) with the release's system layer on top: its packages,
+    # at their versions, and nothing it retires (UPDATES.md §12)
+    with tarfile.open(os.path.join(a.release, a.bundle)) as t:
+        lnames = {n.lstrip("./"): n for n in t.getnames()}
+        layer = json.load(t.extractfile(lnames["system/layer.json"])) if "system/layer.json" in lnames else None
+    ok("the release carries a system layer", layer is not None)
+    want = {}
+    for l in open(a.lock).read().splitlines():
+        if l and not l.startswith("#"):
+            p, v = l.split()[:2]
+            want[p] = v
+    for p in (layer or {}).get("remove") or []:
+        want.pop(p, None)
+    for p in (layer or {}).get("packages") or []:
+        want[p["name"]] = p["version"]
+    want_lines = ["%s %s" % (p, v) for p, v in want.items()]
+    extra, missing = sorted(set(lock_lines) - set(want_lines)), sorted(set(want_lines) - set(lock_lines))
+    ok("packages = base.lock + the system layer", not extra and not missing,
+       "new/changed: %s; gone: %s" % (", ".join(extra[:12]) or "-", ", ".join(missing[:12]) or "-"))
+    st = os.path.join(R, "var/lib/eirl-system/state.json")
+    lstate = json.load(open(st)) if os.path.exists(st) else {}
+    ok("the system layer applied (state.json: the release, no error)", lstate.get("release") == (layer or {}).get("release")
+       and not lstate.get("error") and not lstate.get("skipped"), "%s %s" % (lstate.get("release"), lstate.get("error", "")))
+    ok("no system layer apply left half done", not os.path.exists(os.path.join(R, "var/lib/eirl-system/in-progress.json"))
+       and not os.path.exists(os.path.join(R, "var/lib/eirl-system/txn")))
     deny = []
     for f in sorted(os.listdir(os.path.join(a.repo, "base"))):
         if f.startswith("purge-") and f.endswith(".txt"):
@@ -301,8 +314,7 @@ def main():
                   "eirl-engine-eirl-encoder.conf": "etc/systemd/system/eirl-engine.service.d/eirl-encoder.conf",
                   "sudoers": "etc/sudoers.d/eirl-encoder", "tmpfiles.conf": "etc/tmpfiles.d/eirl-encoder.conf",
                   "eirl-engine.default": "etc/default/eirl-engine",
-                  # Bluetooth audio (BLUETOOTH.md §3.7): the D-Bus policy and bluetoothd's drop-in
-                  "eirl-encoder-bluetooth.conf": "etc/dbus-1/system.d/eirl-encoder-bluetooth.conf",
+                  # Bluetooth audio (BLUETOOTH.md §3.7): bluetoothd's drop-in (the D-Bus policy is the system layer's)
                   "nv-bluetooth-service.conf": "etc/systemd/system/bluetooth.service.d/nv-bluetooth-service.conf"}
     def dest(n):
         top, _, rest = n.partition("/")
@@ -334,13 +346,14 @@ def main():
                 return ""
         if top == "doc":
             return "usr/share/doc/eirl-encoder/" + rest
-        if top == "bluealsa":  # BlueALSA (build/bluealsa.sh): the daemon, its ALSA plugins and their configuration
+        if top == "system":  # the system layer (UPDATES.md §12): its files where they go, its packages through dpkg
+            if rest.startswith("files/"):
+                return rest[len("files/"):]
+            if rest == "layer.json" or (rest.startswith("debs/") and rest.endswith(".deb")):
+                return ""
+        if top == "bluealsa":  # BlueALSA (build/bluealsa.sh): the daemon (its ALSA plugins are the system layer's)
             if rest == "bluealsa":
                 return "usr/local/bin/bluealsa"
-            if rest.startswith("libasound_module_") and rest.endswith(".so"):
-                return "usr/lib/aarch64-linux-gnu/alsa-lib/" + rest
-            if rest == "20-bluealsa.conf":
-                return "usr/share/alsa/alsa.conf.d/20-bluealsa.conf"
         if top == "deploy":
             if rest == "install.sh":
                 return ""
@@ -392,6 +405,9 @@ def main():
         ok("Realtek Bluetooth firmware %s" % f, os.path.exists(os.path.join(R, "lib/firmware/rtl_bt", f)))
     dtb = "tegra210-p3448-0000-p3449-0000-b00-tc358743.dtb"
     ok("our DTB in /boot", os.path.exists(os.path.join(R, "boot", dtb)))
+    pinned_dtb = re.search(r"(?m)^DTB_SHA256=([0-9a-f]{64})$", open(os.path.join(a.repo, "tools/image/pins.sh")).read())
+    ok("the DTB is the frozen base's (pins.sh DTB_SHA256)", pinned_dtb is not None and os.path.exists(os.path.join(R, "boot", dtb))
+       and sha256_file(os.path.join(R, "boot", dtb)) == pinned_dtb.group(1))
     ext = open(os.path.join(R, "boot/extlinux/extlinux.conf")).read()
     ok("extlinux DEFAULT eirl-splash", re.search(r"(?m)^DEFAULT eirl-splash$", ext) is not None)
     labels = re.findall(r"(?m)^LABEL (\S+)", ext)
@@ -411,6 +427,19 @@ def main():
         osr = open(os.path.join(R, f)).read()
         names = re.findall(r'(?m)^(?:NAME|PRETTY_NAME)=.*', osr)
         ok(f + " without the Ubuntu name", len(names) == 2 and not any("Ubuntu" in x for x in names), names[0] if names else "")
+
+    # --- the system's fingerprint (UPDATES.md §12.10): tools/system-equiv.sh compares it with the boards an OTA migrates
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        with tarfile.open(os.path.join(a.release, a.bundle)) as t:
+            ln = {n.lstrip("./"): n for n in t.getnames()}
+            if "system/layer.json" in ln:
+                with open(os.path.join(td, "layer.json"), "wb") as f:
+                    f.write(t.extractfile(ln["system/layer.json"]).read())
+        fp = os.path.join(a.report_dir, "fingerprint.json")
+        rc = subprocess.call([os.path.join(R, "usr/local/sbin/eirl-update"), "system", "fingerprint", "-root", R]
+                             + (["-layer", td] if os.path.exists(os.path.join(td, "layer.json")) else []) + ["-out", fp])
+        ok("the system's fingerprint (report fingerprint.json)", rc == 0 and os.path.exists(fp))
 
     # --- libraries resolve (ldd in the chroot)
     bins = ["usr/lib/eirl-encoder/engine/eirl-engine-go", "usr/local/bin/srtla_send", "usr/local/bin/srtla_send_rs"]
@@ -438,13 +467,13 @@ def main():
     layout = [l.split("\t") for l in open(os.path.join(a.bootparts, "layout.tsv")).read().splitlines()[1:]]
     # The boot partitions are pinned (tools/image/bootparts.lock): NVIDIA's signing is deterministic
     pinned = "\n".join("\t".join((n, name, size, s)) for n, name, size, f, s in layout) + "\n"
-    if os.path.exists(a.bootparts_lock) and not a.update_lock:
+    if os.path.exists(a.bootparts_lock):
         ok("boot partitions = bootparts.lock", open(a.bootparts_lock).read().split("\n", 1)[1] == pinned)
     elif a.mode == "product":
         ok("a product image has a reviewed bootparts.lock", False)
     else:
         with open(a.bootparts_lock, "w", encoding="utf-8") as f:
-            f.write("# tools/image/bootparts.lock: the card's boot partitions (number, name, size, sha256), check.py --update-lock\n" + pinned)
+            f.write("# tools/image/bootparts.lock: the card's boot partitions (number, name, size, sha256), written by a test build when missing\n" + pinned)
         note("bootparts.lock", "written: review its diff")
     with open(a.image, "rb") as img:
         for n, name, size, f, s in layout:

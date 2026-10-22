@@ -37,6 +37,7 @@ const simPassword = "eirl-sim-1234"
 type localOpts struct {
 	addr, socket, dataDir, webDir, hwID string
 	fresh                               bool
+	update                              string // the fake updater's start (newSimUpdate)
 }
 
 func runLocal(ctx context.Context, o localOpts, log *slog.Logger) error {
@@ -166,7 +167,7 @@ func runLocal(ctx context.Context, o localOpts, log *slog.Logger) error {
 		}
 	}
 	unit.onStart()
-	upd := newSimUpdate(eng)
+	upd := newSimUpdate(eng, o.update)
 	apiHandler := srv.Handler()
 	mux := http.NewServeMux()
 	// The fake updater, behind the same checks as the API (session, CSRF, LAN, language)

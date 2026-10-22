@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -42,6 +43,10 @@ func RunInstallScript(ctx context.Context, dir string, out io.Writer) error {
 	}
 	cmd.Stdin = nil
 	cmd.Stdout, cmd.Stderr = out, out
+	// Its own process group, killed whole at the time limit: an orphaned child (the system layer's apply) must not go
+	// on while the release is rolled back under it
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = 10 * time.Second
 	return cmd.Run()
 }

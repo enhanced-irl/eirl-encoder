@@ -1,0 +1,18 @@
+# system/overlay.txt — the files of system/files/ the system layer installs (UPDATES.md §12): the path under
+# system/files/ is the path on the board. Then what part of the encoder a change touches (hdmi | bluetooth | uplinks
+# | system) and who reads it: a unit (a change waits for a restart while that unit runs) or - (nothing that runs now).
+# The mode is the file's in the repository (0755 if executable). "@RELEASE@" becomes the release.
+# path on the board                                            area      read by
+/etc/NetworkManager/conf.d/10-globally-managed-devices.conf    uplinks   NetworkManager.service
+/etc/dbus-1/system.d/eirl-encoder-bluetooth.conf               bluetooth -    # install.sh reloads D-Bus after the layer
+/etc/systemd/journald.conf.d/90-eirl-nosyslog.conf             system    systemd-journald.service
+/etc/systemd/journald.conf.d/90-eirl-persistent.conf           system    systemd-journald.service
+/etc/systemd/system/eirl-firmware.service                      system    -
+/etc/systemd/system/eirl-firstboot.service                     system    -
+/etc/systemd/system/usbmuxd.service.d/90-eirl.conf             uplinks   usbmuxd.service
+/usr/lib/eirl-image/eirl-firmware                              system    -
+/usr/lib/eirl-image/eirl-firstboot                             system    -
+/usr/lib/os-release                                            system    -
+/etc/lsb-release                                               system    -
+/etc/issue                                                     system    -
+/etc/issue.net                                                 system    -

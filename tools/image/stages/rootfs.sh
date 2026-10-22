@@ -1,8 +1,12 @@
 #!/bin/bash
 # stages/rootfs.sh — runs as root in the linux/arm64 work container (tools/image/Dockerfile): the image's root
-# filesystem in /work/rootfs, in a native arm64 chroot (IMAGE.md §3.2-§3.6). Inputs, read only:
+# filesystem in /work/rootfs, in a native arm64 chroot (IMAGE.md §3.2-§3.6). It is the frozen base (the packages of
+# tools/image/base.lock exactly, the BSP, the DTB and extlinux, the configuration done once), then the release's
+# bundle with its system layer (UPDATES.md §12: our modules, firmware, the packages added since, system files and the
+# units' state), applied by the same code as on a board. Inputs, read only:
 #   /in/dl/<BSP> /in/dl/<ubuntu-base>   pinned downloads          /in/repo     this repository
-#   /in/kernel/{tc358743.ko,<DTB>}      build/build.sh's output   /in/release  a verified release (bundle + manifest)
+#   /in/kernel/<DTB>                    build/build.sh's output   /in/release  a verified release (bundle + manifest)
+#   /in/base-debs/*.deb                 optional: the base's .deb files (the maintainers' copies, IMAGE.md §3.2)
 #   /in/debug.pub                       only for a debug image (--debug-ssh-key)
 # Environment: BSP_FILE UBUNTU_BASE_FILE KERNEL_RELEASE IMAGE_VERSION FIRMWARE_MODE (check|update) BUNDLE DEBUG (0|1)
 #              IMAGE_NAME IMAGE_COMMIT (the recipe's commit, for SOURCES.md)
@@ -41,11 +45,25 @@ deb http://ports.ubuntu.com/ubuntu-ports bionic-security main universe
 EOF
 mount_all
 
-step "Ubuntu packages ($(grep -cvE '^[[:space:]]*(#|$)' "$IMG/packages.txt") requested)"
-in_root apt-get update -q
-in_root apt-get -y -q upgrade
+# The frozen base (IMAGE.md §3.2), exactly: every Ubuntu package of base.lock at its version (NVIDIA's come with the
+# BSP below). Nothing newer: a newer version goes through the system layer, so that the boards in the field get it too
+base_pkgs() { sed -E 's/#.*//' "$IMG/base.lock" | awk 'NF == 2 && $1 !~ /^(nvidia-l4t-|jetson-gpio)/ {print $1 "=" $2}'; }
+if ls /in/base-debs/*.deb >/dev/null 2>&1; then
+  step "Ubuntu packages of the base: $(base_pkgs | wc -l), from the maintainers' copies (/in/base-debs)"
+  rm -rf "$R/tmp/base-debs" && mkdir -p "$R/tmp/base-debs" && cp /in/base-debs/*.deb "$R/tmp/base-debs/"
+  in_root /bin/sh -c 'apt-get -y -q install --no-install-recommends /tmp/base-debs/*.deb'
+  rm -rf "$R/tmp/base-debs"
+else
+  step "Ubuntu packages of the base: $(base_pkgs | wc -l), at their versions in base.lock"
+  in_root apt-get update -q
+  # shellcheck disable=SC2046
+  in_root apt-get -y -q install --no-install-recommends $(base_pkgs)
+fi
+# What was asked for is "manual", the rest "auto", as before the base was frozen (apt's own bookkeeping)
 # shellcheck disable=SC2046
-in_root apt-get -y -q install --no-install-recommends $(sed -E 's/#.*//' "$IMG/packages.txt" | awk 'NF {print $1}')
+in_root apt-mark auto $(base_pkgs | cut -d= -f1) >/dev/null
+# shellcheck disable=SC2046
+in_root apt-mark manual $(sed -E 's/#.*//' "$IMG/packages.txt" | awk 'NF {print $1}') >/dev/null
 
 step "NVIDIA BSP: apply_binaries.sh, without the packages the encoder does not use"
 for d in weston graphics-demos oem-config kernel-headers jetson-io gputools; do
@@ -66,22 +84,8 @@ mount_all
 printf '# eirl-encoder image: the NVIDIA library paths (as nvfb-early.sh sets them at the first boot)\n/usr/lib/aarch64-linux-gnu/tegra\n/usr/lib/aarch64-linux-gnu/tegra-egl\n' > "$R/etc/ld.so.conf.d/00-eirl-tegra.conf"
 in_root ldconfig
 
-step "our kernel bits: tc358743.ko, the B01 DTB with the TC358743, extlinux"
-install -D -m 0644 /in/kernel/tc358743.ko "$R/lib/modules/$KERNEL_RELEASE/extra/tc358743.ko"
-# The cellular modem modules (MODEMS.md §4): updates/ is searched before the kernel's own, so our option.ko
-# (with the Quectel IDs) wins over the stock one
-for m in /in/kernel/modules/*.ko; do
-  install -D -m 0644 "$m" "$R/lib/modules/$KERNEL_RELEASE/updates/eirl-modems/$(basename "$m")"
-done
-# Bluetooth (BLUETOOTH.md §3.8): btusb and btrtl with the Realtek RTL8761B(U) (TP-Link UB500 and most current dongles),
-# also from updates/, and its firmware, which Ubuntu 18.04's linux-firmware lacks (with its licence)
-for m in /in/kernel/modules-bt/*.ko; do
-  install -D -m 0644 "$m" "$R/lib/modules/$KERNEL_RELEASE/updates/eirl-bluetooth/$(basename "$m")"
-done
-for f in /in/kernel/firmware/rtl_bt/*; do
-  install -D -m 0644 "$f" "$R/lib/firmware/rtl_bt/$(basename "$f")"
-done
-in_root depmod -a "$KERNEL_RELEASE"
+step "the B01 DTB with the TC358743, extlinux (frozen with the base: the system layer never writes /boot)"
+# Our modules and firmware are the system layer's (UPDATES.md §12), installed with the bundle below
 install -m 0644 "/in/kernel/$DTB" "$R/boot/$DTB"
 # Our FDT in "primary" too: the nvidia-l4t-kernel postinst forces DEFAULT primary (IMAGE.md §3.3).
 # tc358743 is the DEFAULT the bundle's splash copies into its own entry.
@@ -106,7 +110,7 @@ LABEL tc358743
       APPEND $APPEND
 EOF
 
-step "the encoder software: $BUNDLE (EIRL_IMAGE=1 install.sh)"
+step "the encoder software and its system layer: $BUNDLE (EIRL_IMAGE=1 install.sh)"
 rm -rf "$R/tmp/eirl-bundle" && mkdir -p "$R/tmp/eirl-bundle"
 tar -xzf "/in/release/$BUNDLE" -C "$R/tmp/eirl-bundle"
 in_root /bin/bash -c 'cd /tmp/eirl-bundle && EIRL_IMAGE=1 ./install.sh'
@@ -122,26 +126,21 @@ ln -sfn /usr/share/zoneinfo/Etc/UTC "$R/etc/localtime"; echo Etc/UTC > "$R/etc/t
 # No oem-config and no user: what l4t_create_default_user.sh does to skip it, without its useradd
 ln -sfn /lib/systemd/system/multi-user.target "$R/etc/systemd/system/default.target"
 mkdir -p "$R/etc/nv" && touch "$R/etc/nv/nvautoconfig"
-# NVIDIA enables nvpmodel (MAXN at boot) only with a display manager
-nvp=$(cd "$R" && ls etc/systemd/system/nvpmodel.service lib/systemd/system/nvpmodel.service 2>/dev/null | head -1 || true)
-[ -n "$nvp" ] || { echo "rootfs: no nvpmodel.service" >&2; exit 1; }
-mkdir -p "$R/etc/systemd/system/multi-user.target.wants"
-ln -sfn "/$nvp" "$R/etc/systemd/system/multi-user.target.wants/nvpmodel.service"
-# Journal: persistent, 200 MB, nothing forwarded to syslog (B2)
-# The image's own files: only what is tracked there (no editor or Finder leftovers from the build machine)
+# The image's own files (its NOTICE): only what is tracked there (no editor or Finder leftovers from the build machine).
+# The system files a board needs too (the first boot, the journal, NetworkManager…) are the system layer's
 (cd "$IMG/rootfs" && find . -type f ! -name '.DS_Store' ! -name '*~' ! -name '*.swp' ! -name '._*' ! -path '*/__pycache__/*') | while read -r f; do
   m=0644; [ -x "$IMG/rootfs/$f" ] && m=0755
   install -D -m "$m" -o root -g root "$IMG/rootfs/$f" "$R/${f#./}"
 done
-install -m 0644 /in/repo/base/files/90-eirl-nosyslog.conf "$R/etc/systemd/journald.conf.d/90-eirl-nosyslog.conf"
 mkdir -p "$R/var/log/journal"
 # What flash.sh writes for this board; the firmware check reads it (IMAGE.md §4)
 install -m 0644 /work/out/bootparts/nv_boot_control.conf "$R/etc/nv_boot_control.conf"
 echo "$FIRMWARE_MODE" > "$R/usr/lib/eirl-image/firmware-mode"
-in_root systemctl enable eirl-firstboot.service eirl-firmware.service
+# What the card was flashed with (the system says the installed release since UPDATES.md §12.12: /etc/os-release)
+echo "$IMAGE_VERSION" > "$R/usr/lib/eirl-image/flashed"
 
-# Units the image does not run: base/units-*.txt where the unit exists (BASE.md §6), USB device mode (D5), sshd
-mask_unit() {   # also the units NVIDIA only links (their files are in /opt/nvidia) and template instances
+# The units' state is the system layer's (system/units.txt), except sshd: masked in a product image, on in a debug one
+mask_unit() {
   local u=$1
   if find "$R/etc/systemd/system" "$R/lib/systemd/system" -name "$u" 2>/dev/null | grep -q .; then
     find "$R/etc/systemd/system" -name "$u" -path '*.wants/*' -delete
@@ -150,36 +149,6 @@ mask_unit() {   # also the units NVIDIA only links (their files are in /opt/nvid
     echo "   masked $u"
   fi
 }
-units() { sed -E 's/#.*//' "$1" | awk 'NF {print $1}'; }
-for f in units-b1a.txt units-b2.txt units-b1b-alsa.txt units-qspi.txt; do
-  for u in $(units "/in/repo/base/$f"); do
-    case "$u" in
-      linger:*) ;;                                              # a login user's linger: the image has none
-      file:*) ;;                                                # B2's journald drop-in: installed above
-      mask:*) mask_unit "${u#mask:}" ;;
-      nvweston.service|nvmemwarning.service) find "$R/etc/systemd/system" -name "$u" -path '*.wants/*' -delete ;;
-      *) mask_unit "$u" ;;
-    esac
-  done
-done
-for u in nv-l4t-usb-device-mode.service nv-l4t-usb-device-mode-runtime.service serial-getty@ttyGS0.service; do mask_unit "$u"; done
-# The apt and motd timers, off on the test board since Oct 8 (BASE.md §4.1): an appliance does not refresh apt's lists
-# every day, and motd-news has nothing left to run (update-motd.d is emptied below): it failed at every boot
-for u in apt-daily.timer apt-daily.service apt-daily-upgrade.timer apt-daily-upgrade.service motd-news.timer motd-news.service; do
-  mask_unit "$u"
-done
-# ModemManager stays installed and disabled, as on the test board (base/keep.txt): its postinst enables it on a new
-# install. Whether it runs at boot is decided with the modems' work
-find "$R/etc/systemd/system" -name ModemManager.service -path '*.wants/*' -delete
-rm -f "$R/etc/systemd/system/dbus-org.freedesktop.ModemManager1.service"
-# nvargus-daemon (NVIDIA's Argus camera service, nvidia-l4t-camera) off, as on the test board since Oct 8 (BASE.md §4.1):
-# the encoder does not use Argus, and at boot it probes every video device (a kernel warning for a USB capture card's
-# empty format, SCF errors for the TC358743) and keeps 40 MB
-find "$R/etc/systemd/system" -name nvargus-daemon.service -path '*.wants/*' -delete
-# bluetoothd (Bluetooth audio, BLUETOOTH.md §3.7) is installed but not enabled: its postinst enables it, and it only has
-# to run when the release's eirl-bluealsa.service (enabled by install.sh) pulls it in. One switch, ours
-find "$R/etc/systemd/system" -name bluetooth.service -path '*.wants/*' -delete
-rm -f "$R/etc/systemd/system/dbus-org.bluez.service"
 if [ "$DEBUG" = 1 ]; then
   step "DEBUG image: key-only eirl-debug user, ssh on"
   in_root useradd --create-home --shell /bin/bash --groups sudo,video,audio,systemd-journal eirl-debug
@@ -196,29 +165,12 @@ else
   mask_unit ssh.service; mask_unit ssh.socket
 fi
 in_root passwd -l root >/dev/null
-# NVIDIA's udev rules (nvidia-l4t-init, 99-tegra-devices.rules) give the GPU's debug nodes to the group debug, which
-# L4T's own image creates with its first user: without it udev warns at every boot
-in_root getent group debug >/dev/null || in_root groupadd --system debug
 # Every nvidia-l4t-* on hold, as on the board: never an apt upgrade of L4T (it rewrote a QSPI on Oct 4)
 in_root /bin/sh -c "dpkg-query -W -f '\${db:Status-Abbrev} \${Package}\n' 'nvidia-l4t-*' | awk '\$1 ~ /^.i/ {print \$2}' | xargs apt-mark hold" >/dev/null
 
 step "branding (Canonical's IP policy: a modified Ubuntu without its trademarks, IMAGE.md §9.2)"
-rm -f "$R/etc/os-release"
-cat > "$R/usr/lib/os-release" <<EOF
-NAME="EnhancedIRL Encoder"
-VERSION="$IMAGE_VERSION"
-ID=ubuntu
-ID_LIKE=debian
-PRETTY_NAME="EnhancedIRL Encoder $IMAGE_VERSION (Jetson Nano, L4T R32.7.6)"
-VERSION_ID="18.04"
-HOME_URL="https://github.com/enhanced-irl/eirl-encoder"
-VERSION_CODENAME=bionic
-UBUNTU_CODENAME=bionic
-EOF
-ln -s ../usr/lib/os-release "$R/etc/os-release"
-sed -i -E 's/^DISTRIB_DESCRIPTION=.*/DISTRIB_DESCRIPTION="EnhancedIRL Encoder '"$IMAGE_VERSION"'"/' "$R/etc/lsb-release"
-printf 'EnhancedIRL Encoder \\n \\l\n\n' > "$R/etc/issue"
-printf 'EnhancedIRL Encoder\n' > "$R/etc/issue.net"
+# The system's name and version (os-release, lsb-release, issue) are the system layer's: here only what is done once
+[ -L "$R/etc/os-release" ] || { rm -f "$R/etc/os-release"; ln -s ../usr/lib/os-release "$R/etc/os-release"; }
 rm -f "$R"/etc/update-motd.d/* "$R/etc/legal"
 
 step "notices and sources (IMAGE.md §9.3)"

@@ -1,0 +1,5 @@
+- Las actualizaciones traen ahora también lo que antes solo llegaba grabando la tarjeta con una imagen nueva: controladores, firmware y paquetes del sistema. Para tener lo nuevo basta con actualizar; no hace falta volver a grabar la tarjeta.
+- Por eso el iPhone por cable llega ahora también actualizando, no solo con la imagen de tarjeta 0.8.0.
+- Arreglado: desde la 0.7.0, actualizar fallaba con «el paquete de la actualización no es válido». Esta versión se instala desde cualquier versión anterior.
+- Si algo de una actualización solo se activa al reiniciar, el codificador lo avisa y te deja reiniciarlo desde Ajustes o desde la web (nunca mientras emites).
+- Si el codificador sale a internet por un módem o un móvil, la actualización espera a que haya wifi o cable para descargarse sola. Si la buscas, se descarga ya por datos móviles.

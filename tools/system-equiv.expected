@@ -1,0 +1,4 @@
+# tools/system-equiv.expected — the differences tools/system-equiv.sh allows between the image of a release and a board
+# flashed with an older image that got that release over the air (UPDATES.md §12.10). One pattern per line, matched
+# against "<category>:<key>" (path.Match; "**" at the end = a prefix), each with WHY it may differ. Anything else
+# fails the comparison: either the system layer misses it, or it belongs on this list with a reason.

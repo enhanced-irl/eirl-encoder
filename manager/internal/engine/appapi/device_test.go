@@ -345,6 +345,73 @@ func TestUpdateInfo(t *testing.T) {
 	}
 }
 
+// The system layer (UPDATES.md §12) and a download that waits for Wi-Fi: parsed and bounded like the rest, and
+// «Restart now» (update_reboot) is POST /update/reboot.
+func TestUpdateSystemAndReboot(t *testing.T) {
+	a, d := newDevice(t)
+	a.route("GET /update", 200, map[string]any{"current": "0.2.0", "state": "available",
+		"available":     map[string]any{"version": "0.3.0"},
+		"downloadWaits": "metered", "downloadWaitsMessage": "la actualización se descargará sola cuando haya wifi o cable",
+		"system": map[string]any{"release": "0.2.0", "appliedAt": "2026-10-20T10:00:00Z", "state": "failed", "error": "apt",
+			"message": "la parte del sistema no se pudo instalar", "restartRequired": true,
+			"pending":        []any{"hdmi", "uplinks", "hdmi", "kernel", 7},
+			"restartMessage": "reinicia el codificador para terminar la actualización (entrada HDMI, módems e iPhone)"}})
+	d.PollUpdate()
+	u := d.AppSnapshot().Update
+	if u == nil || u.DownloadWaits != "metered" || u.DownloadWaitsMessage == "" || u.System == nil {
+		t.Fatalf("%+v", u)
+	}
+	want := ui.UpdateSystem{State: "failed", Error: "apt", Message: "la parte del sistema no se pudo instalar",
+		RestartRequired: true, Pending: []string{"hdmi", "uplinks"},
+		RestartMessage: "reinicia el codificador para terminar la actualización (entrada HDMI, módems e iPhone)"}
+	if !reflect.DeepEqual(*u.System, want) {
+		t.Fatalf("%+v", *u.System)
+	}
+	// What does not fit is left out: an unknown reason or state, control characters, a message too long, a restart
+	// that is not a bool; without restartRequired its message and areas are not kept
+	a.route("GET /update", 200, map[string]any{"state": "idle", "downloadWaits": "battery", "downloadWaitsMessage": "x",
+		"system": map[string]any{"state": "ok", "message": "ignored when ok", "restartRequired": "yes",
+			"pending": []any{"hdmi"}, "restartMessage": "reinicia"}})
+	d.PollUpdate()
+	u = d.AppSnapshot().Update
+	if u.DownloadWaits != "" || u.DownloadWaitsMessage != "" || u.System == nil ||
+		!reflect.DeepEqual(*u.System, ui.UpdateSystem{State: "ok"}) {
+		t.Fatalf("odd fields kept: %+v %+v", u, u.System)
+	}
+	a.route("GET /update", 200, map[string]any{"state": "idle", "system": map[string]any{"state": "exploded",
+		"restartRequired": true}})
+	d.PollUpdate()
+	if u := d.AppSnapshot().Update; u.System != nil {
+		t.Errorf("an unknown system state kept: %+v", u.System)
+	}
+	a.route("GET /update", 200, map[string]any{"state": "idle", "system": map[string]any{"state": "ok",
+		"restartRequired": true, "restartMessage": "reinicia" + strings.Repeat("a", 400)}})
+	d.PollUpdate()
+	if s := d.AppSnapshot().Update.System; s == nil || !s.RestartRequired || s.RestartMessage != "" || s.Pending != nil {
+		t.Errorf("%+v", s)
+	}
+	// update_reboot: POST /update/reboot, and its refusal with the app's words
+	a.route("POST /update/reboot", 202, map[string]any{"rebooting": true})
+	if !d.Do(ui.AppAction{What: "update_reboot"}) {
+		t.Fatal("update_reboot is not an action")
+	}
+	q, _, _, _ := d.take()
+	d.runAction(*q)
+	if got := a.last(); got.method != "POST" || got.uri != "/api/v1/update/reboot" {
+		t.Errorf("%+v", got)
+	}
+	if l := d.AppSnapshot().Last; !l.OK || l.What != "update_reboot" {
+		t.Errorf("%+v", l)
+	}
+	a.route("POST /update/reboot", 409, map[string]any{"error": "streaming", "message": "deja de emitir para reiniciar el codificador"})
+	d.Do(ui.AppAction{What: "update_reboot"})
+	q, _, _, _ = d.take()
+	d.runAction(*q)
+	if l := d.AppSnapshot().Last; l.OK || l.Status != 409 || l.Code != "streaming" || l.Message == "" {
+		t.Errorf("%+v", l)
+	}
+}
+
 func TestSlots(t *testing.T) {
 	a, d := newDevice(t)
 	cam := "/dev/v4l/by-id/usb-Elgato_Cam_Link_4K_0001-video-index0"

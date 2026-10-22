@@ -33,7 +33,8 @@ serve() {
   sleep 1
 }
 
-# The board's environment
+# The board's environment (systemd's own systemctl, if any, stays as systemctl.real: tools/ota-sim/shims/systemctl)
+[ -x /bin/systemctl ] && ! grep -q 'Fake systemctl' /bin/systemctl && mv /bin/systemctl /bin/systemctl.real
 cp /s/sim/shims/* /bin/
 for g in i2c systemd-journal video audio input; do groupadd -f "$g"; done
 mkdir -p /boot/extlinux /etc/NetworkManager/dispatcher.d /var/log

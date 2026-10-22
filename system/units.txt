@@ -1,0 +1,25 @@
+# system/units.txt — the state the system layer fixes for these units (UPDATES.md §12): enabled | disabled | masked.
+# Never ssh (the debug image runs it) nor the app's own units (install.sh enables them). A unit that is not in the
+# list is left as it is.
+# Masked, as on the test board since Oct 8 (BASE.md §4.1, base/units-*.txt where the unit exists, D5):
+alsa-restore.service                      masked     # ALSA's saved mixer levels: the engine sets them
+apt-daily.service                         masked     # an appliance never refreshes or upgrades apt by itself
+apt-daily.timer                           masked
+apt-daily-upgrade.service                 masked
+apt-daily-upgrade.timer                   masked
+motd-news.service                         masked     # nothing to show: no login messages
+motd-news.timer                           masked
+nv-l4t-bootloader-config.service          masked     # NVIDIA's every-boot QSPI update: ours is eirl-firmware (IMAGE.md §4)
+nv-l4t-usb-device-mode.service            masked     # the board is not a USB gadget (D5)
+nv-l4t-usb-device-mode-runtime.service    masked
+serial-getty@ttyGS0.service               masked
+# Installed but not started at boot:
+ModemManager.service                      disabled   # decided with the modems' M0 (MODEMS.md)
+nvargus-daemon.service                    disabled   # NVIDIA's Argus camera service: unused, probes every video device
+nvweston.service                          disabled   # NVIDIA's Wayland (desktop only); its file is in /etc: not masked (BASE.md)
+nvmemwarning.service                      disabled   # the desktop's low-memory warning (a loop with sleep 300)
+bluetooth.service                         disabled   # pulled in by eirl-bluealsa.service, the one switch (BLUETOOTH.md §3.7)
+# Started at boot:
+nvpmodel.service                          enabled    # MAXN at boot (NVIDIA only enables it with a display manager)
+eirl-firstboot.service                    enabled    # the image's first boot (IMAGE.md §5): skipped once done
+eirl-firmware.service                     enabled    # the board's firmware check (IMAGE.md §4): skipped once done

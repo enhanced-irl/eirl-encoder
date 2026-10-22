@@ -609,6 +609,8 @@ func (u *UI) pageTouch(what, pick string, hasPick bool) {
 		u.updateCheck()
 	case what == "s_up_install":
 		u.updateInstall()
+	case what == "s_up_reboot":
+		u.updateReboot()
 	case what == "s_setup_again":
 		u.setupAgain()
 	}
@@ -1138,6 +1140,9 @@ func (u *UI) pageKeys(page string, n *NetSnapshot) []string {
 			keys = append(keys, "s_up_check")
 			if u.installShown(&app) {
 				keys = append(keys, "s_up_install")
+			}
+			if restartShown(&app) {
+				keys = append(keys, "s_up_reboot")
 			}
 		}
 	case "about":

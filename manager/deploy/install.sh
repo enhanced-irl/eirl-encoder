@@ -9,6 +9,9 @@
 #                                        # enable` only; nothing that needs a running system (see "Image mode")
 #
 # What it does (and how to undo it, in MANAGER.md §11):
+#   the system layer, first, when the package carries it (a release bundle: system/; UPDATES.md §12): the update
+#   helper and its units go in, then `eirl-update system apply` installs its kernel modules, firmware, Ubuntu
+#   packages, system files and units' state (a transaction of its own, not in files.txt) ·
 #   system user eirl-encoder (groups video, i2c, systemd-journal) · /etc/eirl-encoder · udev rule of the
 #   USB capture devices (no autosuspend; the board's hub writable by the group eirl-usbhub, which only
 #   eirl-engine has, to recover a hung device, and the MS2109's hidraw node, to read its signal) · app
@@ -19,8 +22,8 @@
 #   (eirl-netsetup, MediaMTX and their units; F7) · app unit (+ /etc/default/eirl-encoderd) · eirl-engine
 #   drop-in · the engine itself when the package carries it (a release bundle: engine/; its units enabled) ·
 #   the update helper (eirl-update and its units, UPDATES.md) · the fan control (eirl-fan and its unit, FAN.md) ·
-#   Bluetooth audio (BlueALSA's daemon and its system user bluealsa, its ALSA plugins and configuration, its unit, the
-#   D-Bus policy of the app and of BlueALSA, and bluetoothd's drop-in with only its audio plugins; BLUETOOTH.md §3.7) ·
+#   Bluetooth audio (BlueALSA's daemon and its system user bluealsa, its unit and bluetoothd's drop-in with only its
+#   audio plugins; its ALSA plugins, their configuration and the D-Bus policy are the system layer's; BLUETOOTH.md §3.7) ·
 #   one-time migrations (hdmi2srt →
 #   eirl-engine; the destination from /etc/default/eirl-engine to /etc/eirl-encoder/engine.env) · on a
 #   new device, engine.env with the output off and a default /etc/default/eirl-engine (never overwritten) · boot
@@ -57,10 +60,9 @@ DROPIN=/etc/systemd/system/eirl-engine.service.d/eirl-encoder.conf
 PKLA_DIR=/etc/polkit-1/localauthority/50-local.d
 NET_UNITS="eirl-ap.service eirl-ap-dhcp.service eirl-media.service"
 UPDATE_UNITS="eirl-update.service eirl-update-recover.service"
-# Bluetooth audio (BLUETOOTH.md §3.7): where alsa-lib 1.1.3 of Ubuntu 18.04 arm64 loads its plugins and its add-on
-# configuration (alsa.conf loads <datadir>/alsa.conf.d/*.conf), and bluetoothd's drop-in folder
-ALSA_PLUGINS=/usr/lib/aarch64-linux-gnu/alsa-lib
-ALSA_CONFD=/usr/share/alsa/alsa.conf.d
+# Bluetooth audio (BLUETOOTH.md §3.7): bluetoothd's drop-in. BlueALSA's ALSA plugins (in alsa-lib's folder), their
+# configuration and the D-Bus policy are the system layer's (system/built.txt, system/overlay.txt): outside the
+# folders every update helper since 0.1.0 accepts in files.txt, they made every bundle from 0.7.0 to 0.10.0 refused
 BT_DROPIN=/etc/systemd/system/bluetooth.service.d/nv-bluetooth-service.conf
 DOC=/usr/share/doc/eirl-encoder
 
@@ -114,10 +116,6 @@ list_files() {
   fi
   if [ -f "$SRC/bluealsa/bluealsa" ]; then
     echo /usr/local/bin/bluealsa
-    echo "$ALSA_PLUGINS/libasound_module_pcm_bluealsa.so"
-    echo "$ALSA_PLUGINS/libasound_module_ctl_bluealsa.so"
-    echo "$ALSA_CONFD/20-bluealsa.conf"
-    echo /etc/dbus-1/system.d/eirl-encoder-bluetooth.conf
     echo /etc/systemd/system/eirl-bluealsa.service
     echo "$BT_DROPIN"
   fi
@@ -201,6 +199,18 @@ st = read('/run/eirl-engine/state')
 sys.exit(0 if st is not None and 'OUTPUT=on' in st.split() else 1)
 PY
 }
+
+# 0. The system layer (UPDATES.md §12), before anything else of the release. The update helper and its units go in
+#    first: from here on, a power cut is undone at boot by THIS helper's recover, which knows the layer. Its files
+#    are listed in files.txt as always; the layer's are not (an older helper would refuse them): the layer keeps its
+#    own copy, marker and state in /var/lib/eirl-system. A failure undoes the layer and stops here, so the helper
+#    puts the previous release back.
+if [ -d "$SRC/system" ] && [ -f "$SRC/eirl-update" ]; then
+  put 0755 "$SRC/eirl-update" /usr/local/sbin/eirl-update
+  for u in $UPDATE_UNITS; do put 0644 "$D/$u" "/etc/systemd/system/$u"; done
+  [ -n "$IMAGE" ] || systemctl daemon-reload
+  /usr/local/sbin/eirl-update system apply -layer "$SRC/system" ${IMAGE:+-image}
+fi
 
 # 1. User and groups (v4l2, I2C of the TC358743, journal; the app only uses them to read)
 if ! id "$USER_" >/dev/null 2>&1; then
@@ -372,9 +382,10 @@ if [ -f "$SRC/eirl-update" ]; then
   for u in $UPDATE_UNITS; do put 0644 "$D/$u" "/etc/systemd/system/$u"; done
   install -d -m 0755 -o root -g root /var/lib/eirl-update
 fi
-# 6b''. Bluetooth audio (BLUETOOTH.md §3.7): BlueALSA (daemon, ALSA plugins and their configuration, unit), the D-Bus
-#       policy (the app may talk to BlueZ and BlueALSA, the engine to BlueALSA, root owns org.bluealsa) and bluetoothd's
-#       drop-in (NVIDIA's starts it without its audio plugins). Harmless without BlueZ: the unit's condition skips it
+# 6b''. Bluetooth audio (BLUETOOTH.md §3.7): BlueALSA's daemon and unit, and bluetoothd's drop-in (NVIDIA's starts it
+#       without its audio plugins). Its ALSA plugins and their configuration, and the D-Bus policy (the app may talk to
+#       BlueZ and BlueALSA, the engine to BlueALSA, root owns org.bluealsa) came with the system layer (step 0).
+#       Harmless without BlueZ: the unit's condition skips it
 bt_changed=""
 if [ -f "$SRC/bluealsa/bluealsa" ]; then
   # Its own system user (not root: it decodes what paired devices send). Its state, /var/lib/bluealsa, is the unit's
@@ -384,10 +395,6 @@ if [ -f "$SRC/bluealsa/bluealsa" ]; then
   fi
   before=$CHANGED
   put 0755 "$SRC/bluealsa/bluealsa" /usr/local/bin/bluealsa
-  put 0644 "$SRC/bluealsa/libasound_module_pcm_bluealsa.so" "$ALSA_PLUGINS/libasound_module_pcm_bluealsa.so"
-  put 0644 "$SRC/bluealsa/libasound_module_ctl_bluealsa.so" "$ALSA_PLUGINS/libasound_module_ctl_bluealsa.so"
-  put 0644 "$SRC/bluealsa/20-bluealsa.conf" "$ALSA_CONFD/20-bluealsa.conf"
-  put 0644 "$D/eirl-encoder-bluetooth.conf" /etc/dbus-1/system.d/eirl-encoder-bluetooth.conf
   put 0644 "$D/eirl-bluealsa.service" /etc/systemd/system/eirl-bluealsa.service
   put 0644 "$D/nv-bluetooth-service.conf" "$BT_DROPIN"
   [ "$CHANGED" != "$before" ] && bt_changed=1
@@ -532,13 +539,14 @@ if [ -x /usr/local/sbin/eirl-fan ]; then
   fi
 fi
 
-# 8d. Bluetooth audio: enabled at boot (it pulls bluetoothd in); now, if BlueZ is installed and something of it
-#     changed: the bus rereads its policies, bluetoothd restarts with its audio plugins (it drops the connected devices
-#     for a few seconds) and BlueALSA (re)starts. Without BlueZ the unit's condition skips it
+# 8d. Bluetooth audio: enabled at boot (it pulls bluetoothd in). The bus rereads its policies (the system layer may have
+#     changed ours: nothing is cut). If BlueZ is installed and something of it changed: bluetoothd restarts with its
+#     audio plugins (it drops the connected devices for a few seconds) and BlueALSA (re)starts. Without BlueZ the unit's
+#     condition skips it
 if [ -x /usr/local/bin/bluealsa ]; then
   systemctl enable eirl-bluealsa.service >/dev/null 2>&1
+  [ -n "$IMAGE" ] || systemctl reload dbus.service >/dev/null 2>&1 || true
   if [ -z "$IMAGE" ] && [ -n "$bt_changed" ] && [ -x /usr/lib/bluetooth/bluetoothd ]; then
-    systemctl reload dbus.service >/dev/null 2>&1 || true
     systemctl restart bluetooth.service || echo "WARNING: bluetoothd did not restart" >&2
     systemctl restart eirl-bluealsa.service || echo "WARNING: BlueALSA did not start: no Bluetooth audio" >&2
   fi

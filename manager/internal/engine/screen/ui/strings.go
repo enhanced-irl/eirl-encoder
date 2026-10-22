@@ -177,6 +177,11 @@ type Strings struct {
 	UpdInstalledF                          string // %s version
 	UpdUndoneF, UpdFailedF                 string // %s version, %s the app's message
 	UpdTestBuild                           string
+	// The restart that finishes an update (the system layer, UPDATES.md §12.5), and what the app says below the app
+	UpdReboot, UpdRebootConfirm, UpdRebooting string
+	UpdRebootStreaming, UpdRestartNeeded      string // the app's restartMessage, when it gives none: UpdRestartNeeded
+	UpdSystemFailed, UpdSystemSkipped         string // when the app gives no message
+	UpdMetered                                string // when the app gives no downloadWaitsMessage
 	// Sources page
 	SourceF                     string // %d = slot
 	SrcAuto, SrcAutoSub         string

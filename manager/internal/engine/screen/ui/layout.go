@@ -114,9 +114,9 @@ type Layout struct {
 	// The Date & time page: the clock's block; the zone picker: its grid
 	TimeClock          Rect
 	ZoneCols, ZoneRows int
-	// The Updates page: the notes' box; About: where its lines go
-	UpdateNotes Rect
-	AboutLines  Rect
+	// The Updates page: the notes' box and the row of the restart that finishes an update; About: where its lines go
+	UpdateNotes, UpdateRestart Rect
+	AboutLines                 Rect
 	// The wizard's list of steps (left column, above «Later»)
 	WizardList Rect
 

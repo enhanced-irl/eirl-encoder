@@ -386,7 +386,7 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir, frames string
 			app.snap.Slots.Slots[i].Alias = ""
 		}
 	}
-	if variant == "settings-updates-live" {
+	if variant == "settings-updates-live" || variant == "settings-updates-restart-live" {
 		st["output"] = m("mode", "on", "state", "on", "kbps", 5800, "sentKbps", 5800, "rttMs", 57)
 	}
 	net.app = app
@@ -544,6 +544,8 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir, frames string
 			p.AliasKeyboard(1, "Cámara principal")
 		case "settings-updates-confirm":
 			p.ConfirmUpdate()
+		case "settings-updates-restart-confirm":
+			p.ConfirmReboot()
 		case "settings-language":
 			p.Press(ui.HitButton, "s_lang_"+tx.Code, 0)
 		case "settings-sources-hidden": // a tap on Hide of the source on air: the engine refuses it

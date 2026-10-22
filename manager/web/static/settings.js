@@ -1,5 +1,5 @@
 // Settings cards of the dashboard that came with the device API (setup batch, 2026-10): source slots
-// (GET/PUT /sources/slots), updates (GET /update, POST /update/check|install) and the device (GET/PUT
+// (GET/PUT /sources/slots), updates (GET /update, POST /update/check|install|reboot) and the device (GET/PUT
 // /device: language, name, time zone and clock); later, Bluetooth audio (GET/PUT /bluetooth). Loaded after
 // app.js: it uses its helpers (api, t, toast, option, state, hooks, syncRows).
 'use strict';
@@ -761,7 +761,8 @@ onLangChange(() => { if (bt.data) renderBluetooth(bt.data); });
 // is going on, every minute otherwise (only with the dashboard live). While installing, the app restarts:
 // failed requests are expected, and the page reloads itself when the new UI answers (staleWeb).
 
-const upd = { data: null, timer: 0, installing: false, dismissed: '', asked: false };
+const upd = { data: null, timer: 0, installing: false, dismissed: '', asked: false, rebootAt: 0 };
+const REBOOT_WAIT = 3 * 60 * 1000; // «Restarting…» stays this long after the app took it (the board goes off before)
 const UPD_BUSY = ['checking', 'downloading', 'installing'];
 const UPD_KEY = 'eirl.updating'; // sessionStorage: the version being installed, to say how it went after the reload
 
@@ -874,6 +875,7 @@ function renderUpdate(u) {
   const show = canInstall || u.state === 'downloading';
   $('update-banner').hidden = !show || upd.dismissed === avVer;
   if (show) $('update-banner-txt').textContent = t('update.banner', { v: avVer });
+  renderUpdateSystem(u);
   // «Check now» found nothing new: say so (an automatic check, silently)
   if (upd.asked && prev && UPD_BUSY.includes(prev.state) && u.state === 'idle') toast(t('update.upToDateToast'));
   if (!UPD_BUSY.includes(u.state)) upd.asked = false;
@@ -892,6 +894,45 @@ function renderUpdateGate() {
   const why = !shown ? '' : streaming ? t('update.streaming') : !serverOk ? (u.blockedMessage || '') : '';
   $('update-why').hidden = !why;
   $('update-why').textContent = why;
+}
+
+// Below the app (the system layer, UPDATES.md §12): a download that waits for Wi-Fi or a cable («Check now»
+// downloads it), a system part that did not install, and the restart that finishes an update. The app's words
+// come in the request's language, as fragments
+const capFirst = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
+function renderUpdateSystem(u) {
+  // With a release available, it replaces «it downloads by itself» (update-msg); otherwise its own line
+  const waits = u.downloadWaits === 'metered' ? capFirst(u.downloadWaitsMessage || '') : '';
+  if (waits && u.state === 'available') $('update-msg').textContent = waits;
+  $('update-waits').textContent = waits;
+  $('update-waits').hidden = !waits || u.state === 'available';
+  const sys = u.system || null;
+  const sysMsg = sys && (sys.state === 'failed' || sys.state === 'skipped') ? capFirst(sys.message || '') : '';
+  $('update-system').textContent = sysMsg;
+  $('update-system').className = 'hint' + (sys && sys.state === 'failed' ? ' warn' : '');
+  $('update-system').hidden = !sysMsg;
+  const restart = !!(sys && sys.restartRequired === true);
+  if (!restart) { upd.rebootAt = 0; closeAsk($('update-reboot-ask')); }
+  $('update-restart').hidden = !restart;
+  if (restart) $('update-restart-msg').textContent = capFirst(sys.restartMessage || '') || t('update.restartNeeded');
+  renderRebootGate();
+}
+
+const updRebooting = () => upd.rebootAt > 0 && Date.now() - upd.rebootAt < REBOOT_WAIT;
+
+// «Restart now»: never while streaming nor while an update installs (follows every status and mixer change)
+function renderRebootGate() {
+  const u = upd.data;
+  if (!u || $('update-restart').hidden) return;
+  const streaming = emittingNow() || u.streaming === true;
+  const going = updRebooting();
+  const btn = $('update-reboot');
+  btn.disabled = going || streaming || UPD_BUSY.includes(u.state);
+  btn.hidden = !$('update-reboot-ask').hidden;
+  const why = going ? t('update.rebooting') : streaming ? t('update.rebootStreaming') : '';
+  $('update-restart-why').textContent = why;
+  $('update-restart-why').hidden = !why;
+  if (streaming) closeAsk($('update-reboot-ask'));
 }
 
 const UPDATE_STATES = ['idle', 'checking', 'available', 'downloading', 'ready', 'installing', 'rolled_back', 'error'];
@@ -944,6 +985,27 @@ $('update-install').addEventListener('click', async () => {
     $('update-install').disabled = false;
   }
   loadUpdate();
+});
+
+$('update-reboot').addEventListener('click', async () => {
+  const u = upd.data;
+  if (!u || !u.system || !u.system.restartRequired) return;
+  if (emittingNow()) { renderRebootGate(); return; }
+  const ask = $('update-reboot-ask');
+  $('update-reboot').hidden = true;
+  const yes = await askInline(ask, t('update.rebootAsk'), t('update.rebootYes'), true);
+  $('update-reboot').hidden = false;
+  if (!yes) { renderRebootGate(); return; }
+  $('update-reboot').disabled = true;
+  try {
+    await api('POST', '/update/reboot');
+    upd.rebootAt = Date.now();
+    toast(t('update.rebootingToast'));
+  } catch (e) {
+    toast(e.message, true); // 409 streaming / nothing_pending, 503 power_unavailable: in the request's language
+    loadUpdate();
+  }
+  renderRebootGate();
 });
 
 $('update-banner-go').addEventListener('click', () => {
@@ -1180,8 +1242,8 @@ $('dev-setup-again').addEventListener('click', async () => {
 hooks.start.push(loadDevice);
 hooks.live.push(loadUpdate, renderClock);
 hooks.stop.push(() => { clearTimeout(upd.timer); clearTimeout(dev.clockTimer); });
-hooks.status.push(renderUpdateGate);
-hooks.mixer.push(renderUpdateGate);
+hooks.status.push(renderUpdateGate, renderRebootGate);
+hooks.mixer.push(renderUpdateGate, renderRebootGate);
 onLangChange(() => {
   if (upd.data) renderUpdate(upd.data);
   if (state.device) {

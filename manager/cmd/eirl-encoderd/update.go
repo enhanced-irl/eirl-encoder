@@ -10,6 +10,7 @@ import (
 
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/api"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/update"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/update/syslayer"
 )
 
 // Over-the-air updates (UPDATES.md §8): the app checks, downloads and verifies; the root helper
@@ -47,6 +48,8 @@ func setupUpdates(ctx context.Context, srv *api.Server, manifestURL, dir string,
 		Current:   func() string { return update.InstalledRelease("/") },
 		Online:    func() bool { return update.HasDefaultRoute("/proc/net/route", "/proc/net/ipv6_route") },
 		Streaming: func() bool { on, _ := update.Streaming(runDir); return on },
+		// A modem or a phone: the automatic download waits for Wi-Fi or a cable (UPDATES.md §12.7)
+		Metered: func() bool { m, _ := update.MeteredDefaultRoute("/proc/net/route", "/sys/class/net"); return m },
 		// Exact sudoers rule: the helper is a systemd unit, never a child of this sandboxed process
 		StartHelper: func(ctx context.Context) error {
 			out, err := exec.CommandContext(ctx, "sudo", "-n", "/bin/systemctl", "--no-block", "start", "eirl-update.service").CombinedOutput()
@@ -60,6 +63,8 @@ func setupUpdates(ctx context.Context, srv *api.Server, manifestURL, dir string,
 		Log:              log,
 	})
 	srv.Update = u
+	// The system layer's state (UPDATES.md §12): what the update installed below the app, what waits for a restart
+	srv.SystemStateDir, srv.BootID = syslayer.DefaultStateDir, syslayer.CurrentBootID
 	log.Info("updates", "manifest", manifestURL, "auto", auto, "installed", update.InstalledRelease("/"), "key", update.KeyID(keys[0]))
 	go u.Run(ctx)
 }

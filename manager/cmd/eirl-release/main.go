@@ -8,6 +8,9 @@
 //	eirl-release keygen                       a THROWAWAY key pair for tests (seed and public key, base64)
 //	eirl-release check -url URL -current V -dir DIR [-pubkey B64]   what a board does: check, download, verify
 //	eirl-release semver V                    validates a version (no leading "v")
+//	eirl-release check-files -files files.txt   every path is one the board's update helper accepts (UPDATES.md §3)
+//	eirl-release layer -repo DIR -out DIR -release V -debs DIR -build-out DIR [-commit C] [-sources F] [-update-modules-lock]
+//	                                          the system layer (UPDATES.md §12) a bundle carries as system/
 //
 // The SD card image (IMAGE.md §8):
 //
@@ -46,6 +49,7 @@ import (
 	"time"
 
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/update"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/update/syslayer"
 )
 
 func main() {
@@ -85,6 +89,10 @@ func main() {
 		err = keygen()
 	case "check":
 		err = check(args)
+	case "layer":
+		err = layer(args)
+	case "check-files":
+		err = checkFiles(args)
 	case "semver":
 		if len(args) != 1 {
 			err = errors.New("usage: eirl-release semver VERSION")
@@ -100,6 +108,61 @@ func main() {
 		fmt.Fprintln(os.Stderr, "eirl-release:", err)
 		os.Exit(1)
 	}
+}
+
+// checkFiles: a bundle whose files.txt names a path outside the helpers' allow-list is refused whole by every board
+// (bad_bundle), as the bundles of 0.7.0 to 0.10.0 were. The allow-list has not changed since 0.1.0, so this one is
+// every helper's.
+func checkFiles(args []string) error {
+	fs := flag.NewFlagSet("check-files", flag.ContinueOnError)
+	files := fs.String("files", "", "files.txt")
+	if err := fs.Parse(args); err != nil || *files == "" {
+		return errors.New("usage: eirl-release check-files -files files.txt")
+	}
+	b, err := os.ReadFile(*files)
+	if err != nil {
+		return err
+	}
+	paths, err := update.ParseFiles(b)
+	if err != nil {
+		return fmt.Errorf("%v: every board would refuse this bundle (bad_bundle); a system file goes in the system layer (UPDATES.md §12.2)", err)
+	}
+	fmt.Printf("files.txt: %d paths, all accepted by the update helper\n", len(paths))
+	return nil
+}
+
+// layer builds the system layer from the repository's system/ (syslayer.Build) and prints what it holds.
+func layer(args []string) error {
+	fs := flag.NewFlagSet("layer", flag.ContinueOnError)
+	var in syslayer.BuildInput
+	fs.StringVar(&in.Repo, "repo", ".", "the repository's root")
+	fs.StringVar(&in.Out, "out", "", "the layer's directory (made from scratch)")
+	fs.StringVar(&in.Release, "release", "", "the release that carries it")
+	fs.StringVar(&in.DebCache, "debs", "", "the .deb files of system/packages.lock (build/system.sh)")
+	fs.StringVar(&in.BuildOut, "build-out", "", "build/out: the modules and firmware of build/build.sh")
+	fs.StringVar(&in.Commit, "commit", "", "the repository's commit (SOURCES.md)")
+	fs.StringVar(&in.SourcesOut, "sources", "", "write the layer's SOURCES.md here")
+	fs.BoolVar(&in.UpdateModulesLock, "update-modules-lock", false, "rewrite system/modules.lock with what build/build.sh built")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if in.Out == "" || in.Release == "" || in.DebCache == "" || in.BuildOut == "" {
+		return errors.New("usage: eirl-release layer -repo DIR -out DIR -release V -debs DIR -build-out DIR [-commit C] [-sources F]")
+	}
+	if _, err := update.ParseVersion(in.Release); err != nil {
+		return err
+	}
+	l, err := syslayer.Build(in)
+	if err != nil {
+		return err
+	}
+	var debs int64
+	for _, p := range l.Packages {
+		debs += p.Size
+	}
+	fmt.Printf("system layer %s: %d packages (%d KB), %d files, %d units, base of %d packages\n", l.Release, len(l.Packages),
+		debs>>10, len(l.Files), len(l.Units), len(l.Base))
+	return nil
 }
 
 // pack writes a deterministic .tar.gz of dir: sorted entries, root:root, fixed time, modes 0755/0644,

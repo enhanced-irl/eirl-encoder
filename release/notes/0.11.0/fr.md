@@ -1,0 +1,5 @@
+- Les mises à jour apportent maintenant aussi ce qui n'arrivait qu'en écrivant la carte avec une nouvelle image : pilotes, firmware et paquets du système. Pour avoir les nouveautés, il suffit de mettre à jour ; plus besoin de réécrire la carte.
+- C'est pourquoi l'iPhone par câble arrive maintenant aussi par une mise à jour, et pas seulement avec l'image de carte 0.8.0.
+- Corrigé : depuis la 0.7.0, la mise à jour échouait avec « le paquet de mise à jour n’est pas valide ». Cette version s'installe depuis n'importe quelle version précédente.
+- Si une partie d'une mise à jour ne s'active qu'après un redémarrage, l'encodeur le signale et vous permet de le redémarrer depuis les Réglages ou depuis le web (jamais pendant une diffusion).
+- Si l'encodeur accède à internet par un modem ou un téléphone, la mise à jour attend le Wi-Fi ou un câble pour se télécharger d'elle-même. Si vous la recherchez, elle se télécharge tout de suite en données mobiles.

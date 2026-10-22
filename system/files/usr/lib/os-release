@@ -1,0 +1,9 @@
+NAME="EnhancedIRL Encoder"
+VERSION="@RELEASE@"
+ID=ubuntu
+ID_LIKE=debian
+PRETTY_NAME="EnhancedIRL Encoder @RELEASE@ (Jetson Nano, L4T R32.7.6)"
+VERSION_ID="18.04"
+HOME_URL="https://github.com/enhanced-irl/eirl-encoder"
+VERSION_CODENAME=bionic
+UBUNTU_CODENAME=bionic

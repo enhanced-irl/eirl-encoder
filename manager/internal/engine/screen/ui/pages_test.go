@@ -199,6 +199,69 @@ func TestUpdatesPage(t *testing.T) {
 	}
 }
 
+// «Restart now» finishes an update (the system layer, UPDATES.md §12.5): only while the app says something waits
+// for it, with a second tap, never while streaming; and it lights the Updates dot.
+func TestUpdatesRestart(t *testing.T) {
+	h, app := pagesHarness(t, "updates")
+	if keys := h.u.pageKeys("updates", &h.net.snap); slices.Contains(keys, "s_up_reboot") || updateAvailable(&app.snap) {
+		t.Fatal("restart with nothing waiting")
+	}
+	app.snap.Update = &UpdateInfo{Current: "0.2.0", State: "idle", System: &UpdateSystem{State: "ok", RestartRequired: true,
+		Pending: []string{"hdmi"}, RestartMessage: "reinicia el codificador para terminar la actualización (entrada HDMI)"}}
+	if keys := h.u.pageKeys("updates", &h.net.snap); !slices.Contains(keys, "s_up_reboot") {
+		t.Fatal(keys)
+	}
+	if !updateAvailable(&app.snap) || h.u.pageDot("updates", &h.net.snap, &app.snap, nil) != "brand" {
+		t.Error("the dot")
+	}
+	n := len(app.did)
+	h.press("s_up_reboot", 0.1) // the first tap asks for the second
+	if len(app.did) != n || h.u.confirm == nil || h.u.confirm.what != "reboot" {
+		t.Fatal("restarts at the first tap")
+	}
+	h.press("s_up_reboot", 0.1)
+	if a := app.lastDid(); a.What != "update_reboot" {
+		t.Fatal(a)
+	}
+	// Taken by the app: «Restarting…», the button off
+	app.snap.Last = &AppResult{What: "update_reboot", OK: true, At: h.now()}
+	if ok, _ := h.u.rebootEnabled(&app.snap); ok || !h.u.rebooting(&app.snap) {
+		t.Fatal("restart again while restarting")
+	}
+	h.advance(rebootWait + time.Second)
+	if h.u.rebooting(&app.snap) {
+		t.Fatal("«Restarting…» forever")
+	}
+	// Streaming: never, and it says why
+	st := *h.u.st
+	st.Output.Mode = "on"
+	h.u.SetStatus(&st)
+	n = len(app.did)
+	h.press("s_up_reboot", 0.1)
+	h.press("s_up_reboot", 0.1)
+	if len(app.did) != n {
+		t.Fatal("restarts while streaming")
+	}
+	if ok, why := h.u.rebootEnabled(&app.snap); ok || why != Spanish.UpdRebootStreaming {
+		t.Fatal(ok, why)
+	}
+	// The app's word counts too (blocked: streaming)
+	st.Output.Mode = "off"
+	h.u.SetStatus(&st)
+	app.snap.Update.Blocked = "streaming"
+	if ok, _ := h.u.rebootEnabled(&app.snap); ok {
+		t.Fatal("restarts while the app says streaming")
+	}
+	app.snap.Update.Blocked = ""
+	// The confirmation expires
+	h.press("s_up_reboot", 0.1)
+	h.advance(ConfirmUpdate + time.Second)
+	h.u.Tick()
+	if h.u.confirm != nil {
+		t.Fatal("the confirmation stays")
+	}
+}
+
 func TestAboutSetupAgain(t *testing.T) {
 	h, app := pagesHarness(t, "about")
 	h.press("s_setup_again", 0.1)
@@ -227,7 +290,7 @@ func TestSettingsPagesLayout(t *testing.T) {
 			return r.X >= box.X && r.Y >= box.Y && r.X+r.W <= box.X+box.W && r.Y+r.H <= box.Y+box.H
 		}
 		groups := map[string][]string{"list": nil, "language": nil, "time": nil, "zones": {"s_prev", "s_next"},
-			"updates": {"s_up_check", "s_up_install"}, "about": {"s_setup_again"}}
+			"updates": {"s_up_check", "s_up_install", "s_up_reboot"}, "about": {"s_setup_again"}}
 		for _, g := range SettingsGroups {
 			groups["list"] = append(groups["list"], "s_page_"+g.ID)
 		}
@@ -268,6 +331,11 @@ func TestSettingsPagesLayout(t *testing.T) {
 		}
 		if lay.UpdateNotes.Y < lay.Buttons["s_up_check"].Y+lay.Buttons["s_up_check"].H {
 			t.Errorf("%v: the notes over the buttons", sz)
+		}
+		rr, pg := lay.UpdateRestart, lay.SettingsPage
+		if rr.Y < lay.Buttons["s_up_check"].Y+lay.Buttons["s_up_check"].H || !in(rr, pg) ||
+			!in(lay.Buttons["s_up_reboot"], rr) || rr.Y+rr.H+60 > pg.Y+pg.H {
+			t.Errorf("%v: the restart row %v", sz, rr)
 		}
 	}
 }
@@ -350,6 +418,27 @@ func TestUpdatesAppWords(t *testing.T) {
 	draw(&UpdateInfo{Current: "0.2.0", State: "idle", LastResult: &UpdateRun{State: "installed", From: "0.1.0", To: "0.2.0"}})
 	if !has("Actualizado a la 0.2.0") {
 		t.Fatalf("installed: %q", shown)
+	}
+	// Below the app: the restart's message, the system layer that failed and the download that waits, capitalised;
+	// the screen's own words when the app gives none
+	draw(&UpdateInfo{Current: "0.2.0", State: "available", Available: avail, DownloadWaits: "metered",
+		DownloadWaitsMessage: "la actualización se descargará sola cuando haya wifi o cable",
+		System: &UpdateSystem{State: "failed", Message: "la parte del sistema no se pudo instalar", RestartRequired: true,
+			RestartMessage: "reinicia el codificador para terminar la actualización"}})
+	all := strings.Join(shown, " ")
+	for _, w := range []string{"La actualización se descargará sola cuando haya wifi o cable",
+		"La parte del sistema no se pudo instalar", "Reinicia el codificador para terminar", Spanish.UpdReboot} {
+		if !strings.Contains(all, w) {
+			t.Errorf("%q not in %q", w, shown)
+		}
+	}
+	draw(&UpdateInfo{Current: "0.2.0", State: "available", Available: avail, DownloadWaits: "metered",
+		System: &UpdateSystem{State: "skipped", RestartRequired: true}})
+	all = strings.Join(shown, " ")
+	for _, w := range []string{Spanish.UpdMetered, Spanish.UpdSystemSkipped, Spanish.UpdRestartNeeded} {
+		if !strings.Contains(all, strings.Fields(w)[0]+" "+strings.Fields(w)[1]) {
+			t.Errorf("%q not in %q", w, shown)
+		}
 	}
 	draw(&UpdateInfo{Current: "0.2.0", State: "idle", TestBuild: true})
 	if !has("Al día") || !has(Spanish.UpdTestBuild) {

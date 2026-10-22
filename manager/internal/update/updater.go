@@ -99,6 +99,10 @@ type Config struct {
 	Online func() bool
 	// Streaming: whether the engine streams (Streaming(runDir)); nil = never.
 	Streaming func() bool
+	// Metered: whether the way to the internet is paid by the megabyte (a modem, a phone: MeteredDefaultRoute).
+	// An automatic check then does not download the release: it waits for Wi-Fi or a cable, and a manual check
+	// downloads it at once (UPDATES.md §12.7). nil = never.
+	Metered func() bool
 	// StartHelper starts the root helper (sudo -n /bin/systemctl --no-block start eirl-update.service).
 	StartHelper func(ctx context.Context) error
 	// HelperStatusPath: the helper's status.json.
@@ -122,6 +126,9 @@ type Status struct {
 	Streaming  bool
 	LastResult *HelperStatus // the helper's last run, if any
 	AutoCheck  bool
+	// DownloadWaits: why a newer release is not being downloaded by itself ("metered": it waits for Wi-Fi or a
+	// cable; a manual check downloads it). "" = it is not waiting
+	DownloadWaits string
 }
 
 // CanInstallNow: a verified bundle is waiting, nothing streams and no install runs.
@@ -154,6 +161,7 @@ type Updater struct {
 	// the wait before the next (a mispublished asset is not fetched in full every 30 min)
 	badSums    int
 	badSumsVer string
+	waits      string // Status.DownloadWaits
 
 	trigger chan struct{}
 }
@@ -184,6 +192,8 @@ func (u *Updater) current() string {
 
 func (u *Updater) streaming() bool { return u.cfg.Streaming != nil && u.cfg.Streaming() }
 
+func (u *Updater) metered() bool { return u.cfg.Metered != nil && u.cfg.Metered() }
+
 // Status returns a snapshot.
 func (u *Updater) Status() Status {
 	streaming := u.streaming()
@@ -192,6 +202,9 @@ func (u *Updater) Status() Status {
 	st := Status{Current: u.cfg.Current(), State: u.state, Available: u.avail, Progress: u.progress,
 		LastCheck: u.lastCheck, Error: u.errCode, Detail: u.errDetail, Ready: u.ready, Streaming: streaming,
 		AutoCheck: u.cfg.AutoCheck}
+	if u.avail != nil && !u.ready && u.state == StateAvailable {
+		st.DownloadWaits = u.waits
+	}
 	if u.lastResult != nil {
 		r := *u.lastResult
 		st.LastResult = &r
@@ -310,7 +323,7 @@ func (u *Updater) periodic(ctx context.Context) {
 	}
 	if dueCheck {
 		u.checkAndDownload(ctx, false)
-	} else {
+	} else if !u.waitForUnmetered(now) {
 		u.download(ctx)
 	}
 }
@@ -453,10 +466,35 @@ func (u *Updater) checkAndDownload(ctx context.Context, manual bool) {
 	if !same {
 		u.clean()
 	}
+	if manual {
+		u.mu.Lock()
+		u.waits = ""
+		u.mu.Unlock()
+	} else if u.waitForUnmetered(now) {
+		return
+	}
 	u.mu.Lock()
 	u.busy = false // download takes the flag itself
 	u.mu.Unlock()
 	u.download(ctx)
+}
+
+// waitForUnmetered: an automatic download waits while the way to the internet is metered (a modem, a phone): it
+// says so in the status and looks again later. True = it waits.
+func (u *Updater) waitForUnmetered(now time.Time) bool {
+	if !u.metered() {
+		u.mu.Lock()
+		u.waits = ""
+		u.mu.Unlock()
+		return false
+	}
+	u.mu.Lock()
+	if u.waits == "" {
+		u.cfg.Log.Info("update: the download waits for Wi-Fi or a cable (the link is metered)")
+	}
+	u.waits, u.nextDL = "metered", now.Add(OfflinePoll)
+	u.mu.Unlock()
+	return true
 }
 
 // showingResult: the state shows the result of the last install (rolled_back) until it is dismissed.

@@ -22,8 +22,10 @@
 #   --key-stdin         sign with a THROWAWAY seed (base64) read from stdin; needs --pubkey
 #   --pubkey B64        the throwaway public key: the binaries are a TEST build that trusts only it
 #   --skip-engine       an app-only bundle (the engine on the board is left as it is)
-#   --inject-failure W  a broken bundle to test the rollback: W=app (the new app never starts) or
-#                       W=install (install.sh fails)
+#   --skip-system       a bundle without the system layer (UPDATES.md §12; the board's system is left as it is)
+#   --inject-failure W  a broken bundle to test the rollback: W=app (the new app never starts),
+#                       W=install (install.sh fails) or W=system (a file of the system layer that every apply
+#                       needs, its os-release, does not match its layer.json: refused before changing anything)
 #   --allow-dirty       build from a tree with uncommitted changes
 #
 # image options. IMG is the image recipe's eirl-encoder-<version>-jetson-nano.img.xz, where <version> is the
@@ -61,7 +63,7 @@ case "$cmd" in
   *) awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; exit 64 ;;
 esac
 
-LOCAL="" VERSION_OPT="" KEY_STDIN="" PUBKEY="" SKIP_ENGINE="" ENGINE_BIN="" INJECT="" ALLOW_DIRTY="" MIN_FROM="" NOTES="" YES=""
+LOCAL="" VERSION_OPT="" KEY_STDIN="" PUBKEY="" SKIP_ENGINE="" SKIP_SYSTEM="" ENGINE_BIN="" INJECT="" ALLOW_DIRTY="" MIN_FROM="" NOTES="" YES=""
 IMAGE="" SOFTWARE="" RAW_SIZE="" RAW_SHA="" RAW_FROM_XZ="" PACKAGES="" SOURCES="" MIN_CARD="" COMMIT="" BUILT="" CLOBBER="" REPO_OPT="" ARG=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -70,6 +72,7 @@ while [ $# -gt 0 ]; do
     --key-stdin) KEY_STDIN=1 ;;
     --pubkey) PUBKEY=${2:?}; shift ;;
     --skip-engine) SKIP_ENGINE=1 ;;
+    --skip-system) SKIP_SYSTEM=1 ;;
     --engine-bin) ENGINE_BIN=${2:?}; shift ;;
     --inject-failure) INJECT=${2:?}; shift ;;
     --allow-dirty) ALLOW_DIRTY=1 ;;
@@ -111,7 +114,7 @@ GITHUB_MAX_ASSET=2147483648   # GitHub: every file of a release must be under 2 
 
 # --- image: sign the SD card image of a release (IMAGE.md §8) ----------------------------------------------
 if [ "$cmd" = image ]; then
-  [ -z "$VERSION_OPT$SKIP_ENGINE$ENGINE_BIN$INJECT$MIN_FROM$NOTES$YES$CLOBBER$REPO_OPT" ] ||
+  [ -z "$VERSION_OPT$SKIP_ENGINE$SKIP_SYSTEM$ENGINE_BIN$INJECT$MIN_FROM$NOTES$YES$CLOBBER$REPO_OPT" ] ||
     die "image takes --image, --software-manifest, --raw-size and --raw-sha256 or --raw-from-xz, --packages, --sources, --min-card-bytes, --commit, --built, and --local, --key-stdin, --pubkey, --allow-dirty to test"
   [ -n "$IMAGE" ] || die "--image eirl-encoder-<version>-jetson-nano.img.xz is required"
   if [ -z "$LOCAL" ]; then
@@ -200,7 +203,7 @@ fi
 
 # --- publish-image: add the image to the existing GitHub release (IMAGE.md §8.3) ---------------------------
 if [ "$cmd" = publish-image ]; then
-  [ -z "$LOCAL$VERSION_OPT$KEY_STDIN$SKIP_ENGINE$ENGINE_BIN$INJECT$ALLOW_DIRTY$MIN_FROM$NOTES$IMAGE_OPTS" ] ||
+  [ -z "$LOCAL$VERSION_OPT$KEY_STDIN$SKIP_ENGINE$SKIP_SYSTEM$ENGINE_BIN$INJECT$ALLOW_DIRTY$MIN_FROM$NOTES$IMAGE_OPTS" ] ||
     die "publish-image takes <version>, --yes and --clobber (and --repo with --pubkey, to test it)"
   ver=$ARG
   [ -n "$ver" ] || die "usage: tools/release.sh publish-image <version> [--yes] [--clobber]"
@@ -269,7 +272,7 @@ fi
 
 if [ "$cmd" = publish ]; then
   [ -z "$IMAGE_OPTS$CLOBBER$REPO_OPT" ] || die "publish takes only --yes"
-  [ -z "$LOCAL$VERSION_OPT$KEY_STDIN$PUBKEY$SKIP_ENGINE$INJECT" ] || die "publish takes only --yes"
+  [ -z "$LOCAL$VERSION_OPT$KEY_STDIN$PUBKEY$SKIP_ENGINE$SKIP_SYSTEM$INJECT" ] || die "publish takes only --yes"
   ver=$(file_version)
   out=build/out/release/$ver
   bundle=$out/eirl-encoder-$ver-linux-arm64.tar.gz
@@ -306,13 +309,13 @@ fi
 # --- build ------------------------------------------------------------------------------------------------
 [ -z "$IMAGE_OPTS$CLOBBER$REPO_OPT" ] || die "--image, --software-manifest, --raw-*, --packages, --sources, --min-card-bytes, --commit, --built, --clobber and --repo are not for build"
 if [ -z "$LOCAL" ]; then
-  [ -z "$VERSION_OPT$KEY_STDIN$PUBKEY$SKIP_ENGINE$INJECT$ALLOW_DIRTY" ] ||
-    die "--version, --key-stdin, --pubkey, --skip-engine, --inject-failure and --allow-dirty are for --local test releases only"
+  [ -z "$VERSION_OPT$KEY_STDIN$PUBKEY$SKIP_ENGINE$SKIP_SYSTEM$INJECT$ALLOW_DIRTY" ] ||
+    die "--version, --key-stdin, --pubkey, --skip-engine, --skip-system, --inject-failure and --allow-dirty are for --local test releases only"
 fi
 if [ -n "$KEY_STDIN" ] || [ -n "$PUBKEY" ]; then
   [ -n "$KEY_STDIN" ] && [ -n "$PUBKEY" ] || die "--key-stdin and --pubkey go together"
 fi
-case "$INJECT" in ""|app|install) ;; *) die "--inject-failure app|install" ;; esac
+case "$INJECT" in ""|app|install|system) ;; *) die "--inject-failure app|install|system" ;; esac
 if [ -z "$SKIP_ENGINE" ]; then
   # The engine runs as its own system user (no login, no sudo): a unit with any other User= would make
   # every board run the engine as that account (security review). Until the eirl-engine user is in main,
@@ -373,9 +376,22 @@ if [ -z "$SKIP_ENGINE" ]; then
   printf '%s\n' $RETIRED > "$PKG/engine/retired.txt"
 fi
 
+if [ -z "$SKIP_SYSTEM" ]; then
+  # The system layer (UPDATES.md §12): our modules and firmware (build/build.sh, reproducible: their sha256 are pinned
+  # in system/modules.lock), the Ubuntu packages of system/packages.lock (build/system.sh fetches and checks them),
+  # system/files/ and the units' state. In the bundle as system/, applied by install.sh; its sources in doc/
+  echo "== system layer"
+  build/build.sh >/dev/null
+  build/system.sh >/dev/null
+  "$REL" layer -repo "$ROOT" -out "$PKG/system" -release "$ver" -debs "${CACHE:-$HOME/.cache/l4t-r32.7.6}/debs" \
+    -build-out build/out -commit "$commit" -sources "$PKG/doc/system-SOURCES.md"
+fi
+
 # files.txt with everything the bundle installs (install.sh --list-files, with the engine now in the package)
 bash "$PKG/install.sh" --list-files > "$PKG/files.txt.new" && mv "$PKG/files.txt.new" "$PKG/files.txt"
 grep -qx /usr/lib/eirl-encoder/VERSION "$PKG/files.txt" || die "files.txt without VERSION"
+# Every path must be one the boards' update helper accepts, or every board refuses the whole bundle (UPDATES.md §3)
+"$REL" check-files -files "$PKG/files.txt" >/dev/null || die "files.txt names a path the update helper refuses"
 
 case "$INJECT" in
   app)
@@ -384,6 +400,10 @@ case "$INJECT" in
   install)
     printf '#!/bin/sh\necho "install.sh: injected failure (tools/release.sh --inject-failure install)" >&2\nexit 1\n' > "$PKG/install.sh"
     chmod 0755 "$PKG/install.sh" ;;
+  system)
+    f=$PKG/system/files/usr/lib/os-release
+    [ -f "$f" ] || die "--inject-failure system: the bundle has no system layer"
+    echo "# injected failure (tools/release.sh --inject-failure system)" >> "$f" ;;
 esac
 
 echo "== bundle"

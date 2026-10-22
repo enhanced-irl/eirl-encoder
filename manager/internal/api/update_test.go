@@ -170,3 +170,75 @@ func TestUpdateRoutesOnAnyMux(t *testing.T) {
 		t.Errorf("%d %s", w.Code, w.Body)
 	}
 }
+
+// The system layer (UPDATES.md §12): what waits for a restart, and the restart itself
+func TestUpdateSystemLayerAndRestart(t *testing.T) {
+	e := setup(t, true)
+	f := &fakeUpdate{st: update.Status{Current: "0.10.0", State: update.StateIdle}}
+	e.srv.Update = f
+	pw := &fakePower{}
+	e.srv.Power = pw
+	sysDir := filepath.Join(e.dir, "eirl-system")
+	os.MkdirAll(sysDir, 0o755)
+	boot := "boot-1"
+	e.srv.SystemStateDir, e.srv.BootID = sysDir, func() string { return boot }
+	e.h = e.srv.Handler()
+	ck := e.login(t)
+	get := func() UpdateView {
+		w := e.do("GET", "/api/v1/update", "", ck, "Accept-Language", "es")
+		var v UpdateView
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &v) != nil {
+			t.Fatalf("GET %d %s", w.Code, w.Body)
+		}
+		return v
+	}
+	// No state yet: no "system"
+	if v := get(); v.System != nil {
+		t.Errorf("system without a state: %+v", v.System)
+	}
+	if w := e.do("POST", "/api/v1/update/reboot", "{}", ck); w.Code != 409 || len(pw.calls) != 0 {
+		t.Errorf("reboot with nothing pending: %d", w.Code)
+	}
+	st := `{"v":1,"release":"0.10.0","appliedAt":"2026-10-21T12:00:00Z","bootId":"boot-1","files":{},"packages":{},"units":{},
+	  "pending":[{"area":"uplinks","what":"usbmuxd.service","effect":"reboot"},{"area":"hdmi","what":"tc358743","effect":"reboot"},
+	  {"area":"uplinks","what":"option","effect":"reboot"}]}`
+	os.WriteFile(filepath.Join(sysDir, "state.json"), []byte(st), 0o644)
+	v := get()
+	if v.System == nil || v.System.State != "ok" || !v.System.RestartRequired || strings.Join(v.System.Pending, ",") != "hdmi,uplinks" ||
+		!strings.Contains(v.System.RestartMessage, "entrada HDMI, módems e iPhone") {
+		t.Fatalf("pending view %+v", v.System)
+	}
+	// Never while streaming
+	f.st.Streaming = true
+	if w := e.do("POST", "/api/v1/update/reboot", "{}", ck); w.Code != 409 || !strings.Contains(w.Body.String(), `"streaming"`) || len(pw.calls) != 0 {
+		t.Errorf("reboot while streaming: %d %s", w.Code, w.Body)
+	}
+	f.st.Streaming = false
+	// Never in the middle of an install (it would cut dpkg)
+	f.st.State = update.StateInstalling
+	if w := e.do("POST", "/api/v1/update/reboot", "{}", ck); w.Code != 409 || !strings.Contains(w.Body.String(), `"busy"`) || len(pw.calls) != 0 {
+		t.Errorf("reboot while installing: %d %s", w.Code, w.Body)
+	}
+	f.st.State = update.StateIdle
+	if w := e.do("POST", "/api/v1/update/reboot", "{}", ck, "Sec-Fetch-Site", "cross-site"); w.Code != 403 {
+		t.Errorf("cross-site reboot: %d", w.Code)
+	}
+	if w := e.do("POST", "/api/v1/update/reboot", "{}", ck); w.Code != 202 || len(pw.calls) != 1 {
+		t.Errorf("reboot: %d %v", w.Code, pw.calls)
+	}
+	// After the restart (another boot) nothing waits
+	boot = "boot-2"
+	if v := get(); v.System.RestartRequired || len(v.System.Pending) != 0 {
+		t.Errorf("after the restart: %+v", v.System)
+	}
+	// A layer that failed: the previous one stays, and it says so
+	os.WriteFile(filepath.Join(sysDir, "state.json"), []byte(`{"v":1,"release":"0.10.0","error":"unmet_dependencies: x","failed":"0.11.0"}`), 0o644)
+	if v := get(); v.System.State != "failed" || v.System.Error != "unmet_dependencies" || v.System.Message == "" {
+		t.Errorf("failed view %+v", v.System)
+	}
+	// A metered link: the download waits, with the reason
+	f.st = update.Status{Current: "0.10.0", State: update.StateAvailable, Available: &update.Manifest{Version: "0.11.0"}, DownloadWaits: "metered"}
+	if v := get(); v.DownloadWaits != "metered" || !strings.Contains(v.DownloadWaitsMsg, "wifi") {
+		t.Errorf("metered view %+v", v)
+	}
+}

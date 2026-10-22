@@ -51,7 +51,7 @@ type AppWatch struct {
 
 // AppAction is a change asked of the app.
 type AppAction struct {
-	What  string // language | name | timezone | ntp | time | setup_step | setup_complete | setup_restart | update_check | update_install | slots | cloud_pair, and MIXER.md §21's (AppActions)
+	What  string // language | name | timezone | ntp | time | setup_step | setup_complete | setup_restart | update_check | update_install | update_reboot | slots | cloud_pair, and MIXER.md §21's (AppActions)
 	Value string // language, name, timezone; setup_step: the step id; bt_device: the order (pair | connect | disconnect | forget)
 	State string // setup_step: done | skipped
 	On    bool   // ntp
@@ -219,6 +219,22 @@ type UpdateInfo struct {
 	LastResult     *UpdateRun
 	TestBuild      bool // this build trusts a test key (never on a customer device)
 	Versions       UpdateVersions
+	// DownloadWaits: "metered" when a newer release waits for Wi-Fi or a cable before it downloads by itself («Check
+	// now» downloads it at once); DownloadWaitsMessage says so in the device language
+	DownloadWaits        string
+	DownloadWaitsMessage string
+	System               *UpdateSystem // the system layer (UPDATES.md §12); nil from an app without it
+}
+
+// UpdateSystem is the system layer below the app: how its last install went and whether something waits for a
+// restart (POST /update/reboot, never while streaming).
+type UpdateSystem struct {
+	State           string // ok | failed (the previous one stays) | skipped (not the encoder's own system)
+	Error           string // the stable code when failed
+	Message         string // failed or skipped, in the device language
+	RestartRequired bool
+	Pending         []string // what the restart finishes: hdmi | bluetooth | uplinks | system
+	RestartMessage  string   // in the device language
 }
 
 // UpdateRun is the installer's last run: installed | rolled_back | failed | refused | installing.

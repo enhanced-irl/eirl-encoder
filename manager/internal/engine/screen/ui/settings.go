@@ -1056,10 +1056,41 @@ func (u *UI) drawZones(d *dc, app *AppSnapshot) {
 	}
 }
 
-// updateAvailable: there is a release to install (the Updates entry's dot, and the gear's).
+// updateAvailable: there is a release to install, or a restart to finish one (the Updates entry's dot, and the
+// gear's).
 func updateAvailable(app *AppSnapshot) bool {
 	up := app.Update
-	return up != nil && up.Available != nil && (up.State == "available" || up.State == "ready")
+	return up != nil && (up.Available != nil && (up.State == "available" || up.State == "ready") || restartShown(app))
+}
+
+// restartShown: something the last update installed acts only after a restart (the system layer, UPDATES.md §12.5).
+func restartShown(app *AppSnapshot) bool {
+	up := app.Update
+	return up != nil && up.System != nil && up.System.RestartRequired
+}
+
+// rebootWait is how long «Restarting the encoder…» stays after the app took the restart (the board goes off before).
+const rebootWait = 3 * PowerWait
+
+// rebooting: the restart was asked and the app took it (or it is on its way).
+func (u *UI) rebooting(app *AppSnapshot) bool {
+	l := app.Last
+	return app.Pending == "update_reboot" || (l != nil && l.What == "update_reboot" && l.OK && u.now().Sub(l.At) < rebootWait)
+}
+
+// rebootEnabled: «Restart now» can be pressed, else why not: never while streaming (the engine's own output, or the
+// app's word), nor while an update runs or the restart is already asked.
+func (u *UI) rebootEnabled(app *AppSnapshot) (bool, string) {
+	up := app.Update
+	switch {
+	case !restartShown(app) || u.rebooting(app):
+		return false, ""
+	case u.streaming() || up.Blocked == "streaming":
+		return false, u.Tx.UpdRebootStreaming
+	case up.State == "installing" || app.Pending == "update_install":
+		return false, ""
+	}
+	return true, ""
 }
 
 // streaming: the output is on (an update must not start; the app also refuses it).
@@ -1149,7 +1180,7 @@ func (u *UI) drawUpdatesPage(d *dc, app *AppSnapshot) {
 	busy := up.State == "checking" || up.State == "downloading" || up.State == "installing" ||
 		app.Pending == "update_check" || app.Pending == "update_install"
 	d.button("s_up_check", btn{label: tx.UpdCheck, dim: busy})
-	note := u.resultNote(app, "update_check", "update_install")
+	note := u.resultNote(app, "update_check", "update_install", "update_reboot")
 	if u.installShown(app) {
 		conf := u.confirm != nil && u.confirm.what == "update"
 		label := sprintf(tx.UpdInstallF, ver)
@@ -1163,16 +1194,28 @@ func (u *UI) drawUpdatesPage(d *dc, app *AppSnapshot) {
 			note = why
 		}
 	}
+	// Under the buttons: the restart that finishes an update, what the app says below the app (the system layer) and
+	// why the download waits, then the release notes in what is left. ty: the baseline of the next line
+	nb := lay.UpdateNotes
+	nx, nw := float64(nb.X), float64(nb.W)
+	maxY := float64(nb.Y+nb.H) - 26*s
+	ty := float64(nb.Y) + 4*s
+	if restartShown(app) {
+		ok, why := u.drawRestartRow(d, app)
+		if !ok && note == "" {
+			note = why
+		}
+		ty = float64(lay.UpdateRestart.Y+lay.UpdateRestart.H) + 24*s
+	}
 	if note == "" && up.TestBuild {
 		note = tx.UpdTestBuild
 	}
-	// The release notes
-	if up.Available != nil && up.Available.Notes != "" {
-		nb := lay.UpdateNotes
-		nx, ny, nw, nh := float64(nb.X), float64(nb.Y), float64(nb.W), float64(nb.H)
-		d.text(nx+4*s, ny+4*s, tx.UpdNotes, 15*s, textOpt{col: cQuiet, bold: true})
-		ly := ny + 28*s
-		maxY := ny + nh - 26*s
+	for _, n := range u.updateNotices(up) { // up to two lines each
+		ty = d.paragraph(nx+4*s, ty, nw-8*s, n.text, 15*s, 20*s, 2, textOpt{col: n.tone, bold: n.tone == cWarn}) + 8*s
+	}
+	if up.Available != nil && up.Available.Notes != "" && ty+24*s <= maxY {
+		d.text(nx+4*s, ty, tx.UpdNotes, 15*s, textOpt{col: cQuiet, bold: true})
+		ly := ty + 24*s
 		for _, para := range strings.Split(up.Available.Notes, "\n") {
 			for _, line := range d.wrap(para, 15*s, Sans, nw-8*s) {
 				if ly > maxY {
@@ -1184,6 +1227,88 @@ func (u *UI) drawUpdatesPage(d *dc, app *AppSnapshot) {
 		}
 	}
 	u.noteLine(d, note, true)
+}
+
+// drawRestartRow is the restart that finishes an update: the app's words on the left (or «Restarting…»), «Restart
+// now» on the right with its second tap, on an amber band. It returns whether the button can be pressed, else why.
+func (u *UI) drawRestartRow(d *dc, app *AppSnapshot) (bool, string) {
+	lay, tx, c, s := u.Lay, u.Tx, d.c, d.s
+	r := lay.UpdateRestart
+	x, y, w, h := float64(r.X), float64(r.Y), float64(r.W), float64(r.H)
+	c.FillRR(RR{x, y, w, h, 8 * s}, cWarn.WithAlpha(0.12))
+	c.StrokeRR(RR{x, y, w, h, 8 * s}, 1.25, cWarn.WithAlpha(0.5))
+	sys := app.Update.System
+	msg := capFirst(sys.RestartMessage)
+	if msg == "" {
+		msg = tx.UpdRestartNeeded
+	}
+	ok, why := u.rebootEnabled(app)
+	if u.rebooting(app) {
+		msg = tx.UpdRebooting
+	}
+	tw := float64(lay.Buttons["s_up_reboot"].X) - x - 24*s
+	lines := d.wrapText(msg, 15*s, SansBold, tw)
+	n := min(len(lines), 3)
+	ly := y + (h-float64(n)*18*s)/2 + 13*s
+	d.paragraph(x+12*s, ly, tw, msg, 15*s, 18*s, 3, textOpt{col: cInk, bold: true})
+	conf := ok && u.confirm != nil && u.confirm.what == "reboot"
+	label := tx.UpdReboot
+	if conf {
+		label = tx.UpdRebootConfirm
+	}
+	d.button("s_up_reboot", btn{label: label, active: ok, col: colp(map[bool]Color{true: cWarn, false: cBrand}[conf]),
+		dim: !ok})
+	return ok, why
+}
+
+// updateNotice is a line of the Updates page under the buttons.
+type updateNotice struct {
+	text string
+	tone Color
+}
+
+// updateNotices: the system layer that did not install (or is not the encoder's), and the download that waits for
+// Wi-Fi or a cable (the app's words, in the device language; the screen's own when it gives none).
+func (u *UI) updateNotices(up *UpdateInfo) []updateNotice {
+	tx := u.Tx
+	var out []updateNotice
+	or := func(msg, own string) string {
+		if msg = capFirst(msg); msg != "" {
+			return msg
+		}
+		return own
+	}
+	if sys := up.System; sys != nil {
+		switch sys.State {
+		case "failed":
+			out = append(out, updateNotice{or(sys.Message, tx.UpdSystemFailed), cWarn})
+		case "skipped":
+			out = append(out, updateNotice{or(sys.Message, tx.UpdSystemSkipped), cQuiet})
+		}
+	}
+	if up.DownloadWaits == "metered" {
+		out = append(out, updateNotice{or(up.DownloadWaitsMessage, tx.UpdMetered), cInk})
+	}
+	return out
+}
+
+// paragraph draws t wrapped to a width from the baseline y, at most n lines (the last one shortened when more is
+// left), and returns the baseline after it.
+func (d *dc) paragraph(x, y, width float64, t string, size, lineH float64, n int, o textOpt) float64 {
+	style := Sans
+	if o.bold {
+		style = SansBold
+	}
+	lines := d.wrapText(t, size, style, width)
+	if len(lines) > n {
+		lines = append(lines[:n-1], strings.Join(lines[n-1:], " "))
+	}
+	o.width = width
+	for _, line := range lines {
+		d.text(x, y, line, size, o)
+		y += lineH
+	}
+	return y
 }
 
 // installEnabled: «Update to X» can be pressed, else why not. The app says it (canInstall, blockedMessage, in

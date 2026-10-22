@@ -1,4 +1,8 @@
-# tools/image/packages.lock — the image's exact packages and versions (check.py --update-lock).
+# tools/image/base.lock — the encoder's FROZEN BASE: the packages of the SD card image of 0.7.0 (recipe 0f07c8317eb5), the
+# first published one, exactly. Every image is this base plus the system layer (system/, UPDATES.md §12); a board
+# flashed with any published image reaches the same system over the air. It never changes: a different package or
+# version goes into the system layer (system/packages.txt), so that boards already in the field get it too.
+# name version
 adduser 3.116ubuntu1
 adwaita-icon-theme 3.28.0-1ubuntu1
 adwaita-icon-theme-full 3.28.0-1ubuntu1
@@ -201,7 +205,6 @@ libidn11 1.33-2.1ubuntu1.2
 libidn2-0 2.0.4-1.1ubuntu0.2
 libiec61883-0 1.2.0-2
 libilmbase12 2.2.0-11ubuntu2
-libimobiledevice6 1.2.1~git20171128.5a854327+dfsg-0.1
 libip4tc0 1.6.1-2ubuntu2.1
 libip6tc0 1.6.1-2ubuntu2.1
 libiptc0 1.6.1-2ubuntu2.1
@@ -287,7 +290,6 @@ libpcsclite1 1.8.23-1
 libperl5.26 5.26.1-6ubuntu0.7
 libpgm-5.2-0 5.2.122~dfsg-2
 libpixman-1-0 0.34.0-2ubuntu0.1
-libplist3 2.0.0-2ubuntu1
 libpng16-16 1.6.34-1ubuntu0.18.04.2
 libpolkit-agent-1-0 0.105-20ubuntu0.18.04.6
 libpolkit-backend-1-0 0.105-20ubuntu0.18.04.6
@@ -361,7 +363,6 @@ libtwolame0 0.3.13-3
 libudev1 237-3ubuntu10.57
 libunistring2 0.9.9-0ubuntu2
 libusb-1.0-0 2:1.0.21-2
-libusbmuxd4 1.1.0~git20171206.c724e70f-0.1
 libuuid1 2.31.1-0.4ubuntu3.7
 libv4l-0 1.14.2-1
 libv4l2rds0 1.14.2-1
@@ -488,7 +489,6 @@ tzdata 2023c-0ubuntu0.18.04
 ubuntu-keyring 2018.09.18.1~18.04.2
 ucf 3.0038
 udev 237-3ubuntu10.57
-usbmuxd 1.1.0-2ubuntu0.1
 util-linux 2.31.1-0.4ubuntu3.7
 v4l-utils 1.14.2-1
 vim-common 2:8.0.1453-1ubuntu1.13

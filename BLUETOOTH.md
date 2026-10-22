@@ -227,9 +227,9 @@ same extension signature) and lacks only three things, taken from upstream:
 
 `build/build.sh` builds both modules from L4T's sources (`build/out/modules-bt/`) and fetches the firmware
 (`build/out/firmware/rtl_bt/`). They live where the modems' modules do: `/lib/modules/<release>/updates/eirl-bluetooth/`
-(searched before the kernel's own) and `/lib/firmware/rtl_bt/`. New boards get them from the SD card image
-(`tools/image/stages/rootfs.sh`, checked by `check.py`); a board already in use, from `tools/bt-modules.sh`
-(`--check`, `--undo`). The OTA never touches the kernel. Our `btusb` is the stock one plus those ids: every other
+(searched before the kernel's own) and `/lib/firmware/rtl_bt/`. Every board gets them with the release's system
+layer (`system/built.txt`, UPDATES.md §12), and the image too (checked by `check.py`); `tools/bt-modules.sh` (`--check`,
+`--undo`) is for trying a change before a release. The kernel itself is never touched. Our `btusb` is the stock one plus those ids: every other
 adapter works as before. Measured: with the patch the controller reports LMP subversion 0xd922 and receives (206 LE
 advertisements in 6 s); reloading `btusb` keeps the patch (the dongle is not powered off), a cold boot loads it again.
 
@@ -243,16 +243,19 @@ advertisements in 6 s); reloading `btusb` keeps the patch (the dongle is not pow
   window (also before powering it: BlueZ starts pairable) and names it like the encoder (`Alias`).
 - **BlueALSA** is built like `ristsender` (`build/bluealsa.sh`: release 4.1.0 and libsbc 2.0 verified by sha256, in
   the L4T 18.04 arm64 container; A2DP with SBC, hands-free with CVSD, no tools) and travels in the bundle: the daemon
-  (`/usr/local/bin/bluealsa`, which links only the image's libraries; libsbc inside), the ALSA plugins
-  (`/usr/lib/aarch64-linux-gnu/alsa-lib/`) and their configuration (`/usr/share/alsa/alsa.conf.d/20-bluealsa.conf`),
-  and the unit `eirl-bluealsa.service`: its **own system user `bluealsa`** (created by `install.sh`), not root (it
+  (`/usr/local/bin/bluealsa`, which links only the image's libraries; libsbc inside) and the unit
+  `eirl-bluealsa.service` with the app; the ALSA plugins (`/usr/lib/aarch64-linux-gnu/alsa-lib/`) and their
+  configuration (`/usr/share/alsa/alsa.conf.d/20-bluealsa.conf`) with the system layer (`system/built.txt`, UPDATES.md
+  §12: listed in `files.txt` from 0.7.0 to 0.10.0, they made every board refuse those bundles, UPDATES.md §10). The unit
+  runs as its **own system user `bluealsa`** (created by `install.sh`), not root (it
   decodes what paired devices send: as root a flaw there would be the whole board), sandboxed (`ProtectSystem=strict`,
   `AF_UNIX AF_BLUETOOTH`, `MemoryDenyWriteExecute`, `RestrictNamespaces`, ambient `CAP_NET_RAW CAP_NET_ADMIN` only),
   `ConditionPathExists=/usr/lib/bluetooth/bluetoothd`, and `Wants=bluetooth.service`: in the image `bluetooth.service`
   is **not** enabled (its postinst enables it; `tools/image/stages/rootfs.sh` undoes it and `check.py` checks it), our
   unit pulls it in. The licences go to `/usr/share/doc/eirl-encoder/licenses/bluealsa/`, with libsbc's source
   tarball (LGPL, linked statically).
-- **D-Bus policy** (`/etc/dbus-1/system.d/eirl-encoder-bluetooth.conf`, from `install.sh`), each one to the interfaces
+- **D-Bus policy** (`/etc/dbus-1/system.d/eirl-encoder-bluetooth.conf`, from the system layer since 0.11, `install.sh`
+  reloads D-Bus after it), each one to the interfaces
   it uses: `bluealsa` owns `org.bluealsa` and reaches BlueZ's `Media1`, `ProfileManager1` and `MediaTransport1`; the
   app reaches `Adapter1`, `Device1`, `AgentManager1` and reads BlueALSA's PCMs; the engine (group `audio`) opens the
   PCMs (`PCM1`), never BlueALSA's RFCOMM.

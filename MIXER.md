@@ -1147,8 +1147,10 @@ title row (`SettingsGroups`, settings_layout.go; a list entry is `s_page_<group>
 | Device | Language (`language`) · Date & time (`time`) · Name & password (`account`) |
 | System | Updates (`updates`) · About (`about`) |
 
-A group's entry goes back to the tab last seen. The dots (Wi-Fi down, an update, the setup pending) show on the
-group's entry and on the tab. The wizard keeps using the pages by id, without tabs.
+A group's entry goes back to the tab last seen. The dots (Wi-Fi down, an update or a restart to finish one, the setup
+pending) show on the group's entry and on the tab. The Updates page also shows the system layer (UPDATES.md §12): a
+restart that finishes the update (action `update_reboot` → `POST /update/reboot`, two taps, refused while streaming),
+a download that waits for Wi-Fi or a cable, and a system part that failed or was skipped. The wizard keeps using the pages by id, without tabs.
 
 ### 21.2 How a page is made
 

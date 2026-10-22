@@ -1,0 +1,8 @@
+# system/packages.lock — the system layer's Ubuntu packages: system/packages.txt with its dependencies, resolved
+# over the frozen base (tools/image/base.lock) by build/system.sh --update-lock. Every line is installed on every
+# board and image, at this version: review a change. Columns:
+# name version arch sha256 size installed-size(KiB) source source-version path-in-archive
+libimobiledevice6 1.2.1~git20171128.5a854327+dfsg-0.1 arm64 3eafcd93aee10817224f892d624885987314da732657a901def3e38968438bf2 53432 166 libimobiledevice 1.2.1~git20171128.5a854327+dfsg-0.1 pool/main/libi/libimobiledevice/libimobiledevice6_1.2.1~git20171128.5a854327+dfsg-0.1_arm64.deb
+libplist3 2.0.0-2ubuntu1 arm64 8bcaaa566f33aec69f098d2cd972f86ff076d924a818e49f1f8ab38af00da96f 27728 75 libplist 2.0.0-2ubuntu1 pool/main/libp/libplist/libplist3_2.0.0-2ubuntu1_arm64.deb
+libusbmuxd4 1.1.0~git20171206.c724e70f-0.1 arm64 25b2a8efad1380961df4a89683cdf485b96e85a844a5b35739055bf9ec454e27 13928 54 libusbmuxd 1.1.0~git20171206.c724e70f-0.1 pool/main/libu/libusbmuxd/libusbmuxd4_1.1.0~git20171206.c724e70f-0.1_arm64.deb
+usbmuxd 1.1.0-2ubuntu0.1 arm64 a221e380404e03d91be3f78e1dee04a1f6aa6377f46d253985d7d25e7228cad0 31128 96 usbmuxd 1.1.0-2ubuntu0.1 pool/main/u/usbmuxd/usbmuxd_1.1.0-2ubuntu0.1_arm64.deb

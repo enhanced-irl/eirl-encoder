@@ -744,6 +744,21 @@ sudo systemctl restart eirl-encoderd</pre>
         <p id="update-err" class="err" role="alert" hidden></p>
         <p id="update-why" class="hint" hidden></p>
         <p id="update-test" class="uplinks-warn" hidden data-i18n="update.testBuild"></p>
+        <!-- Below the app (the system layer, UPDATES.md §12): why the download waits, what did not install, and the
+             restart that finishes an update (POST /update/reboot, never while streaming; asked in the page) -->
+        <p id="update-waits" class="hint" hidden></p>
+        <p id="update-system" class="hint" hidden></p>
+        <div id="update-restart" class="update-restart" hidden>
+          <p id="update-restart-msg" class="update-restart-msg"></p>
+          <p id="update-restart-why" class="hint" hidden></p>
+          <div id="update-reboot-ask" class="dests-ask" role="alertdialog" hidden>
+            <p></p>
+            <div class="form-actions"><button class="btn small ghost" type="button" data-ask="no" data-i18n="common.cancel"></button><button class="btn small primary" type="button" data-ask="yes"></button></div>
+          </div>
+          <div class="form-actions">
+            <button id="update-reboot" class="btn" type="button" data-i18n="update.reboot"></button>
+          </div>
+        </div>
         <div class="form-actions">
           <button id="update-check" class="btn" type="button" data-i18n="update.check"></button>
           <button id="update-install" class="btn primary" type="button" hidden></button>

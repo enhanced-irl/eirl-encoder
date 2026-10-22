@@ -4,6 +4,7 @@
 # in containers, from inputs pinned in tools/image/pins.sh. Nothing is installed on the machine.
 #
 #   tools/image/build.sh --release DIR [--pubkey B64] [--test | --debug-ssh-key FILE | --firmware-check-only] [--out DIR] [--keep]
+#                        [--base-debs DIR]
 #
 #   --release DIR        a release: DIR/manifest.json, manifest.json.sig and the bundle they name
 #                        (tools/release.sh build, or build --local for a test release). Verified before use.
@@ -15,7 +16,11 @@
 #                        writes it, like a test image (IMAGE.md §4)
 #   --out DIR            where the image goes (default build/out/image)
 #   --keep               keep the work volume (the root filesystem, the raw image) for a look afterwards
-#   --update-lock        accept the packages the build installs as the new tools/image/packages.lock
+#   --base-debs DIR      the frozen base's .deb files (the maintainers' copies, tools/image/base-debs.sh) instead of
+#                        Ubuntu's archive: for when Ubuntu no longer serves a version of tools/image/base.lock
+#
+# The image is the frozen base (tools/image/base.lock, never changed) plus the release's system layer (UPDATES.md §12),
+# so a board flashed with an older image reaches the same system over the air (tools/system-equiv.sh checks it).
 #
 # Needs ~12 GB free in Docker's disk. The work happens in a Docker volume (eirl-image-<pid>): macOS's
 # filesystem is not case-sensitive and cannot hold a Linux root filesystem.
@@ -26,7 +31,7 @@ ROOT=$(cd "$HERE/../.." && pwd)
 . "$HERE/pins.sh"
 die() { echo "image: $*" >&2; exit 1; }
 
-RELEASE="" PUBKEY="" MODE=product DEBUG_KEY="" OUT="$ROOT/build/out/image" KEEP="" UPDATE_LOCK="" FW_CHECK_ONLY=""
+RELEASE="" PUBKEY="" MODE=product DEBUG_KEY="" OUT="$ROOT/build/out/image" KEEP="" BASE_DEBS="" FW_CHECK_ONLY=""
 CACHE=${CACHE:-$HOME/.cache/eirl-image}
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -37,14 +42,13 @@ while [ $# -gt 0 ]; do
     --out) mkdir -p "${2:?}"; OUT=$(cd "$2" && pwd); shift ;;
     --firmware-check-only) FW_CHECK_ONLY=1 ;;
     --keep) KEEP=1 ;;
-    --update-lock) UPDATE_LOCK=1 ;;
+    --base-debs) BASE_DEBS=$(cd "${2:?}" && pwd); shift ;;
     -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
   shift
 done
 [ -n "$RELEASE" ] || die "--release DIR is required"
-[ "$MODE" != product ] || [ -z "$UPDATE_LOCK" ] || die "--update-lock is for test builds: a product image uses the reviewed locks"
 [ -z "$FW_CHECK_ONLY" ] || [ "$MODE" = product ] || die "--firmware-check-only is for product images (test images never write the firmware)"
 [ -z "$DEBUG_KEY" ] || [ -f "$DEBUG_KEY" ] || die "no such key: $DEBUG_KEY"
 command -v docker >/dev/null || die "Docker is needed"
@@ -108,6 +112,7 @@ ENVS=(-e BSP_FILE="$BSP_FILE" -e UBUNTU_BASE_FILE="$UBUNTU_BASE_FILE" -e KERNEL_
       -e IMAGE_VERSION="$VERSION" -e FIRMWARE_MODE="$FIRMWARE_MODE" -e BUNDLE="$BUNDLE" -e IMAGE_NAME="$NAME" -e IMAGE_COMMIT="$COMMIT"
       -e DEBUG="$([ "$MODE" = debug ] && echo 1 || echo 0)")
 MOUNTS=(-v "$VOL:/work" -v "$CACHE:/in/dl:ro" -v "$ROOT:/in/repo:ro" -v "$KOUT:/in/kernel:ro" -v "$RELEASE:/in/release:ro")
+[ -n "$BASE_DEBS" ] && MOUNTS+=(-v "$BASE_DEBS:/in/base-debs:ro")
 [ "$MODE" = debug ] && MOUNTS+=(-v "$DEBUG_KEY:/in/debug.pub:ro")
 
 # --- 5. The card's boot partitions: NVIDIA's flash.sh --no-flash --sign, in linux/amd64
@@ -126,8 +131,8 @@ docker run --rm --platform linux/arm64 --cap-add SYS_CHROOT -e LC_ALL=C.UTF-8 -e
   --rootfs /work/rootfs --image /work/out/assemble/image.img --bootparts /work/out/bootparts \
   --release /in/release --bundle "$BUNDLE" --version "$VERSION" --mode "$MODE" --firmware-mode "$FIRMWARE_MODE" \
   --commit "$COMMIT" --repo /in/repo \
-  --lock /in/lockdir/packages.lock --bootparts-lock /in/lockdir/bootparts.lock \
-  --report-dir "/out/$NAME.report" ${UPDATE_LOCK:+--update-lock} || CHECK_FAILED=1
+  --lock /in/lockdir/base.lock --bootparts-lock /in/lockdir/bootparts.lock \
+  --report-dir "/out/$NAME.report" || CHECK_FAILED=1
 docker run --rm -v "$VOL:/work" -v "$OUT:/out" eirl-image-tools:arm64 sh -c \
   "cp /work/out/raw.txt /work/out/bootparts/layout.tsv /out/$NAME.report/ && cp /work/out/bootparts/flash.log /out/$NAME.report/bootparts-flash.log"
 if [ -n "${CHECK_FAILED:-}" ]; then

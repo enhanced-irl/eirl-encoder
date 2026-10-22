@@ -58,6 +58,7 @@ func main() {
 	fresh := flag.Bool("fresh", false, "local mode: an unconfigured device (no admin password, wizard to run)")
 	localSock := flag.String("local-socket", "", "local mode: also serve the screen's local socket at this path")
 	dataDir := flag.String("data", "", "local mode: directory for device.json, slots.json, admin.hash… (default a new temporary one)")
+	updScenario := flag.String("update", "", "local mode: how the fake updater starts: metered (0.2.0 waits for Wi-Fi to download), restart (on 0.2.0, waiting for a restart), sysfailed (its system layer failed)")
 	webDir := flag.String("web", "", "local mode: serve the web from this directory instead of the embedded one (e.g. web/static)")
 	flag.Parse()
 
@@ -69,7 +70,8 @@ func main() {
 	if *httpAddr != "" {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
-		if err := runLocal(ctx, localOpts{addr: *httpAddr, socket: *localSock, dataDir: *dataDir, webDir: *webDir, hwID: *hwID, fresh: *fresh}, log); err != nil {
+		if err := runLocal(ctx, localOpts{addr: *httpAddr, socket: *localSock, dataDir: *dataDir, webDir: *webDir, hwID: *hwID, fresh: *fresh,
+			update: *updScenario}, log); err != nil {
 			fail(log, "local mode", err)
 		}
 		return

@@ -6,16 +6,19 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/i18n"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/update"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/update/syslayer"
 )
 
 // --- updates (OTA, UPDATES.md §8; CONTRACT §4) -------------------------------------------------------------
 //
-// GET /update, POST /update/check (202), POST /update/install (202; 409 streaming | not_ready | busy). Web
+// GET /update, POST /update/check (202), POST /update/install (202; 409 streaming | not_ready | busy), POST
+// /update/reboot (202; 409 streaming | nothing_pending; 503 power_unavailable: "restart to finish", UPDATES.md §12.5). Web
 // (session + CSRF, like every mutation) and local socket (the touch screen has the button; local.go whitelists the
 // three routes). Messages come from the i18n catalog (update.*) in the request language. The app only
 // checks, downloads and verifies; installing is the root helper's job (eirl-update.service).
@@ -32,6 +35,7 @@ func (s *Server) registerUpdate(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/update", s.getUpdate)
 	mux.HandleFunc("POST /api/v1/update/check", s.postUpdateCheck)
 	mux.HandleFunc("POST /api/v1/update/install", s.postUpdateInstall)
+	mux.HandleFunc("POST /api/v1/update/reboot", s.postUpdateReboot)
 }
 
 // UpdateView is GET /update.
@@ -53,6 +57,29 @@ type UpdateView struct {
 	AutoCheck  bool            `json:"autoCheck"`
 	TestBuild  bool            `json:"testBuild,omitempty"` // this build trusts a test key (never on a customer device)
 	Versions   update.Versions `json:"versions"`
+	// DownloadWaits: a newer release waits for Wi-Fi or a cable before it downloads by itself ("metered"); a check
+	// (POST /update/check) downloads it at once. DownloadWaitsMsg says so in the request's language
+	DownloadWaits    string `json:"downloadWaits,omitempty"`
+	DownloadWaitsMsg string `json:"downloadWaitsMessage,omitempty"`
+	// System: the system layer (UPDATES.md §12): what the last update installed below the app, and what waits for
+	// a restart. Absent where the board has no system layer state
+	System *UpdateSystemView `json:"system,omitempty"`
+}
+
+// UpdateSystemView is GET /update's "system".
+type UpdateSystemView struct {
+	Release   string     `json:"release,omitempty"` // the release whose system layer is installed
+	AppliedAt *time.Time `json:"appliedAt,omitempty"`
+	// State: ok | failed (the last one did not install: the previous one stays) | skipped (not the encoder's own
+	// system: nothing below the app is updated)
+	State   string `json:"state"`
+	Error   string `json:"error,omitempty"`   // the stable code when failed
+	Message string `json:"message,omitempty"` // in the request's language
+	// RestartRequired: something installed acts only after a restart (Pending: hdmi | bluetooth | uplinks |
+	// system, what it touches); RestartMessage says so. POST /update/reboot restarts (never while streaming)
+	RestartRequired bool     `json:"restartRequired"`
+	Pending         []string `json:"pending,omitempty"`
+	RestartMessage  string   `json:"restartMessage,omitempty"`
 }
 
 type UpdateAvailableView struct {
@@ -136,6 +163,10 @@ func (s *Server) updateView(r *http.Request) UpdateView {
 	if v.Blocked != "" {
 		v.BlockedMsg = i18n.Msg(lang, "update."+v.Blocked)
 	}
+	if st.DownloadWaits != "" {
+		v.DownloadWaits, v.DownloadWaitsMsg = st.DownloadWaits, i18n.Msg(lang, "update.waits."+st.DownloadWaits)
+	}
+	v.System = s.systemView(lang)
 	if lr := st.LastResult; lr != nil {
 		v.LastResult = &UpdateRunView{State: lr.State, From: lr.From, To: lr.To, At: lr.FinishedAt, Error: lr.Error,
 			Message: updateMessage(lang, lr.Error), Phase: lr.Phase, StartedAt: lr.StartedAt, FinishedAt: lr.FinishedAt}
@@ -185,6 +216,93 @@ func (s *Server) postUpdateInstall(w http.ResponseWriter, r *http.Request) {
 		s.Log.Error("update: cannot start the installer", "err", err)
 		fail(w, r, 500, "helper_failed", "update.err.helper_failed")
 	}
+}
+
+// systemView reads the system layer's state.json (syslayer.State): nil if there is none.
+func (s *Server) systemView(lang string) *UpdateSystemView {
+	if s.SystemStateDir == "" {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(s.SystemStateDir, syslayer.StateFile)); err != nil {
+		return nil
+	}
+	st := syslayer.ReadState(s.SystemStateDir)
+	v := &UpdateSystemView{Release: st.Release, State: "ok"}
+	if !st.AppliedAt.IsZero() {
+		t := st.AppliedAt.UTC()
+		v.AppliedAt = &t
+	}
+	switch {
+	case st.Skipped != "":
+		v.State, v.Message = "skipped", i18n.Msg(lang, "update.system.skipped")
+	case st.Error != "":
+		code, _, _ := strings.Cut(st.Error, ":")
+		v.State, v.Error, v.Message = "failed", code, i18n.Msg(lang, "update.system.failed")
+	}
+	boot := ""
+	if s.BootID != nil {
+		boot = s.BootID()
+	}
+	seen := map[string]bool{}
+	for _, p := range st.PendingNow(boot) {
+		if !seen[p.Area] {
+			seen[p.Area] = true
+			v.Pending = append(v.Pending, p.Area)
+		}
+	}
+	if len(v.Pending) > 0 {
+		sort.Slice(v.Pending, func(i, j int) bool { return areaOrder(v.Pending[i]) < areaOrder(v.Pending[j]) })
+		names := make([]string, len(v.Pending))
+		for i, a := range v.Pending {
+			names[i] = i18n.Msg(lang, "update.area."+a)
+		}
+		v.RestartRequired = true
+		v.RestartMessage = i18n.Msg(lang, "update.restart_required", strings.Join(names, ", "))
+	}
+	return v
+}
+
+func areaOrder(a string) int {
+	switch a {
+	case "hdmi":
+		return 0
+	case "bluetooth":
+		return 1
+	case "uplinks":
+		return 2
+	}
+	return 3
+}
+
+// postUpdateReboot: "restart to finish the update" (UPDATES.md §12.5), only when something waits for it and never
+// while streaming.
+func (s *Server) postUpdateReboot(w http.ResponseWriter, r *http.Request) {
+	if s.Power == nil {
+		fail(w, r, 503, "power_unavailable", "update.power_unavailable")
+		return
+	}
+	if v := s.systemView(reqLang(r)); v == nil || !v.RestartRequired {
+		fail(w, r, 409, "nothing_pending", "update.nothing_pending")
+		return
+	}
+	if s.Update != nil {
+		st := s.Update.Status()
+		if st.Streaming {
+			fail(w, r, 409, "streaming", "update.reboot_streaming")
+			return
+		}
+		if st.State == update.StateInstalling {
+			fail(w, r, 409, "busy", "update.busy")
+			return
+		}
+	}
+	s.Log.Warn("update: restarting the board to finish the update")
+	if err := s.Power.Reboot(r.Context()); err != nil {
+		s.Log.Error("update: restart failed", "err", err)
+		fail(w, r, 500, "power_failed", "update.power_failed")
+		return
+	}
+	writeJSON(w, 202, map[string]bool{"rebooting": true})
 }
 
 // UpdateSummary is what GET /status (and its SSE) says about updates, so the UIs can show "update

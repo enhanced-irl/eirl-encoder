@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -55,6 +56,9 @@ var (
 	updStates   = set("idle", "checking", "available", "downloading", "ready", "installing", "rolled_back", "error")
 	updBlocked  = set("streaming", "not_ready", "busy")
 	runStates   = set("installed", "rolled_back", "failed", "refused", "installing")
+	sysStates   = set("ok", "failed", "skipped")
+	sysAreas    = set("hdmi", "bluetooth", "uplinks", "system")
+	updWaits    = set("metered")
 	cloudStates = set("unlinked", "pairing", "linked")
 	// the actions and their route; "device" ones are PUT /device with one field
 	actionRoutes = map[string][2]string{
@@ -63,7 +67,8 @@ var (
 		"setup_step": {"POST", "/setup/step"}, "setup_password": {"POST", "/setup/password"},
 		"setup_complete": {"POST", "/setup/complete"}, "setup_restart": {"POST", "/setup/restart"},
 		"update_check": {"POST", "/update/check"}, "update_install": {"POST", "/update/install"},
-		"slots": {"PUT", "/sources/slots"}, "cloud_pair": {"POST", "/cloud/pair"},
+		"update_reboot": {"POST", "/update/reboot"},
+		"slots":         {"PUT", "/sources/slots"}, "cloud_pair": {"POST", "/cloud/pair"},
 	}
 )
 
@@ -325,7 +330,7 @@ func (d *DeviceState) loop() {
 			switch q.a.What {
 			case "setup_step", "setup_password", "setup_complete", "setup_restart":
 				setup = time.Time{}
-			case "update_check", "update_install":
+			case "update_check", "update_install", "update_reboot":
 				upd = time.Time{}
 			case "slots":
 				slots = time.Time{}
@@ -835,7 +840,36 @@ func updateInfo(v any, lang string) *ui.UpdateInfo {
 			u.Versions.Commit = c
 		}
 	}
+	if w := oneOf(m, "downloadWaits", updWaits); w != "" {
+		u.DownloadWaits, u.DownloadWaitsMessage = w, textField(m, "downloadWaitsMessage", 300)
+	}
+	u.System = updateSystem(obj(m["system"]))
 	return u
+}
+
+// updateSystem is GET /update's "system" (the system layer, UPDATES.md §12), or nil without a known state.
+func updateSystem(m map[string]any) *ui.UpdateSystem {
+	st := oneOf(m, "state", sysStates)
+	if m == nil || st == "" {
+		return nil
+	}
+	s := &ui.UpdateSystem{State: st}
+	if st != "ok" {
+		s.Error, s.Message = textField(m, "error", 64), textField(m, "message", 300)
+	}
+	s.RestartRequired, _ = boolOf(m["restartRequired"])
+	if !s.RestartRequired {
+		return s
+	}
+	s.RestartMessage = textField(m, "restartMessage", 300)
+	if ps, ok := m["pending"].([]any); ok {
+		for _, x := range ps {
+			if a, ok := x.(string); ok && sysAreas[a] && !slices.Contains(s.Pending, a) {
+				s.Pending = append(s.Pending, a)
+			}
+		}
+	}
+	return s
 }
 
 // aliasOK: CONTRACT §3, 0-24 characters without control characters (the app validates the rest).

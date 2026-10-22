@@ -1,0 +1,23 @@
+# system/built.txt — what the system layer installs from build/out (UPDATES.md §12): our kernel modules and firmware
+# (build/build.sh) and BlueALSA's ALSA plugins with their configuration (build/bluealsa.sh). Where each goes on the
+# board, which file of build/out it is, what part of the encoder it is (hdmi | bluetooth | uplinks | system: what
+# "restart to finish" names) and its flags: reboot (it acts only after a restart: the camera input keeps tc358743
+# loaded) or usedBy=<module> (firmware: read when that module probes a device). A module acts at once when it is not
+# loaded, and after a restart when it is. A module's sha256 is pinned in system/modules.lock.
+# path on the board                                            build/out/…                                   area       flags
+/lib/modules/<kernel>/extra/tc358743.ko                        tc358743.ko                                   hdmi       reboot
+/lib/modules/<kernel>/updates/eirl-modems/qmi_wwan.ko          modules/qmi_wwan.ko                           uplinks
+/lib/modules/<kernel>/updates/eirl-modems/cdc_mbim.ko          modules/cdc_mbim.ko                           uplinks
+/lib/modules/<kernel>/updates/eirl-modems/huawei_cdc_ncm.ko    modules/huawei_cdc_ncm.ko                     uplinks
+/lib/modules/<kernel>/updates/eirl-modems/option.ko            modules/option.ko                             uplinks
+/lib/modules/<kernel>/updates/eirl-modems/ipheth.ko            modules/ipheth.ko                             uplinks
+/lib/modules/<kernel>/updates/eirl-bluetooth/btusb.ko          modules-bt/btusb.ko                           bluetooth
+/lib/modules/<kernel>/updates/eirl-bluetooth/btrtl.ko          modules-bt/btrtl.ko                           bluetooth
+/lib/firmware/rtl_bt/rtl8761bu_fw.bin                          firmware/rtl_bt/rtl8761bu_fw.bin              bluetooth  usedBy=btrtl
+/lib/firmware/rtl_bt/rtl8761bu_config.bin                      firmware/rtl_bt/rtl8761bu_config.bin          bluetooth  usedBy=btrtl
+/lib/firmware/rtl_bt/LICENCE.rtlwifi_firmware.txt              firmware/rtl_bt/LICENCE.rtlwifi_firmware.txt  bluetooth
+# BlueALSA's ALSA plugins (alsa-lib 1.1.3 loads them from its folder) and the configuration that names them
+# (alsa.conf loads <datadir>/alsa.conf.d/*.conf): the engine opens bluealsa: devices through them (BLUETOOTH.md §3.7)
+/usr/lib/aarch64-linux-gnu/alsa-lib/libasound_module_pcm_bluealsa.so  bluealsa/libasound_module_pcm_bluealsa.so  bluetooth
+/usr/lib/aarch64-linux-gnu/alsa-lib/libasound_module_ctl_bluealsa.so  bluealsa/libasound_module_ctl_bluealsa.so  bluetooth
+/usr/share/alsa/alsa.conf.d/20-bluealsa.conf                           bluealsa/20-bluealsa.conf                  bluetooth

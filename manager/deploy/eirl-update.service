@@ -12,8 +12,8 @@ After=eirl-update-recover.service
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/eirl-update install
-# backup + install.sh + 90 s health check + rollback, on an SD card
-TimeoutStartSec=20min
+# backup + install.sh (with the system layer's packages, UPDATES.md §12) + 90 s health check + rollback, on an SD card
+TimeoutStartSec=30min
 # Root (it installs the software), but install.sh only needs the system: no home, its own /tmp
 ProtectHome=yes
 PrivateTmp=yes

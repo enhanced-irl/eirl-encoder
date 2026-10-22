@@ -231,6 +231,17 @@ func TestRenderEveryLanguage(t *testing.T) {
 			a.Update.LastResult = &UpdateRun{State: "rolled_back", To: "0.2.0",
 				Message: "la nouvelle version n’a pas démarré correctement : la précédente a été restaurée"}
 		})},
+		view{"page-updates-restart", page("updates", "", func(a *AppSnapshot) {
+			a.Update.System = &UpdateSystem{State: "ok", RestartRequired: true, Pending: []string{"hdmi", "uplinks"}}
+		})},
+		view{"page-updates-everything", page("updates", "", func(a *AppSnapshot) { // the screen's own words, all at once
+			avail("available")(a)
+			a.Update.DownloadWaits = "metered"
+			a.Update.System = &UpdateSystem{State: "failed", RestartRequired: true}
+		})},
+		view{"page-updates-skipped", page("updates", "", func(a *AppSnapshot) {
+			a.Update.System = &UpdateSystem{State: "skipped"}
+		})},
 		view{"page-updates-installed", page("updates", "", func(a *AppSnapshot) {
 			a.Update.Current, a.Update.LastResult = "0.2.0", &UpdateRun{State: "installed", To: "0.2.0"}
 		})},

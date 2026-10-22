@@ -1,0 +1,4 @@
+# system/packages.txt — the Ubuntu packages the system layer adds on top of the frozen base (tools/image/base.lock),
+# one per line, with why (UPDATES.md §12). build/system.sh --update-lock resolves them with their dependencies into
+# system/packages.lock, which is what boards and images install: review its diff.
+usbmuxd   # an iPhone's USB tethering (MODEMS.md §12): it switches the iPhone to its tethering configuration

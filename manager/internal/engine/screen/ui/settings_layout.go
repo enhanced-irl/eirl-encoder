@@ -158,6 +158,10 @@ func (l *Layout) settingsLayout() {
 	b["s_up_check"] = Rect{c.X, uy, bw, sh + 8}
 	b["s_up_install"] = Rect{c.X + bw + m, uy, c.W - bw - m, sh + 8}
 	l.UpdateNotes = Rect{c.X, uy + sh + 8 + 3*m, c.W, c.Y + c.H - (uy + sh + 8 + 3*m)}
+	// The restart that finishes an update (UPDATES.md §12.5): a row under the buttons, its words under «Check now»
+	// and its button under «Update» (the notes go below it while it is there)
+	l.UpdateRestart = Rect{c.X, uy + sh + 8 + m, c.W, sh + 16}
+	b["s_up_reboot"] = Rect{c.X + bw + m, l.UpdateRestart.Y + 4, c.W - bw - m - 4, sh + 8}
 	// Sources: one row per slot (its number; what it is; its alias; Hide/Show while a source is in it), and «Save»
 	// at the bottom. The picker of what a slot is uses the network list's rows (s_cand_i)
 	saveH := sh + 8
