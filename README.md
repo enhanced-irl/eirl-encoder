@@ -1,5 +1,5 @@
-> **Status:** IN PROGRESS — released and updating itself over the air (latest: v0.8.0, Oct 19, also as a microSD image); see [Status](#status)
-> **Updated:** 2026-10-16
+> **Status:** IN PROGRESS — released and updating itself over the air (latest: v0.11.1, Oct 23, also as a microSD image); see [Status](#status)
+> **Updated:** 2026-10-23
 
 # eirl-encoder
 
@@ -212,14 +212,14 @@ operating, the bugs found and the history of the test board.
 | Output protocols and codecs | ✅ Released in 0.5.0 (SRT, SRTLA, RTMP, RTMPS, RIST, UDP; H.264/H.265; saved destinations). First version: tests with real platform keys still to come | [`OUTPUTS.md`](OUTPUTS.md) |
 | SRTLA and adaptive bitrate | ✅ Released; tested over loopback and with a real link to EnhancedIRL. Tests with several real links are next | [`SRTLA.md`](SRTLA.md) |
 | 4G/5G modems and link health | 🟡 Released in 0.3.0 as a first version (HiLink modems), tested against fakes and the simulator; real-modem tests are next | [`MODEMS.md`](MODEMS.md) |
-| iPhone over USB | ✅ In the SD card image from 0.8.0, and over the air with the system layer: an iPhone sharing its data by cable is one more link | [`MODEMS.md`](MODEMS.md) §12 |
+| iPhone over USB | ✅ From 0.11.1, over the air for every board and in its SD card image: an iPhone sharing its data by cable is one more link (0.8.0 and 0.11.0 carried it without a link: §12.2) | [`MODEMS.md`](MODEMS.md) §12 |
 | Wi-Fi (access point and client) | ✅ Released; measurements and the cloud's side are next | [`WIFI.md`](WIFI.md) |
 | Web app | ✅ Released, reviewed (code and security) | [`MANAGER.md`](MANAGER.md) |
 | Setup wizard, translations | ✅ Released in 0.1.0 | [`SETUP.md`](SETUP.md) |
-| Over-the-air updates | ✅ Released in 0.1.0; the test board updates itself from GitHub Releases like any device | [`UPDATES.md`](UPDATES.md) |
+| Over-the-air updates | ✅ Released in 0.1.0; since 0.11.0 they also bring drivers, firmware and system packages (the system layer), so a card never has to be written again; the test board updates itself from GitHub Releases like any device | [`UPDATES.md`](UPDATES.md) |
 | Fan control | ✅ Released in 0.6.0 (one curve); profiles next | [`FAN.md`](FAN.md) |
 | Boot splash | ✅ Released | [`SPLASH.md`](SPLASH.md) |
-| microSD image | ✅ Published with 0.7.0 and 0.8.0: the whole card, signed with the updates' key. The one-time firmware update is still to be seen on a board with older firmware | [`IMAGE.md`](IMAGE.md) |
+| microSD image | ✅ Published with 0.7.0, 0.8.0 and 0.11.1: the whole card, signed with the updates' key. The one-time firmware update is still to be seen on a board with older firmware | [`IMAGE.md`](IMAGE.md) |
 
 ### HDMI capture: how it was brought up
 
