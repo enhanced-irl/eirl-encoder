@@ -8,7 +8,7 @@ Link 4K, MS2130, MS2109) or a **UVC camera**, with preview and streaming just li
 the app ("Input" card). A single active source; changing it restarts the stream.
 
 What brings the most is the Cam Link 4K: **1080p60 over USB 3**, which the 2-lane CSI cannot deliver (capped at
-1080p50, see README).
+1080p50, see DEVELOPMENT.md).
 
 The full plan, the research (devices, BELABOX, risks) and the decisions were kept in a separate internal
 planning document ("Encoder video sources plan").
@@ -134,7 +134,7 @@ points of noise: ssh, top) and consumption from the ina3221.
 | Logi MJPEG 1080p60 | Capture only | 56.9 | 24 % | 3.4 W |
 | Logi NV12 1080p30 | SRT streaming + preview | 29.0 | 44 % | 3.7 W |
 | Logi YUY2 1080p30 | Capture only | 29.0 | 34 % | 3.0 W |
-| (HDMI over CSI UYVY 1080p50, README) | SRT streaming | 50 | ~55 % | — |
+| (HDMI over CSI UYVY 1080p50, DEVELOPMENT.md) | SRT streaming | 50 | ~55 % | — |
 
 - **Risk no. 1 is ruled out**: uncompressed 1080p60 over USB fits comfortably (91 % of one
   core = 23 % of the four), without losing frames. The Cam Link delivers 1080p60 in NV12, YUY2 and I420.

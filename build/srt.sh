@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # srt.sh — builds srt-live-transmit and libsrt (Haivision SRT, C++, MPL-2.0) for the Jetson: aarch64, Ubuntu
 # 18.04 (glibc 2.27, OpenSSL 1.1), in the same container as the driver and srtla_send (build/Dockerfile).
-# The engine's SRT output pipes the program into srt-live-transmit (README, "Operating"). Pinned tag and
+# The engine's SRT output pipes the program into srt-live-transmit (DEVELOPMENT.md, "Operating"). Pinned tag and
 # tarball verified by sha256; the source is not modified.
 #
 #   ./build/srt.sh       → build/out/srt-live-transmit, build/out/libsrt.so.1.5   (manager/build.sh packages them)

@@ -3,7 +3,7 @@
 Thanks for your interest. eirl-encoder turns a Jetson Nano into a hardware encoder: it captures HDMI
 (through a TC358743 bridge on the CSI port), USB capture devices and network cameras, mixes them on a
 touch screen and streams the program in H.264/AAC over SRT or SRTLA. [`README.md`](README.md) has the
-map of the repository and the hardware; each piece has its own document (`MIXER.md`, `MANAGER.md`,
+map of the repository and [`DEVELOPMENT.md`](DEVELOPMENT.md) the hardware; each piece has its own document (`MIXER.md`, `MANAGER.md`,
 `SOURCES.md`, `SRTLA.md`…).
 
 Bug reports, fixes, measurements on other hardware and documentation improvements are all welcome. For

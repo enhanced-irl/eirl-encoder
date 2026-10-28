@@ -810,7 +810,7 @@ disconnected, SRTLA links, rules and `iptables` as before, `ip_forward=0`, `outp
 |---|---|
 | `~/f7-spike/` on the board: MediaMTX v1.21.1, `f7probe.py`, `f7measure.sh`, `f7soak.sh`, `pub.sh`, test clips (~900 MB), logs and `ap.psk` (the spike AP's password) | `rm -rf ~/f7-spike` |
 | The team's secret store, field `ap_psk`: since version 3 (Oct 13 08:50), the **real** AP's password (`/etc/eirl-encoder/ap.psk`, network `EnhancedIRL-XXXX`); v2 was the spike's | If F7 does not continue, roll the secret back to version 1. If the password is changed from the web, copy it again (`sudo cat /etc/eirl-encoder/ap.psk` piped straight into the secret store, never printed) |
-| **F7 app installed** (Oct 13 08:27, with the app's F5 on top): the cameras' AP on with a test camera, "Test phone" (`cam1`). Details and how to undo it, in the "Board state" table of the README | Remove the camera from the web: with the last one, everything goes down |
+| **F7 app installed** (Oct 13 08:27, with the app's F5 on top): the cameras' AP on with a test camera, "Test phone" (`cam1`). Details and how to undo it, in the "Board state" table of DEVELOPMENT.md | Remove the camera from the web: with the last one, everything goes down |
 
 To set up the spike again, in a reserved board slot (the password comes from the file and is not
 printed):

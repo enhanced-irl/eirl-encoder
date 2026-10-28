@@ -1,5 +1,5 @@
 // Package tcaudio watches the board's HDMI audio (TC358743 → I2S) for the two failures that do not fix
-// themselves (the launcher's watcher, scripts/eirl-engine.sh; README «Audio que no vuelve»).
+// themselves (the launcher's watcher, scripts/eirl-engine.sh; DEVELOPMENT.md, "Audio that does not come back").
 //
 // Every 2 s it reads AU_STATUS0 (0x8523) of the TC358743: bit 0 = samples arrive, bit 5 = the audio PLL
 // is locked in frequency.
@@ -7,7 +7,7 @@
 //     I2S clock, the I2S4 reset failed and it is dead. Restarting the engine fixes it.
 //   - Samples WITHOUT lock (0x41 instead of 0x61) for AUDIO_LOCK_TIMEOUT s: the chip's PLL is stuck
 //     (intermittent, after HDMI renegotiations) and gives no I2S clock. Neither the SYSCTL software reset
-//     nor rebooting the Jetson fix it; the hardware reset (the board's RST pin, wired: see README) does.
+//     nor rebooting the Jetson fix it; the hardware reset (the board's RST pin, wired: see DEVELOPMENT.md) does.
 //     First, without cutting the video, it tries the chip's audio commands once (reinitialise the
 //     buffer, restart the frequency detection, restart the NCO); then, only if the engine allows it
 //     (not broadcasting and the HDMI not on air), a hotplug pulse: the EDID rewritten, the source

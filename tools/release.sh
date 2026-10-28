@@ -296,7 +296,11 @@ if [ "$cmd" = publish ]; then
     read -r -p "Type the version to confirm: " answer
     [ "$answer" = "$ver" ] || die "not confirmed"
   fi
-  gh release create "v$ver" --repo "$REPO" --target main --title "eirl-encoder $ver" --notes-file "$notes" --latest \
+  # The release page carries the English notes plus release/github-footer.md; the footer is only for GitHub,
+  # the manifest (what the devices show) keeps the notes alone
+  page=$tooldir/github-notes.md
+  { cat "$notes"; if [ -f release/github-footer.md ]; then echo; cat release/github-footer.md; fi; } >"$page"
+  gh release create "v$ver" --repo "$REPO" --target main --title "eirl-encoder $ver" --notes-file "$page" --latest \
     "$bundle" "$out/manifest.json" "$out/manifest.json.sig"
   echo "published v$ver. Tag the working repo too: git tag -a v$ver -m 'eirl-encoder $ver' && git push origin v$ver"
   echo "check it as a board would: $REL check -url https://github.com/$REPO/releases/latest/download/manifest.json -current <installed>"

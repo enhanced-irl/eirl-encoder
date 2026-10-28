@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Questions, builds and ideas
+    url: https://enhancedirl.com/discord
+    about: Ask the community on the EnhancedIRL Discord (in English). Issues are for bugs and feature requests.
   - name: Report a security vulnerability
     url: https://github.com/enhanced-irl/eirl-encoder/blob/main/SECURITY.md
     about: Please report vulnerabilities privately by e-mail, not in a public issue.

@@ -17,7 +17,7 @@ watches it. If the app goes down, the stream goes on.
 
 | Fact | Consequence |
 |---|---|
-| `eirl-engine` active, listener :9000. `gst-launch` ~28 % of a core. The graphical session (gdm) took ~400 MB of RAM (its 11 % CPU was from boot) | **Done (Oct 8)**: boot into `multi-user.target` and surplus services disabled (see the README, "Board state") |
+| `eirl-engine` active, listener :9000. `gst-launch` ~28 % of a core. The graphical session (gdm) took ~400 MB of RAM (its 11 % CPU was from boot) | **Done (Oct 8)**: boot into `multi-user.target` and surplus services disabled (see the DEVELOPMENT.md, "Board state") |
 | `nvjpegenc` present, but it **doubles the host1x interrupts** (measured in phase 1) | v1's JPEG preview encoded it on the CPU. Since phase 5 the preview is a second hardware H.264 encode, which does **not** raise those interrupts |
 | polkit **0.105** (Ubuntu 18.04): `.pkla` files only, no JavaScript rules | With polkit the permission **cannot** be limited to a specific unit: either all or none. Discarded for starting and stopping the service |
 | `ina3221` (power): `in_power*_input` **is only readable by root**; `tegrastats` without root gives no `POM_*` | Reading those sysfs files has to be opened up (they are telemetry, read-only) |
@@ -212,7 +212,7 @@ none, to save the output chosen on the touch screen (see `PUT /output`).
     "cpuPct": [37, 20, 3, 4], "gpuPct": 0,
     "tempC": { "cpu": 45.5, "gpu": 42.0, "pmic": 50.0 },
     "power": { "inMw": 4210, "inMv": 4760, "cpuMw": 900, "gpuMw": 300 },
-    "undervoltage": true          // POM_5V_IN < 4.8 V (the 2 A supply, see the README)
+    "undervoltage": true          // POM_5V_IN < 4.8 V (the 2 A supply, see DEVELOPMENT.md)
   },
   "transport": "srtla",           // srt | srtla: that of the running stream (or the saved one if stopped)
   "uplinks": [                    // internet uplinks (SRTLA.md); absent without the uplinks dispatcher
@@ -773,7 +773,7 @@ phone watching, **< 3 % of a core** (4.4 % since phase 5, with the WebRTC previe
 4. **Rehearsal mode**: yes, also for the final product. It is already in the script (`OUTPUT=off`: capture,
    preview and level meter, without the main encoder or SRT). *Superseded on Oct 12 by the mixer's F3:
    there is no rehearsal mode; the preview is always on and the output is attached hot.*
-5. **Slim down the board**: everything that is surplus. Done in phase 1 (see the README).
+5. **Slim down the board**: everything that is surplus. Done in phase 1 (see DEVELOPMENT.md).
 6. **Minimal** web, without translations. Free choice of language: **Go** is kept (static binary without glibc,
    v4l2 and I2C ioctl without cgo, same pattern as `eirl-failover`). *(Translations superseded on Oct 14: the
    interface is translated es/en/fr, still without a build step: `i18n.js` and `lang-*.js`, see §2.)*

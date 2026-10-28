@@ -1122,6 +1122,7 @@ never calls NetworkManager or `eirl-netsetup`.
   MediaMTX + NVDEC). In main on Oct 13 (MR !27): [`NETWORK_SOURCES.md`](NETWORK_SOURCES.md).
 - **Settings parity:** everything the web configures, on the screen (Oct 14): §21.
 - **Fades and the screen's tiles** (Oct 14): §22. Open: a change mid-fade still jumps (§22.3).
+- **Lining the inputs up to the slowest one** (optional; plan, Oct 24): [`INPUT_SYNC.md`](INPUT_SYNC.md).
 
 ## 21. Settings: everything the web configures, on the screen (Oct 14)
 

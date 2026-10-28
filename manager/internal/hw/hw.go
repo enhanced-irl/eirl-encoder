@@ -48,7 +48,7 @@ type Audio struct {
 }
 
 // AudioFromStatus decodes AU_STATUS0 (0x8523): bit 0 samples arriving, bit 5 PLL frequency-locked.
-// 0x61 = playing; 0x41 = samples without lock (the PLL failure, see README).
+// 0x61 = playing; 0x41 = samples without lock (the PLL failure, see DEVELOPMENT.md).
 func AudioFromStatus(v byte) Audio {
 	a := Audio{AuStatus0: "0x" + strconv.FormatUint(uint64(v)|0x100, 16)[1:]}
 	switch {

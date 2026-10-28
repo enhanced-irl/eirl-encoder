@@ -3,7 +3,7 @@
 # install.sh creates it on a new device and never overwrites it afterwards.
 #
 # What the app manages (destination, bitrates, OUTPUT, the input) is NOT here: it is in
-# /etc/eirl-encoder/engine.env, which overrides these keys. Every key and its default: README.md,
+# /etc/eirl-encoder/engine.env, which overrides these keys. Every key and its default: DEVELOPMENT.md,
 # "Operating". After a change: sudo systemctl restart eirl-engine
 
 # The source on air at start and whose audio is used: hdmi (the board's HDMI input), usb or test (bars).

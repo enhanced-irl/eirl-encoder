@@ -24,7 +24,7 @@ as Moblin does. If one link drops or degrades, the stream carries on over the ot
 | `CONFIG_IP_MULTIPLE_TABLES=y`, iproute2 4.15 | There is *policy routing* |
 | NetworkManager **1.10.6** active and managing new USB-Ethernet devices (DHCP only); `networkd-dispatcher` also active | NM 1.10 does **not** know how to set source-based routing rules (`ipv4.routing-rules` arrived in 1.18): it has to be done with a *dispatcher* script |
 | `rp_filter`: `all=1` (strict), `eth0=2` | With `from <ip>` rules the strict check should pass, but **it has to be verified** in the spike; if not, `rp_filter=2` on the link interfaces |
-| Power: 5 V 2 A supply, already at `OC ALARM` and 4.65 V | 🔴 **Blocking**: a 4G modem peaks at 0.5–1 A. Without the **5 V 4 A** supply (barrel + jumper J48) the board will reboot while streaming (see README) |
+| Power: 5 V 2 A supply, already at `OC ALARM` and 4.65 V | 🔴 **Blocking**: a 4G modem peaks at 0.5–1 A. Without the **5 V 4 A** supply (barrel + jumper J48) the board will reboot while streaming (see DEVELOPMENT.md) |
 | gcc 7.5, cmake 3.10, Python 3.6 with `python3-gi` and GStreamer 1.14 through introspection | `srtla_send` (C, just `make`) builds on the board itself or in `build/Dockerfile`. Python+gi allows an encoder controller without new dependencies |
 | No passwordless sudo; the app runs as `eirl-encoder` with 3 exact sudo commands | Routing (root) goes into pieces that `install.sh` installs, **not** into the app |
 

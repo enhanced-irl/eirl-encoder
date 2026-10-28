@@ -24,7 +24,7 @@ as such (§12.11).
 | Package and bundle | `manager/build.sh`, `manager/deploy/install.sh` (`--list-files`) |
 | Release tool | `tools/release.sh`, `manager/cmd/eirl-release` |
 | System layer (§12) | `manager/internal/update/syslayer`, `eirl-update system …`, the repo's `system/`, `tools/image/base.lock`, `build/system.sh`, `eirl-release layer`, `tools/system-equiv.sh` |
-| Release key and notes | `release/eirl-release.pub` (and `release/eirl-release.pem`, the same key for OpenSSL), `release/notes/<version>/{en,es,fr}.md` |
+| Release key and notes | `release/eirl-release.pub` (and `release/eirl-release.pem`, the same key for OpenSSL), `release/notes/<version>/{en,es,fr}.md`; `release/github-footer.md`, added under the notes on the GitHub release page only (never in the manifest) |
 
 ## 1. How an update flows
 

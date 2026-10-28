@@ -25,8 +25,8 @@ done together with it.
 
 ## 1. What to expect (being honest about the goal)
 
-The board was already slimmed down on Oct 8 (booting without a desktop and a dozen services removed, see the
-README, "Board state"). What is left of the base system **uses almost no CPU**: all its
+The board was already slimmed down on Oct 8 (booting without a desktop and a dozen services removed, see
+DEVELOPMENT.md, "Board state"). What is left of the base system **uses almost no CPU**: all its
 processes together do not reach 1 % of a core. The CPU goes to the engine (`python3` at 178 %,
 load 8.5). Therefore:
 
@@ -339,7 +339,7 @@ there was before each group, the plans and what was purged) is kept in `/var/lib
 | `tools/base-measure.py` | B0 measurement (§5) and `--compare` |
 
 - Applying twice changes nothing.
-- Each applied group is recorded in the "Board state" table of the README (what and how to undo it),
+- Each applied group is recorded in the "Board state" table of DEVELOPMENT.md (what and how to undo it),
   with a line in the board's booking notes and a prior heads-up to the mixer session.
 - Commit, push and MR only when the maintainer asks (the repo's contributor rules). In the MR: `docs: n/a (encoder
   in testing, D8)`.

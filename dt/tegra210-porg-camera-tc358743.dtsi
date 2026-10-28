@@ -23,7 +23,7 @@
  * bajo y deja el chip en reset incluso tras un ciclo de corriente (0,6 V en RST,
  * probado 2026-10-07). Solo con un transistor en drenador abierto (2N7000/BS170
  * o NPN: puerta/base al pin 31, drenador/colector a RST, fuente/emisor a GND)
- * y descomentando reset-gpios abajo. Ver README.
+ * y descomentando reset-gpios abajo. Ver DEVELOPMENT.md.
  */
 #define TC358743_RESET		TEGRA_GPIO(Z, 0)
 

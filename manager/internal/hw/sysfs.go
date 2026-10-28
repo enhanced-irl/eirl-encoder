@@ -27,7 +27,7 @@ type Power struct {
 	CPUMw int64 `json:"cpuMw"`
 }
 
-// undervoltageMv: with the 2 A supply the input drops to 4.68-4.76 V while streaming (see README).
+// undervoltageMv: with the 2 A supply the input drops to 4.68-4.76 V while streaming (see DEVELOPMENT.md).
 const undervoltageMv = 4800
 
 // Sysfs reads the telemetry. It keeps the previous /proc/stat sample to give CPU % between calls
