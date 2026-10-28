@@ -70,9 +70,9 @@ draws them again.*
   | RIST | Simple or main profile, optionally encrypted, bonded across the links |
   | UDP / RTP | MPEG-TS to the local network, unicast or multicast |
 
-- **Saved destinations**: several destinations (templates for EnhancedIRL, Twitch, YouTube, Kick, Facebook,
-  or your own), one active; switching destination while live brings the stream back within a second,
-  without restarting the encoder.
+- **Saved destinations**: several destinations (templates for Twitch, YouTube, Kick and Facebook, or your
+  own; a linked encoder also gets its EnhancedIRL account's), one active; switching destination while
+  live brings the stream back within a second, without restarting the encoder.
 - **Connections**: Ethernet, Wi-Fi client, USB 4G/5G modems (HiLink and ModemManager: PIN, APN, roaming,
   network type) and phones; a health dot per link (good, weak, no internet), and a link with no internet
   stops carrying the stream until it recovers.
@@ -168,7 +168,7 @@ The encoder streams anywhere on its own: Twitch, YouTube, Kick or your own serve
 
 - **A receiver for bonding.** SRTLA spreads the stream across all your links, and a server on the other end has
   to put it back together. An EnhancedIRL stream key is that server, in Europe, the US or Asia, from €5 a month,
-  and the encoder already has a destination template for it.
+  and you add it as a Custom SRTLA destination by pasting its publish URL.
   [How an SRTLA relay works](https://enhancedirl.com/srtla-relay?utm_source=github&utm_medium=readme&utm_campaign=eirl-encoder).
 - **A real OBS in the cloud.** Cloud OBS takes your encoder's stream and runs your scenes and overlays on an
   NVIDIA GPU, with automatic scene switching: when your signal drops, viewers see your BRB scene instead of a
