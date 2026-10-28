@@ -285,14 +285,16 @@ func (s Settings) validateOutput(errs FieldErrors) {
 }
 
 // outputKeys: the engine.env keys the engine takes hot with {"cmd":"output_config"} (OUTPUTS.md §8): the
-// destination, its bitrates and the new output keys. EIRL_MANAGED_BY goes with the destination (the engine ignores
-// it). OUTPUT is apart: starting and stopping the stream has its own command (output).
+// destination, its bitrates and the new output keys, and the recording's mode and quality (RECORDING.md §6.1: the
+// engine gives them to the recorder and leaves the stream alone). EIRL_MANAGED_BY goes with the destination (the
+// engine ignores it). OUTPUT is apart: starting and stopping the stream has its own command (output).
 var outputKeys = map[string]bool{
 	"EIRL_MANAGED_BY": true, "SRT_URL": true, "SRT_MODE": true, "SRT_LATENCY": true, "SRT_STREAMID": true,
 	"SRT_PASSPHRASE": true, "VBITRATE": true, "VBITRATE_MIN": true, "ABR": true, "ABITRATE": true,
 	"OUTPUT_PROTOCOL": true, "OUTPUT_URL": true, "OUTPUT_KEY": true, "OUTPUT_PASSPHRASE": true, "OUTPUT_USER": true,
 	"OUTPUT_PASSWORD": true, "RIST_PROFILE": true, "OUTPUT_LATENCY": true, "OUTPUT_VCODEC": true,
 	"OUTPUT_SIZE": true, "OUTPUT_FPS": true,
+	"REC_MODE": true, "REC_QUALITY": true,
 }
 
 // DiffEnv compares two readings of the app file (Store.Env), OUTPUT aside: changed = some other key differs;

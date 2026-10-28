@@ -73,6 +73,10 @@ type Settings struct {
 	VideoCodec       string // OUTPUT_VCODEC: "" (h264) | h264 | h265
 	OutputSize       string // OUTPUT_SIZE: "" (the program's) | 1280x720 | 960x540
 	OutputFPS        string // OUTPUT_FPS: "" (full) | full | half
+
+	// Local recording to a USB disk (RECORDING.md §6.1, recording.go): global keys, like OUTPUT
+	RecMode    string // REC_MODE: off | manual | with_output
+	RecQuality string // REC_QUALITY: standard | high | max | efficient
 }
 
 // EDIDModes: the EDIDs the device installs (edid-<mode>-lpcm48k.bin next to the engine). The same
@@ -89,7 +93,8 @@ const DefaultLatencyMs = 2000
 // Defaults: the same as the engine when the variable is missing.
 func Defaults() Settings {
 	return Settings{ManagedBy: "local", Mode: "caller", LatencyMs: DefaultLatencyMs, VideoKbps: 6000, AudioKbps: 128, Output: "on", VideoMinKbps: 1000, EDIDPreferred: "1080p30",
-		Source: "hdmi", VideoDevice: "auto", VideoFormat: "auto", VideoMode: "auto", AudioSource: "auto"}
+		Source: "hdmi", VideoDevice: "auto", VideoFormat: "auto", VideoMode: "auto", AudioSource: "auto",
+		RecMode: RecOff, RecQuality: DefaultRecQuality}
 }
 
 var (
@@ -183,6 +188,7 @@ func (s Settings) Validate() error {
 	}
 	s.validateInput(errs)
 	s.validateOutput(errs)
+	s.validateRecording(errs)
 	if len(errs) > 0 {
 		return errs
 	}
@@ -314,7 +320,8 @@ func ParseURL(raw string) (Pasted, error) {
 var keys = []string{"EIRL_MANAGED_BY", "SRT_URL", "SRT_MODE", "SRT_LATENCY", "SRT_STREAMID", "SRT_PASSPHRASE", "VBITRATE", "ABITRATE", "OUTPUT", "ABR", "VBITRATE_MIN", "EDID_PREFERRED",
 	"SOURCE", "VIDEO_DEVICE", "VIDEO_FORMAT", "VIDEO_MODE", "AUDIO_SOURCE",
 	"OUTPUT_PROTOCOL", "OUTPUT_URL", "OUTPUT_KEY", "OUTPUT_PASSPHRASE", "OUTPUT_USER", "OUTPUT_PASSWORD",
-	"RIST_PROFILE", "OUTPUT_LATENCY", "OUTPUT_VCODEC", "OUTPUT_SIZE", "OUTPUT_FPS"}
+	"RIST_PROFILE", "OUTPUT_LATENCY", "OUTPUT_VCODEC", "OUTPUT_SIZE", "OUTPUT_FPS",
+	"REC_MODE", "REC_QUALITY"}
 
 // ReadEnv reads an EnvironmentFile. Only the subset we write and the one /etc/default/eirl-engine has:
 // KEY=value, comments and empty lines; optional outer quotes.
@@ -421,6 +428,8 @@ func apply(s *Settings, env map[string]string) {
 	str("OUTPUT_VCODEC", &s.VideoCodec)
 	str("OUTPUT_SIZE", &s.OutputSize)
 	str("OUTPUT_FPS", &s.OutputFPS)
+	str("REC_MODE", &s.RecMode)
+	str("REC_QUALITY", &s.RecQuality)
 }
 
 // Render writes EVERY key, also the empty ones: a missing key would let the value of
@@ -438,6 +447,7 @@ func (s Settings) Render() []byte {
 		"OUTPUT_PASSPHRASE": s.OutputPassphrase, "OUTPUT_USER": s.OutputUser, "OUTPUT_PASSWORD": s.OutputPassword,
 		"RIST_PROFILE": s.RISTProfile, "OUTPUT_LATENCY": "", "OUTPUT_VCODEC": s.VideoCodec,
 		"OUTPUT_SIZE": s.OutputSize, "OUTPUT_FPS": s.OutputFPS,
+		"REC_MODE": s.RecMode, "REC_QUALITY": s.RecQuality,
 	}
 	if s.OutputLatencyMs != 0 {
 		vals["OUTPUT_LATENCY"] = strconv.Itoa(s.OutputLatencyMs)

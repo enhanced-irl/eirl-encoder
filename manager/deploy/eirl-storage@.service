@@ -1,0 +1,27 @@
+# eirl-storage@<disk>: the USB disk <disk> of local recordings (RECORDING.md §4). Wanted by 71-eirl-storage.rules when a
+# USB disk appears and bound to its device: pulling the disk out stops it. attach checks the disk, mounts it at
+# /media/eirl-rec and leaves the state in /run/eirl-storage/state.json; it exits 0 once it has said what it found (even
+# "unsupported" or "error"), so the unit stays active until the disk goes and its stop runs detach.
+#
+# NO sandboxing, on purpose: ProtectSystem, ProtectHome, PrivateTmp, ReadWritePaths… give the unit a mount namespace of
+# its own, and the disk would then be mounted only inside it, invisible to the engine.
+# The exFAT FUSE daemon (mount.exfat-fuse) stays in this unit's cgroup while the unit is active (RemainAfterExit; systemd
+# kills nothing of an active unit). On stop, ExecStop unmounts first, which ends the daemon cleanly; only then does
+# systemd kill what is left (a daemon still serving a lazily unmounted disk that was pulled out).
+[Unit]
+Description=eirl-storage: the USB disk %I for local recordings
+Documentation=https://github.com/enhanced-irl/eirl-encoder/blob/main/RECORDING.md
+BindsTo=dev-%i.device
+After=dev-%i.device systemd-tmpfiles-setup.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/eirl-storage attach %I
+ExecStop=/usr/local/sbin/eirl-storage detach %I
+# Also when the start failed or was cut (the disk pulled out while it was checked: systemd kills attach and runs no
+# ExecStop for a unit that never started). detach is idempotent
+ExecStopPost=/usr/local/sbin/eirl-storage detach %I
+# A read-only fsck (up to 2 min), the mount and the 32 MB write test; plus waiting for another disk's check
+TimeoutStartSec=600
+TimeoutStopSec=90

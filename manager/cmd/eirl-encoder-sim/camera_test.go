@@ -19,7 +19,12 @@ func startTestEngine(t *testing.T) *simEngine {
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	e, err := startSimEngine(ctx, dir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	disk, err := newSimStorage(dir, "", log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := startSimEngine(ctx, dir, disk, false, log)
 	if err != nil {
 		t.Fatal(err)
 	}

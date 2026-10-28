@@ -60,6 +60,49 @@ void eg_fix_base(GstElement *pipe, GstClockTime base)
 	gst_element_set_base_time(pipe, base);
 }
 
+// A downstream event sent to a bin goes to its source elements: the appsrcs push what they hold, then EOS
+int eg_send_eos(GstElement *pipe)
+{
+	return gst_element_send_event(pipe, gst_event_new_eos()) ? 1 : 0;
+}
+
+// A recording's sources carry the program's timestamps, which start wherever the program is when it begins:
+// minutes or hours, and that is where the file's timeline would start. Before the pipeline plays, both appsrcs'
+// src pads get the same offset: minus the program's running time now, less a margin for the buffers already on
+// their way (a frame reaches the tap tens of ms after its pts). The file then starts a fraction of a second
+// after 0, with the encoder's first keyframe, and the audio stays in sync. Pad offsets leave the buffers alone:
+// they are the program's, shared with the stream. Set before any data, the offset is in the one segment each
+// appsrc sends. Set on the first buffer instead (the first version), the segment could go out twice, and in 3
+// recordings of 9 the video reached the file about once every offset's length (RECORDING.md §8.3).
+#define ZERO_MARGIN ((gint64)(250 * GST_MSECOND))
+
+int eg_zero_start(GstElement *pipe, const char *video, const char *audio)
+{
+	const char *names[] = {video, audio};
+	GstPad *pads[2] = {NULL, NULL};
+	gboolean ok = TRUE;
+	for (int i = 0; i < 2; i++) {
+		GstElement *el = gst_bin_get_by_name(GST_BIN(pipe), names[i]);
+		if (el != NULL) {
+			pads[i] = gst_element_get_static_pad(el, "src");
+			gst_object_unref(el);
+		}
+		ok = ok && pads[i] != NULL;
+	}
+	if (ok) {
+		GstClock *clk = gst_system_clock_obtain(); // the program's, as eg_fix_base gives it
+		gint64 run = (gint64)gst_clock_get_time(clk) - (gint64)gst_element_get_base_time(pipe);
+		gst_object_unref(clk);
+		gint64 off = run > ZERO_MARGIN ? -(run - ZERO_MARGIN) : 0;
+		for (int i = 0; i < 2; i++)
+			gst_pad_set_offset(pads[i], off);
+	}
+	for (int i = 0; i < 2; i++)
+		if (pads[i] != NULL)
+			gst_object_unref(pads[i]);
+	return ok ? 1 : 0;
+}
+
 GstClockTime eg_base_time(GstElement *el)
 {
 	return gst_element_get_base_time(el);

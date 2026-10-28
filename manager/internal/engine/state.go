@@ -5,6 +5,7 @@ import (
 
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/audio"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/camera"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/record"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/scene"
 )
 
@@ -25,7 +26,9 @@ type State struct {
 	Sources []SourceState  `json:"sources"`
 	Screen  ScreenState    `json:"screen"`
 	Output  OutputState    `json:"output"`
-	Preview *PreviewState  `json:"preview,omitempty"`
+	// Record: the local recording (RECORDING.md §5.2), absent without its taps
+	Record  *RecordState  `json:"record,omitempty"`
+	Preview *PreviewState `json:"preview,omitempty"`
 	// Audio: without an audio bus the key is absent, like the Python engine with MIXER_AUDIO_SLOTS=0
 	Audio *audio.State `json:"audio,omitempty"`
 }
@@ -88,6 +91,26 @@ type PowerRequest struct {
 	Want string  `json:"want"` // reboot | poweroff
 	Seq  int     `json:"seq"`
 	At   float64 `json:"at"` // epoch s
+}
+
+// RecordState is the local recording (RECORDING.md §5.2): its mode and state like the output's, while on
+// the time, rate, seconds dropped and file, and always the disk.
+type RecordState struct {
+	Mode  string `json:"mode"`  // on | off
+	State string `json:"state"` // off | starting | on | error
+	// Setting and Quality: REC_MODE and REC_QUALITY as the engine has them now (after output_config), so that the
+	// screen and the web follow a change made on the other at once
+	Setting  string      `json:"setting"` // off | manual | with_output
+	Quality  string      `json:"quality"` // standard | high | max | efficient
+	Reason   string      `json:"reason,omitempty"`
+	Detail   string      `json:"detail,omitempty"`
+	By       string      `json:"by"` // start | socket | screen | output
+	Seq      int         `json:"seq"`
+	ElapsedS *int        `json:"elapsedS,omitempty"`
+	Kbps     *int        `json:"kbps,omitempty"`
+	DroppedS *int        `json:"droppedS,omitempty"`
+	File     string      `json:"file,omitempty"`
+	Disk     record.Disk `json:"disk"`
 }
 
 // OutputState is the hot output (F3). Until the output phase (M2) the engine has no hot output.

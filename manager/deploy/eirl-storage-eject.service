@@ -1,0 +1,13 @@
+# eirl-storage-eject: `eirl-storage eject` in the system's mount namespace (RECORDING.md §4). The app runs
+# `sudo eirl-storage eject` (an exact sudoers rule), which starts this unit and returns its exit status: run inside the
+# app's sandbox (ProtectSystem=strict, PrivateTmp) the unmount would only happen in the app's own mount namespace and the
+# state could not be written. No sandboxing here for the same reason. Not enabled: nothing starts it but the helper.
+[Unit]
+Description=eirl-storage: eject the USB disk of local recordings
+Documentation=https://github.com/enhanced-irl/eirl-encoder/blob/main/RECORDING.md
+
+[Service]
+Type=oneshot
+Environment=EIRL_STORAGE_DIRECT=1
+ExecStart=/usr/local/sbin/eirl-storage eject
+TimeoutStartSec=120

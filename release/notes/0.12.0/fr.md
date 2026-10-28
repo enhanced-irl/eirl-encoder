@@ -1,0 +1,5 @@
+- Nouveau : l'enregistrement local sur un disque USB. L'encodeur enregistre le programme (ce qui part à l'antenne, avec son son) sur une clé ou un disque USB, en haute qualité (25 Mbit/s par défaut) et indépendamment du direct : si la connexion tombe, l'enregistrement continue. Il se règle sur l'écran, dans Réglages › Diffusion › Enregistrement, ou dans la carte « Enregistrement » de l'interface web.
+- Trois modes : Désactivé (comme jusqu'ici), Indépendant (REC enregistre ou s'arrête, en direct ou non) et Avec le direct (Diffuser enregistre aussi, et Arrêter la diffusion arrête les deux).
+- Disques en exFAT, FAT32 (les enregistrements sont découpés en fichiers de 3,9 Go) ou ext4. L'encodeur peut formater un disque en exFAT. Chaque enregistrement est un fichier MP4 dans le dossier EnhancedIRL.
+- Branchez le disque avant de passer en direct et appuyez sur Éjecter avant de le débrancher. Un disque dur 2,5" uniquement via un hub USB avec sa propre alimentation : sans elle, il peut couper l'alimentation de l'encodeur.
+- Après une coupure de courant, l'enregistrement reste arrêté (le direct, lui, reprend) et le fichier est réparé quand le disque est rebranché.

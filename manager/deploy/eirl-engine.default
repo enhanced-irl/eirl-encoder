@@ -20,3 +20,7 @@ SOURCE=hdmi
 #SRTLA_SENDER=irlserver
 #SRTLA_MODE=classic
 #SRT_PAYLOAD=1128
+# The local recording (RECORDING.md §5.1): where the storage helper mounts the USB disk, and its state file.
+# REC_MODE and REC_QUALITY come from the app's file; set here, they are only the defaults.
+#REC_DIR=/media/eirl-rec
+#REC_STORAGE_STATE=/run/eirl-storage/state.json

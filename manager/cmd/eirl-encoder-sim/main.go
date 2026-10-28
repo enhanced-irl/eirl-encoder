@@ -14,11 +14,14 @@
 //
 // Local mode (-http): the device's own web and API (internal/api, the real handlers) over fakes, to develop the web
 // and the screen without the board (local.go): device settings, setup wizard (-fresh: an unconfigured device),
-// source slots with a catalogue, EnhancedIRL linking (approved after 30 s) and a fake updater.
+// source slots with a catalogue, EnhancedIRL linking (approved after 30 s), a fake updater and the local recording
+// with a USB disk that is plugged and pulled while it runs (recording.go).
 //
 //	eirl-encoder-sim -http 127.0.0.1:8080 -fresh              # wizard from scratch (the setup code is in the log)
 //	eirl-encoder-sim -http 127.0.0.1:8080 -web web/static     # configured (password eirl-sim-1234), web from disk
 //	eirl-encoder-sim -http :8080 -local-socket /tmp/eirl-api.sock -data /tmp/eirl-sim
+//	eirl-encoder-sim -http 127.0.0.1:8080 -data /tmp/eirl-sim -disk exfat   # a disk ready to record
+//	echo 'ntfs another' > /tmp/eirl-sim/disk; rm /tmp/eirl-sim/disk          # another disk; pulled out
 package main
 
 import (
@@ -60,6 +63,11 @@ func main() {
 	dataDir := flag.String("data", "", "local mode: directory for device.json, slots.json, admin.hash… (default a new temporary one)")
 	updScenario := flag.String("update", "", "local mode: how the fake updater starts: metered (0.2.0 waits for Wi-Fi to download), restart (on 0.2.0, waiting for a restart), sysfailed (its system layer failed)")
 	webDir := flag.String("web", "", "local mode: serve the web from this directory instead of the embedded one (e.g. web/static)")
+	disk := flag.String("disk", "", "local mode: the USB disk of local recordings plugged in at start, written to <data>/disk (empty = what that file says). "+
+		"Change the file while it runs to plug another one in, remove it to pull the disk out. The first word: exfat, fat32 or ext4 (ready), "+
+		"ntfs or small (unsupported), blank (unformatted), readonly (error); then any of dirty, another (a second disk too), low (2 min "+
+		"of room), full (no room), slow (disk_slow while recording), checking (stays checking). Eject and Format work from the web")
+	recPowerLost := flag.Bool("rec-power-lost", false, "local mode: the engine starts as after a power cut while recording (record.reason power_lost)")
 	flag.Parse()
 
 	var h slog.Handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
@@ -71,7 +79,7 @@ func main() {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 		if err := runLocal(ctx, localOpts{addr: *httpAddr, socket: *localSock, dataDir: *dataDir, webDir: *webDir, hwID: *hwID, fresh: *fresh,
-			update: *updScenario}, log); err != nil {
+			update: *updScenario, disk: *disk, recPowerLost: *recPowerLost}, log); err != nil {
 			fail(log, "local mode", err)
 		}
 		return

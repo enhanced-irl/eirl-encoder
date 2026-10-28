@@ -1,6 +1,7 @@
 package config
 
 import (
+	"reflect"
 	"strconv"
 	"strings"
 )
@@ -151,7 +152,7 @@ func (c *Config) SameDevice(n *Config) bool {
 }
 
 // WithOutput is a copy of c with the output configuration of n: the destination, the bitrates and the
-// encoding settings, and n's fingerprint. OutputAtBoot stays: emitting is switched apart (output).
+// encoding settings, the recording's mode and quality, and n's fingerprint. OutputAtBoot stays: emitting is switched apart (output).
 func (c *Config) WithOutput(n *Config) *Config {
 	x := *c
 	x.ConfSHA = n.ConfSHA
@@ -160,5 +161,15 @@ func (c *Config) WithOutput(n *Config) *Config {
 	x.Transport, x.OutputURL, x.OutputKey, x.OutputPassphrase = n.Transport, n.OutputURL, n.OutputKey, n.OutputPassphrase
 	x.OutputUser, x.OutputPassword, x.RISTProfile, x.OutputLatencyMs = n.OutputUser, n.OutputPassword, n.RISTProfile, n.OutputLatencyMs
 	x.VCodec, x.OutputSize, x.OutputHalf = n.VCodec, n.OutputSize, n.OutputHalf
+	x.RecMode, x.RecQuality = n.RecMode, n.RecQuality // the recording's, taken live too (RECORDING.md §5.1)
 	return &x
+}
+
+// SameOutput reports whether n (a WithOutput of c) changes nothing the output uses: only the recording's keys
+// or the fingerprint. output_config then leaves a stream on air alone, which a new output configuration restarts.
+func (c *Config) SameOutput(n *Config) bool {
+	a, b := *c, *n
+	a.ConfSHA, a.RecMode, a.RecQuality = "", "", ""
+	b.ConfSHA, b.RecMode, b.RecQuality = "", "", ""
+	return reflect.DeepEqual(a, b)
 }

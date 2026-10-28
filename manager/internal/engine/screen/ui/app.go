@@ -47,6 +47,8 @@ type AppWatch struct {
 	// Bluetooth: the Bluetooth page (BLUETOOTH.md §3.6): GET /bluetooth every ~2 s, every second while it searches,
 	// is visible or an order on a device runs
 	Bluetooth bool
+	// Recording: the Recording page (RECORDING.md §6.2): GET /recording every ~2 s
+	Recording bool
 }
 
 // AppAction is a change asked of the app.
@@ -99,11 +101,15 @@ type AppAction struct {
 //	bt_visible    POST /bluetooth/visible  Body: on (the 2-minute window, D4)
 //	bt_device     POST /bluetooth/devices/{ID}/{Value}  ID: the address; Value: pair | connect | disconnect | forget
 //	bt_use        PUT /bluetooth/devices/{ID}  Body: use (listen | mic | input)
+//	Local recording (RECORDING.md §6.2); REC itself is the engine's record command, not the app's:
+//	rec_settings  PUT /recording  Body: mode and/or quality → AppSnapshot.Recording
+//	rec_eject     POST /storage/eject → AppSnapshot.Recording.Storage
+//	rec_format    POST /storage/format  Body: seq (the disk the confirmation named) → AppSnapshot.Recording.Storage
 var AppActions = []string{"dest_save", "dest_reveal", "dest_create", "dest_update", "dest_delete", "dest_activate",
 	"dest_secrets", "restart", "uplink", "input_save", "sources_scan",
 	"cloud_unlink", "password", "cam_add", "cam_rename", "cam_rotate", "cam_remove", "cam_creds", "ap_enabled",
 	"ap_channel", "ap_rotate", "lan_enabled", "modem_save", "modem_pin", "modem_reset", "modem_subnet",
-	"bt_power", "bt_scan", "bt_visible", "bt_device", "bt_use"}
+	"bt_power", "bt_scan", "bt_visible", "bt_device", "bt_use", "rec_settings", "rec_eject", "rec_format"}
 
 // SecretsDropper is an App that can forget the secrets it read for the screen (DestSecrets, CamCreds): the page
 // that showed them calls it when it goes.
@@ -150,6 +156,9 @@ type AppSnapshot struct {
 	// The board's Bluetooth (BLUETOOTH.md §3.4): BluetoothAPI No is an app without it
 	Bluetooth    *BTState
 	BluetoothAPI Tri
+	// Local recording's settings and disk (RECORDING.md §6.2): RecordingAPI No is an app without them
+	Recording    *RecordingInfo
+	RecordingAPI Tri
 	// Local facts the engine knows itself (About): the build's commit and the board's IP addresses
 	Commit string
 	IPs    []string
@@ -582,6 +591,52 @@ func (b *BTState) Busy() bool {
 		}
 	}
 	return false
+}
+
+// RecordingInfo is GET /recording (RECORDING.md §6.2), validated by the client: the mode and the quality saved, the
+// qualities to choose from, and the disk (the storage helper's state, without paths).
+type RecordingInfo struct {
+	Mode      string // off | manual | with_output
+	Quality   string // standard | high | max | efficient
+	Qualities []RecQuality
+	Storage   StorageInfo
+}
+
+// QualityOf is a quality by its id (nil: the app did not list it).
+func (r *RecordingInfo) QualityOf(id string) *RecQuality {
+	if r == nil {
+		return nil
+	}
+	for i := range r.Qualities {
+		if r.Qualities[i].ID == id {
+			return &r.Qualities[i]
+		}
+	}
+	return nil
+}
+
+// RecQuality is one of the recording's qualities: its codec and bitrates.
+type RecQuality struct {
+	ID        string
+	Codec     string // h264 | h265
+	VideoKbps int
+	AudioKbps int
+}
+
+// StorageInfo is the storage object (RECORDING.md §4.3, §6.2): the USB disk the encoder records to.
+type StorageInfo struct {
+	State       string // none | checking | ready | unsupported | unformatted | error | ejected
+	Reason      string // unsupported: fs_ntfs | fs_unknown | too_small; error: mount_failed | readonly | check_failed
+	Seq         int64  // goes up on every change of the disk: format names it
+	Device      string // sda…
+	Model       string
+	FS          string // exfat | fat32 | fat16 | fat12 | ext4 | ntfs | another type ("" not known)
+	Label       string
+	SizeBytes   int64
+	ReadOnly    bool
+	Dirty       bool // not ejected last time
+	WriteMBps   float64
+	AnotherDisk string // a second disk plugged in (only one is used)
 }
 
 // AppResult is how an action went: OK, or the HTTP code with the app's error, message (in the device language)

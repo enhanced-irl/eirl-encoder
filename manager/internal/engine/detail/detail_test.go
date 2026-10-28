@@ -32,6 +32,7 @@ func TestTexts(t *testing.T) {
 		{"probe_failed", []string{"rc", "2", "error", "boom"}, "eirl-encoderd probe ha fallado (2): boom"},
 		{"hung_given_up", nil, "colgada: desenchúfala y vuelve a enchufarla"},
 		{"hung_on_air_unknown", nil, "colgada: emitiendo no la reinicio (no sé qué hay al aire)"},
+		{"hung_recording", nil, "colgada: grabando no la reinicio (cortaría el disco)"},
 		{"port_reset", nil, "reiniciando su puerto USB"},
 		{"net_receiver_down", nil, "el receptor de cámaras no responde"},
 		{"net_waiting", nil, "Esperando a la cámara"},
@@ -73,7 +74,7 @@ func TestTexts(t *testing.T) {
 			t.Errorf("code %s has no test", c)
 		}
 	}
-	if len(Codes()) != 40 {
+	if len(Codes()) != 41 {
 		t.Errorf("%d codes: the list is a contract (ENGINE_GO.md §13), update both", len(Codes()))
 	}
 }

@@ -245,6 +245,10 @@ func TestStreaming(t *testing.T) {
 	if on, _ := Streaming(dir); !on {
 		t.Error("mixer connecting: not streaming")
 	}
+	w("mixer.json", `{"output":{"mode":"off","state":"off"},"record":{"mode":"on","state":"on"}}`)
+	if on, why := Streaming(dir); !on || why != "mixer.json record.mode=on" {
+		t.Errorf("recording to a USB disk: not busy (%s)", why)
+	}
 	w("mixer.json", `{"scene":{}}`) // an engine without output in its state: the state file decides
 	if on, _ := Streaming(dir); !on {
 		t.Error("mixer.json without output + OUTPUT=on: not streaming")

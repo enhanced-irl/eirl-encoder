@@ -25,6 +25,7 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/network"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/service"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/sources"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/storage"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/uplinks"
 )
 
@@ -95,6 +96,12 @@ type Server struct {
 	// Power: restart or power off the board from the screen's Power menu (nil = ignored)
 	Power Power
 
+	// Local recording to a USB disk (RECORDING.md §6). StoragePath: the storage helper's state file
+	// (/run/eirl-storage/state.json; "" = no helper: the disk is always "none"); StorageRunner runs its eject and
+	// format (nil = for real: sudo -n with the exact commands of the sudoers rule)
+	StoragePath   string
+	StorageRunner storage.Runner
+
 	// Device settings and setup wizard (SETUP.md §2). Device: device.json (nil = /device and /setup
 	// answer 503); System: time zone, NTP, clock and hostname (nil = the OS hostname, no clock
 	// settings); Zones: the cached time zone list; SetupCodePath: the setup code ("" = none: the web
@@ -159,6 +166,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/destinations/{id}", s.deleteDestination)
 	mux.HandleFunc("POST /api/v1/destinations/{id}/activate", s.activateDestination)
 	mux.HandleFunc("PUT /api/v1/output", s.putOutput)
+	mux.HandleFunc("GET /api/v1/recording", s.getRecording)
+	mux.HandleFunc("PUT /api/v1/recording", s.putRecording)
+	mux.HandleFunc("PUT /api/v1/record", s.putRecord)
+	mux.HandleFunc("GET /api/v1/storage", s.getStorage)
+	mux.HandleFunc("POST /api/v1/storage/eject", s.postStorageEject)
+	mux.HandleFunc("POST /api/v1/storage/format", s.postStorageFormat)
 	mux.HandleFunc("PUT /api/v1/uplinks/{name}", s.putUplink)
 	mux.HandleFunc("GET /api/v1/modems", s.getModems)
 	mux.HandleFunc("PUT /api/v1/modems/{id}", s.putModem)

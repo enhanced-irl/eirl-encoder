@@ -771,3 +771,33 @@ select.invalid { border-color: var(--error); box-shadow: 0 0 0 3px var(--error-a
 #bt-why { margin: 0; }
 #bt-on:disabled, #bt-visible:disabled { opacity: .6; cursor: progress; }
 .bt-sub { margin: 0 0 8px; }
+
+/* Local recording (RECORDING.md §6.5): the state, REC under it (beside it in a wide column), the mode and the quality,
+   then the disk with its warnings and buttons. Recording: a red line with a blinking dot, like the «Live» pill */
+.rec-bar { display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 10px 14px; }
+@container zone (min-width: 460px) { .rec-bar { grid-template-columns: minmax(0, 1fr) auto; } }
+.rec-now { min-width: 0; }
+.rec-line { font-size: 1.02rem; font-weight: 650; line-height: 1.3; color: var(--gray-50); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.rec-line.on { color: var(--error-300); }
+.rec-line.on::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 50%; background: var(--error); vertical-align: 1px; animation: blink 1.6s ease-in-out infinite; }
+.rec-now .sub { margin-top: 2px; font-size: .8rem; color: var(--gray-400); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.rec-now .sub.warn { color: var(--warning-300) !important; }
+/* ● to record, ■ to stop (like Go live) */
+#rec-btn::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--error); flex: none; }
+#rec-btn.danger::before { border-radius: 2px; }
+#rec-btn.danger { color: #fff; }
+#rec-why { margin-top: 8px; }
+.rec-set { margin-top: 6px; }
+.rec-set .dests-ask { margin: 6px 0 0; }
+.rec-disk { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--gray-800); }
+.rec-disk-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.rec-disk-head .sub { font-size: .8rem; color: var(--gray-400); }
+.rec-dinfo { min-width: 0; }
+.rec-dname { font-weight: 600; color: var(--gray-50); overflow-wrap: anywhere; }
+.rec-dmeta { margin-top: 2px; font-size: .82rem; color: var(--gray-400); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.rec-warns.uplinks-warn { margin: 10px 0 0; }
+.rec-warns p + p { margin-top: 6px; }
+.rec-disk .dests-ask { margin: 10px 0 0; }
+#rec-busy, #rec-disk-why { margin-top: 8px; }
+.rec-disk > .form-actions { margin-top: 10px; }
+.rec-disk > .form-actions:not(:has(button:not([hidden]))) { display: none; }

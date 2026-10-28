@@ -30,6 +30,7 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/btaudio"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/i18n"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/service"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/storage"
 )
 
 // ErrOff: no mixer running (eirl-engine stopped, restarting or without MIXER=1).
@@ -179,6 +180,46 @@ var (
 	reOutputSize    = regexp.MustCompile(`^[0-9]{2,5}x[0-9]{2,5}$`)
 )
 
+// Record: the local recording to a USB disk (RECORDING.md §5.2, §6.3), the output's sibling. Mode = what was asked
+// (REC, or Go live with REC_MODE=with_output); State = how it really is. While on, the time, rate, seconds dropped and
+// file; always the disk
+type Record struct {
+	Mode  string `json:"mode"`  // on | off
+	State string `json:"state"` // off | starting | on | error
+	// Setting and Quality: REC_MODE and REC_QUALITY as the engine has them now; absent with an engine before them
+	Setting string `json:"setting,omitempty"` // off | manual | with_output
+	Quality string `json:"quality,omitempty"` // standard | high | max | efficient
+	Reason  string `json:"reason,omitempty"`  // RecordReasons
+	Detail  string `json:"detail,omitempty"`  // free text from the engine, ≤ 200
+	// By: who changed Mode last (start | socket | screen | output: Go live); Seq goes up with each change
+	By       string     `json:"by,omitempty"`
+	Seq      int        `json:"seq,omitempty"`
+	ElapsedS *int       `json:"elapsedS,omitempty"`
+	Kbps     *int       `json:"kbps,omitempty"`
+	DroppedS *int       `json:"droppedS,omitempty"` // seconds the disk could not take (disk_slow)
+	File     string     `json:"file,omitempty"`     // the file's name, without its folder
+	Disk     RecordDisk `json:"disk"`
+}
+
+// RecordDisk: the storage helper's state (RECORDING.md §4.3) and the room left at the quality's bitrate
+type RecordDisk struct {
+	State       string `json:"state"`            // the helper's: none | checking | ready | unsupported | unformatted | error | ejected
+	Reason      string `json:"reason,omitempty"` // the helper's
+	FS          string `json:"fs,omitempty"`     // exfat | fat32 | ext4 …; for a disk the encoder does not use, ntfs or blkid's type
+	Label       string `json:"label,omitempty"`
+	SizeBytes   *int64 `json:"sizeBytes,omitempty"`
+	FreeBytes   *int64 `json:"freeBytes,omitempty"`
+	MinutesLeft *int   `json:"minutesLeft,omitempty"`
+	Dirty       bool   `json:"dirty,omitempty"` // not ejected last time
+}
+
+// RecordReasons: the recording reasons that are forwarded (closed list, RECORDING.md §5.2)
+var RecordReasons = map[string]bool{"no_disk": true, "disk_removed": true, "disk_full": true, "disk_slow": true,
+	"write_error": true, "encoder_error": true, "power_lost": true, "internal": true}
+
+// reRecordFile: a recording's name as the engine makes it (2026-10-24_1530.mp4, rec-0042-2.mp4)
+var reRecordFile = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}$`)
+
 // Audio: the audio inputs (independent of video, F4) and which one plays. Main nil = no audio.
 type Audio struct {
 	Main    *string      `json:"main"`
@@ -272,6 +313,9 @@ type State struct {
 	Screen  Screen         `json:"screen"`
 	Output  *Output        `json:"output,omitempty"`
 	Audio   *Audio         `json:"audio,omitempty"`
+	// Record: the local recording (RECORDING.md §6.3). Absent with an older engine or one without a recorder (the
+	// web hides the recording)
+	Record *Record `json:"record,omitempty"`
 }
 
 // SlotAssign: one slot of the `slots` command and of slots.json (SETUP.md §5, ENGINE_GO.md §12).
@@ -378,6 +422,9 @@ var fields = map[string][]string{
 	"slots":         {"slots"}, // the source slots (PUT /sources/slots writes slots.json and then sends it)
 	// A USB camera's image settings (SOURCES.md §7.3): one control, or all back to the camera's defaults
 	"camera_control": {"source", "control", "value"}, "camera_reset": {"source"},
+	// The local recording to a USB disk (RECORDING.md §5.2): record or stop. With REC_MODE=with_output, output also
+	// records
+	"record": {"on"},
 }
 
 // present: the fields the command carries
@@ -457,7 +504,7 @@ func (c Command) Validate() error {
 		if c.Gain != nil && (*c.Gain < MinPhonesGain || *c.Gain > MaxPhonesGain || *c.Gain != math.Trunc(*c.Gain)) {
 			return i18n.E("mixer.bad_phones_gain", MinPhonesGain, MaxPhonesGain)
 		}
-	case "output", "lock", "audio_follow", "preview":
+	case "output", "record", "lock", "audio_follow", "preview":
 		if c.On == nil {
 			return i18n.E("mixer.cmd_missing", "on")
 		}
@@ -671,6 +718,9 @@ func clean(st *State) *State {
 			o.FPS = 0
 		}
 	}
+	if rec := st.Record; rec != nil {
+		cleanRecord(rec)
+	}
 	if p := st.Screen.Power; p != nil && (p.Want != "reboot" && p.Want != "poweroff" || p.Seq < 1) {
 		st.Screen.Power = nil
 	}
@@ -720,6 +770,70 @@ func clean(st *State) *State {
 		}
 	}
 	return st
+}
+
+// cleanRecord bounds the recording like the output (RECORDING.md §6.3): closed lists, the detail redacted and short,
+// counters that are not negative, the file's name without a folder, and the disk's fields from the storage helper's
+// lists (its label is third-party data: the rule of a device's name).
+func cleanRecord(rec *Record) {
+	if rec.Mode != "on" {
+		rec.Mode = "off"
+	}
+	switch rec.State {
+	case "off", "starting", "on", "error":
+	default:
+		rec.State = "off"
+	}
+	switch rec.Setting {
+	case "off", "manual", "with_output":
+	default:
+		rec.Setting = ""
+	}
+	switch rec.Quality {
+	case "standard", "high", "max", "efficient":
+	default:
+		rec.Quality = ""
+	}
+	if !RecordReasons[rec.Reason] {
+		rec.Reason = ""
+	}
+	rec.Detail = service.Redact(rec.Detail)
+	if r := []rune(rec.Detail); len(r) > 200 {
+		rec.Detail = string(r[:200])
+	}
+	switch rec.By {
+	case "start", "socket", "screen", "output":
+	default:
+		rec.By = ""
+	}
+	rec.Seq = max(rec.Seq, 0)
+	rec.ElapsedS, rec.Kbps, rec.DroppedS = notNegative(rec.ElapsedS), notNegative(rec.Kbps), notNegative(rec.DroppedS)
+	if i := strings.LastIndexAny(rec.File, `/\`); i >= 0 {
+		rec.File = rec.File[i+1:]
+	}
+	if !reRecordFile.MatchString(rec.File) {
+		rec.File = ""
+	}
+	d := &rec.Disk
+	if !storage.States[d.State] {
+		d.State = storage.StateNone
+	}
+	if !storage.Reasons[d.Reason] {
+		d.Reason = ""
+	}
+	if !storage.ValidFS(d.FS) {
+		d.FS = ""
+	}
+	d.Label = CleanDeviceName(d.Label)
+	d.SizeBytes, d.FreeBytes, d.MinutesLeft = notNegative(d.SizeBytes), notNegative(d.FreeBytes), notNegative(d.MinutesLeft)
+}
+
+// notNegative: a counter as is, nil if it is below zero (the key is then absent).
+func notNegative[T int | int64](n *T) *T {
+	if n != nil && *n < 0 {
+		return nil
+	}
+	return n
 }
 
 var (

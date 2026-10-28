@@ -51,6 +51,9 @@ func init() {
 		"bt_power": {"PUT", "/bluetooth"}, "bt_scan": {"POST", "/bluetooth/scan"},
 		"bt_visible": {"POST", "/bluetooth/visible"}, "bt_device": {"POST", "/bluetooth/devices/{id}/{action}"},
 		"bt_use": {"PUT", "/bluetooth/devices/{id}"},
+		// Local recording (RECORDING.md §6.2): checked and built by recRequest
+		"rec_settings": {"PUT", "/recording"}, "rec_eject": {"POST", "/storage/eject"},
+		"rec_format": {"POST", "/storage/format"},
 	}
 	for _, w := range ui.AppActions {
 		r, ok := routes[w]
@@ -127,6 +130,15 @@ func (d *DeviceState) runParity(q queued, route [2]string) {
 		body = b
 		path = strings.Replace(path, "{action}", a.Value, 1) // one of btOrders
 	}
+	if isRec(a.What) { // the same: only its route's fields (recRequest), and no secret
+		b, ok := recRequest(a)
+		if !ok || len(q.secrets) > 0 {
+			res.Status, res.Code, res.At = 400, "bad_request", time.Now()
+			d.finish(res)
+			return
+		}
+		body = b
+	}
 	if strings.Contains(path, "{id}") {
 		if a.ID == "" || len(a.ID) > 200 {
 			res.Status, res.Code, res.At = 400, "bad_request", time.Now()
@@ -138,7 +150,7 @@ func (d *DeviceState) runParity(q queued, route [2]string) {
 	if body == nil {
 		body = parityBody(a, route[0], q.secrets)
 	}
-	_, v, e := d.call("", route[0], path, body, d.actTimeout)
+	_, v, e := d.call("", route[0], path, body, recTimeout(a.What, d.actTimeout))
 	res.OK, res.At = e == nil, time.Now()
 	if e != nil {
 		res.Status, res.Code, res.Message = e.Status, e.Kind, e.userText(d.lang.get())
@@ -202,6 +214,14 @@ func (d *DeviceState) runParity(q queued, route [2]string) {
 	case "bt_power", "bt_scan", "bt_visible", "bt_device", "bt_use": // {"ok": true, "bluetooth": the state now}
 		if b := btState(obj(v)["bluetooth"]); b != nil {
 			d.snap.Bluetooth, d.snap.BluetoothAPI = b, ui.Yes
+		}
+	case "rec_settings": // the recording view
+		if r := recordingInfo(v); r != nil {
+			d.snap.Recording, d.snap.RecordingAPI = r, ui.Yes
+		}
+	case "rec_eject", "rec_format": // the storage object
+		if st, ok := storageInfo(v); ok {
+			d.snap.Recording = withStorage(d.snap.Recording, st)
 		}
 	}
 	d.mu.Unlock()

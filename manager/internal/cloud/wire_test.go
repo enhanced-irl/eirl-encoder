@@ -51,7 +51,9 @@ func TestApplyWireValid(t *testing.T) {
 	want := config.Settings{ManagedBy: "eirl", URL: "srt://eu1.relay.enhancedirl.com:5000", Mode: "caller", LatencyMs: 500,
 		StreamID: "publish:" + testKey, VideoKbps: 6000, AudioKbps: 160, Output: "on", ABR: true, VideoMinKbps: 1500, EDIDPreferred: "1080p50", Protocol: "srt",
 		// The input (SOURCES.md) does not travel in wire v1: the device's is kept
-		Source: "hdmi", VideoDevice: "auto", VideoFormat: "auto", VideoMode: "auto", AudioSource: "auto"}
+		Source: "hdmi", VideoDevice: "auto", VideoFormat: "auto", VideoMode: "auto", AudioSource: "auto",
+		// Nor does the local recording (RECORDING.md §6.1): the device's is kept
+		RecMode: "off", RecQuality: "high"}
 	if s != want {
 		t.Errorf("ApplyWire:\n got %+v\nwant %+v", s, want)
 	}

@@ -43,6 +43,8 @@ var Whitelist = []string{
 	// The output protocols and encoding settings (OUTPUTS.md §3)
 	"OUTPUT_PROTOCOL", "OUTPUT_URL", "OUTPUT_KEY", "OUTPUT_PASSPHRASE", "OUTPUT_USER", "OUTPUT_PASSWORD",
 	"RIST_PROFILE", "OUTPUT_LATENCY", "OUTPUT_VCODEC", "OUTPUT_SIZE", "OUTPUT_FPS",
+	// Local recording (RECORDING.md §5.1)
+	"REC_MODE", "REC_QUALITY",
 }
 
 // verbatimKeys are read without the launcher's «A=b=» quirk (ParseConfFile): they never went through
@@ -206,6 +208,12 @@ type Config struct {
 	ThumbSize  string // THUMB_SIZE (320x180)
 	ThumbEvery int    // THUMB_EVERY s ≥ 1 (5)
 	ThumbFile  string // THUMB_FILE (<RUN_DIR>/thumb.jpg; "" = off)
+
+	// Local recording (RECORDING.md §5.1)
+	RecMode         string // REC_MODE: off | manual | with_output (off)
+	RecQuality      string // REC_QUALITY: standard | high | max | efficient (high)
+	RecDir          string // REC_DIR (/media/eirl-rec): where the storage helper mounts the disk
+	RecStorageState string // REC_STORAGE_STATE (/run/eirl-storage/state.json): the storage helper's state
 
 	PulseServer string // PULSE_SERVER (unix:/nonexistent), exported to the children
 }
@@ -433,6 +441,10 @@ func Load(o Options) (*Config, error) {
 		"SEND_BIN":           e.or("SEND_BIN", "/usr/local/bin/eirl-send"),
 		"RIST_BIN":           e.or("RIST_BIN", "/usr/local/bin/ristsender"),
 		"RIST_LOCAL_PORT":    e.or("RIST_LOCAL_PORT", "6100"),
+		"REC_MODE":           e.or("REC_MODE", RecOff),
+		"REC_QUALITY":        e.or("REC_QUALITY", "high"),
+		"REC_DIR":            e.or("REC_DIR", "/media/eirl-rec"),
+		"REC_STORAGE_STATE":  e.or("REC_STORAGE_STATE", "/run/eirl-storage/state.json"),
 	}
 	raw["DEVICE_TIMEOUT"] = e.or("DEVICE_TIMEOUT", raw["SIGNAL_TIMEOUT"])
 	uplinksDisabled, uplinksNoInternet := "", ""
@@ -552,6 +564,9 @@ func validate(raw map[string]string, o Options) error {
 	if err == nil {
 		err = validateOutput(raw)
 	}
+	if err == nil {
+		err = validateRecording(raw)
+	}
 	if err == nil && raw["AENC"] != "voaacenc" && raw["AENC"] != "avenc_aac" {
 		err = invalid("AENC", "voaacenc or avenc_aac")
 	}
@@ -645,6 +660,8 @@ func (c *Config) fill(raw map[string]string) {
 	c.SendBin = raw["SEND_BIN"]
 	c.RISTBin = raw["RIST_BIN"]
 	c.RISTLocalPort = num("RIST_LOCAL_PORT")
+	c.RecMode, c.RecQuality = raw["REC_MODE"], raw["REC_QUALITY"]
+	c.RecDir, c.RecStorageState = raw["REC_DIR"], raw["REC_STORAGE_STATE"]
 	c.LinksFile = raw["LINKS_FILE"]
 	c.SRTLABin = raw["SRTLA_BIN"]
 	c.SRTLASender = raw["SRTLA_SENDER"]

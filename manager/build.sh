@@ -37,6 +37,8 @@ cp deploy/splash/* dist/pkg/splash/ && chmod +x dist/pkg/splash/install.sh
 build dist/pkg/eirl-netsetup ./cmd/eirl-netsetup
 # The fan control (FAN.md): a root daemon and its unit (deploy/eirl-fan.service, copied above)
 build dist/pkg/eirl-fan ./cmd/eirl-fan
+# Local recordings (RECORDING.md §4): the root helper of the USB disk; its units and udev rule are in deploy/ (copied above)
+build dist/pkg/eirl-storage ./cmd/eirl-storage
 [ -x ../build/out/mediamtx ] || ../build/mediamtx.sh
 cp ../build/out/mediamtx dist/pkg/
 # srtla_send (SRTLA): built separately in build/out (arm64 container, pinned commit); reused
@@ -99,7 +101,7 @@ for l in "$goroot/LICENSE" "$goroot/../LICENSE"; do [ -f "$l" ] && { golic=$l; b
 cp "$golic" "$doc/licenses/go/LICENSE.golang"
 [ -f "$goroot/PATENTS" ] && cp "$goroot/PATENTS" "$doc/licenses/go/PATENTS.golang"
 GOOS=linux GOARCH=arm64 go list -deps -f '{{with .Module}}{{if not .Main}}{{.Path}} {{.Version}} {{.Dir}}{{end}}{{end}}' \
-    ./cmd/eirl-encoderd ./cmd/eirl-splash ./cmd/eirl-netsetup ./cmd/eirl-update ./cmd/eirl-engine ./cmd/eirl-send ./cmd/eirl-fan | sort -u |
+    ./cmd/eirl-encoderd ./cmd/eirl-splash ./cmd/eirl-netsetup ./cmd/eirl-update ./cmd/eirl-engine ./cmd/eirl-send ./cmd/eirl-fan ./cmd/eirl-storage | sort -u |
   while read -r mod modver dir; do
     [ -n "$dir" ] || continue
     d="$doc/licenses/go/$mod"

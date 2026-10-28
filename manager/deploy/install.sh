@@ -22,6 +22,7 @@
 #   (eirl-netsetup, MediaMTX and their units; F7) · app unit (+ /etc/default/eirl-encoderd) · eirl-engine
 #   drop-in · the engine itself when the package carries it (a release bundle: engine/; its units enabled) ·
 #   the update helper (eirl-update and its units, UPDATES.md) · the fan control (eirl-fan and its unit, FAN.md) ·
+#   local recordings (eirl-storage, its units and the udev rule of the USB disk, RECORDING.md §4) ·
 #   Bluetooth audio (BlueALSA's daemon and its system user bluealsa, its unit and bluetoothd's drop-in with only its
 #   audio plugins; its ALSA plugins, their configuration and the D-Bus policy are the system layer's; BLUETOOTH.md §3.7) ·
 #   one-time migrations (hdmi2srt →
@@ -60,6 +61,8 @@ DROPIN=/etc/systemd/system/eirl-engine.service.d/eirl-encoder.conf
 PKLA_DIR=/etc/polkit-1/localauthority/50-local.d
 NET_UNITS="eirl-ap.service eirl-ap-dhcp.service eirl-media.service"
 UPDATE_UNITS="eirl-update.service eirl-update-recover.service"
+# Local recordings (RECORDING.md §4): the USB disk's unit and the two the app's sudo goes through
+STORAGE_UNITS="eirl-storage@.service eirl-storage-eject.service eirl-storage-format@.service"
 # Bluetooth audio (BLUETOOTH.md §3.7): bluetoothd's drop-in. BlueALSA's ALSA plugins (in alsa-lib's folder), their
 # configuration and the D-Bus policy are the system layer's (system/built.txt, system/overlay.txt): outside the
 # folders every update helper since 0.1.0 accepts in files.txt, they made every bundle from 0.7.0 to 0.10.0 refused
@@ -113,6 +116,11 @@ list_files() {
   if [ -f "$SRC/eirl-fan" ]; then
     echo /usr/local/sbin/eirl-fan
     echo /etc/systemd/system/eirl-fan.service
+  fi
+  if [ -f "$SRC/eirl-storage" ]; then
+    echo /usr/local/sbin/eirl-storage
+    for u in $STORAGE_UNITS; do echo "/etc/systemd/system/$u"; done
+    echo /etc/udev/rules.d/71-eirl-storage.rules
   fi
   if [ -f "$SRC/bluealsa/bluealsa" ]; then
     echo /usr/local/bin/bluealsa
@@ -405,7 +413,20 @@ if [ -f "$SRC/eirl-fan" ]; then
   put 0755 "$SRC/eirl-fan" /usr/local/sbin/eirl-fan
   put 0644 "$D/eirl-fan.service" /etc/systemd/system/eirl-fan.service
 fi
+# 6b'''. Local recordings (RECORDING.md §4): the root helper eirl-storage, its units, and the udev rule that makes a USB
+#        disk want eirl-storage@<disk>.service. The rule goes in after the units, and udev rereads its rules after
+#        systemd has read the units. Never `udevadm trigger` (it would rerun every rule, the modems' too): a disk already
+#        plugged in is mounted when it is plugged in again, or at the next boot. The tmpfiles of step 5 made
+#        /run/eirl-storage and its state "none"; the system layer brought exfat-fuse, exfat-utils and dosfstools.
+if [ -f "$SRC/eirl-storage" ]; then
+  put 0755 "$SRC/eirl-storage" /usr/local/sbin/eirl-storage
+  for u in $STORAGE_UNITS; do put 0644 "$D/$u" "/etc/systemd/system/$u"; done
+  put 0644 "$D/71-eirl-storage.rules" /etc/udev/rules.d/71-eirl-storage.rules
+fi
 [ -n "$IMAGE" ] || systemctl daemon-reload
+if [ -z "$IMAGE" ] && [ -f "$SRC/eirl-storage" ]; then
+  udevadm control --reload || true
+fi
 [ -f "$SRC/eirl-update" ] && systemctl enable eirl-update-recover.service >/dev/null 2>&1
 # The engine and its boot preparation (eirl-hdmi-init) start at boot: nothing else enables them, and a new
 # device would never stream. A no-op where they already are.

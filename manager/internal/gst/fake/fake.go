@@ -220,6 +220,9 @@ type Pipeline struct {
 	State  gst.State
 	Base   uint64
 	Closed bool
+	EOS    bool          // SendEOS was called
+	NoEOS  bool          // SendEOS does not post MessageEOS (a stuck pipeline)
+	Zero   [2]string     // ZeroStart's video and audio appsrcs
 	Forced time.Duration // what SetLatency set
 	Query  time.Duration // what a latency query answers (0 = no answer)
 	msgs   []*gst.Message
@@ -274,6 +277,31 @@ func (p *Pipeline) Pop(timeout time.Duration, types gst.MessageType) *gst.Messag
 		}
 		time.Sleep(min(10*time.Millisecond, time.Until(deadline)+time.Millisecond))
 	}
+}
+
+// SendEOS records it and, unless NoEOS, posts MessageEOS as the sinks would once they got it.
+func (p *Pipeline) SendEOS() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.Closed {
+		return false
+	}
+	p.EOS = true
+	if !p.NoEOS {
+		p.msgs = append(p.msgs, &gst.Message{Type: gst.MessageEOS})
+	}
+	return true
+}
+
+// ZeroStart records the two appsrcs in Zero; false if either is not an element of the pipeline.
+func (p *Pipeline) ZeroStart(video, audio string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.elems[video] == nil || p.elems[audio] == nil {
+		return false
+	}
+	p.Zero = [2]string{video, audio}
+	return true
 }
 
 // SetLatency records the forced latency in Forced (0 = never).
@@ -380,6 +408,16 @@ func (e *Element) PullBytes(timeout time.Duration) []byte {
 	time.Sleep(min(timeout, 20*time.Millisecond))
 	return nil
 }
+
+// Feed queues samples for PullBytes (an appsink's output, from a test while a goroutine pulls).
+func (e *Element) Feed(b ...[]byte) {
+	e.mu.Lock()
+	e.Pulls = append(e.Pulls, b...)
+	e.mu.Unlock()
+}
+
+// Pending is how many fed samples were not pulled yet.
+func (e *Element) Pending() int { e.mu.Lock(); defer e.mu.Unlock(); return len(e.Pulls) }
 
 func (e *Element) PullBuffer(time.Duration) gst.Buffer { return &Buffer{From: e.name} }
 

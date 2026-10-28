@@ -691,3 +691,86 @@ func TestCleanOutputConfig(t *testing.T) {
 		t.Error("output_config takes no fields")
 	}
 }
+
+// The recording (RECORDING.md §6.3): the record command takes only on, and the state is forwarded with closed lists,
+// like the output's
+func TestRecord(t *testing.T) {
+	on := true
+	if err := (Command{Cmd: "record", On: &on}).Validate(); err != nil {
+		t.Errorf("record: %v", err)
+	}
+	for _, c := range []Command{{Cmd: "record"}, {Cmd: "record", On: &on, Source: "hdmi"}, {Cmd: "record", On: &on, Mode: "manual"}} {
+		if err := c.Validate(); err == nil {
+			t.Errorf("%+v must not validate", c)
+		}
+	}
+
+	dir := t.TempDir()
+	cl := &Client{StatePath: filepath.Join(dir, "mixer.json")}
+	read := func(rec string) *Record {
+		t.Helper()
+		os.WriteFile(cl.StatePath, []byte(strings.Replace(stateJSON, `"secret":"x"`, `"record":`+rec, 1)), 0o644)
+		st, err := cl.Read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st.Record
+	}
+	if st, _ := (&Client{StatePath: filepath.Join(dir, "none.json")}).Read(); st != nil && st.Record != nil {
+		t.Error("no record without the file")
+	}
+	os.WriteFile(cl.StatePath, []byte(stateJSON), 0o644)
+	if st, err := cl.Read(); err != nil || st.Record != nil {
+		t.Errorf("an older engine: no record (%v)", err)
+	}
+
+	// What the engine sends while recording, forwarded as it is
+	rec := read(`{"mode":"on","state":"on","setting":"with_output","quality":"max","reason":"disk_slow","by":"output","seq":3,` +
+		`"elapsedS":4352,"kbps":25310,"droppedS":2,"file":"2026-10-24_1530.mp4","disk":{"state":"ready","fs":"exfat","label":"EIRL-REC",` +
+		`"sizeBytes":62008590336,"freeBytes":40000000000,"minutesLeft":212,"dirty":true}}`)
+	b, _ := json.Marshal(rec)
+	want := `{"mode":"on","state":"on","setting":"with_output","quality":"max","reason":"disk_slow","by":"output","seq":3,` +
+		`"elapsedS":4352,"kbps":25310,` +
+		`"droppedS":2,"file":"2026-10-24_1530.mp4","disk":{"state":"ready","fs":"exfat","label":"EIRL-REC",` +
+		`"sizeBytes":62008590336,"freeBytes":40000000000,"minutesLeft":212,"dirty":true}}`
+	if string(b) != want {
+		t.Errorf("record:\n got %s\nwant %s", b, want)
+	}
+
+	// Outside the lists: dropped or brought back to off/none; a file without its folder; counters not negative
+	rec = read(`{"mode":"yes","state":"recording","setting":"always","quality":"8k","reason":"cosmic_rays","detail":"srt://h:1?streamid=publish:` + strings.Repeat("k", 300) +
+		`","by":"cloud","seq":-4,"elapsedS":-1,"kbps":-5,"droppedS":-2,"file":"/media/eirl-rec/EnhancedIRL/2026-10-24_1530-2.mp4",` +
+		`"disk":{"state":"mounted","reason":"weird","fs":"ex fat","label":"Disk\u0007<b>","sizeBytes":-1,"freeBytes":-2,"minutesLeft":-3}}`)
+	switch {
+	case rec.Mode != "off" || rec.State != "off" || rec.Setting != "" || rec.Quality != "" || rec.Reason != "" || rec.By != "" || rec.Seq != 0:
+		t.Errorf("closed lists: %+v", rec)
+	case rec.ElapsedS != nil || rec.Kbps != nil || rec.DroppedS != nil:
+		t.Errorf("negative counters: %+v", rec)
+	case rec.File != "2026-10-24_1530-2.mp4":
+		t.Errorf("file %q", rec.File)
+	case strings.Contains(rec.Detail, "kkk") || len([]rune(rec.Detail)) > 200:
+		t.Errorf("detail not redacted or bounded: %q", rec.Detail)
+	case rec.Disk.State != "none" || rec.Disk.Reason != "" || rec.Disk.FS != "" || rec.Disk.Label != "Disk b":
+		t.Errorf("disk: %+v", rec.Disk)
+	case rec.Disk.SizeBytes != nil || rec.Disk.FreeBytes != nil || rec.Disk.MinutesLeft != nil:
+		t.Errorf("disk counters: %+v", rec.Disk)
+	}
+	for _, f := range []string{"../../etc/passwd", "a b.mp4", ".hidden.mp4", strings.Repeat("a", 101)} {
+		if rec := read(`{"mode":"on","state":"on","file":"` + f + `","disk":{"state":"ready"}}`); rec.File != "" && rec.File != "passwd" {
+			t.Errorf("file %q forwarded as %q", f, rec.File)
+		}
+	}
+	// Every reason of the contract goes through, and the helper's disk states and reasons
+	for r := range RecordReasons {
+		if rec := read(`{"mode":"off","state":"error","reason":"` + r + `","disk":{"state":"none"}}`); rec.Reason != r {
+			t.Errorf("reason %s dropped", r)
+		}
+	}
+	for _, d := range []string{`"state":"unsupported","reason":"fs_ntfs","fs":"ntfs"`, `"state":"error","reason":"readonly"`,
+		`"state":"checking"`, `"state":"unformatted"`, `"state":"ejected","fs":"fat32"`} {
+		rec := read(`{"mode":"off","state":"off","disk":{` + d + `}}`)
+		if b, _ := json.Marshal(rec.Disk); string(b) != "{"+d+"}" {
+			t.Errorf("disk %s forwarded as %s", d, b)
+		}
+	}
+}

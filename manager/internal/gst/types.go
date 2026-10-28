@@ -129,6 +129,13 @@ type Pipeline interface {
 	BaseTime() uint64
 	// Pop waits up to timeout for a message of the given types; nil if none.
 	Pop(timeout time.Duration, types MessageType) *Message
+	// SendEOS sends an end of stream into the pipeline (to its sources, as gst-launch -e does): its sinks
+	// get what was in flight and then EOS, which the bus says (MessageEOS). False if it is closed.
+	SendEOS() bool
+	// ZeroStart: before the pipeline plays, the running time of the appsrcs video and audio starts now (less a
+	// margin for the buffers on their way), with the same offset for both (a recording, RECORDING.md §5.4).
+	// After FixBase. False if one is missing.
+	ZeroStart(video, audio string) bool
 	// SetLatency forces the pipeline's latency (gst_pipeline_set_latency).
 	SetLatency(d time.Duration)
 	// Latency asks the pipeline its (minimum) latency; false if it does not answer.

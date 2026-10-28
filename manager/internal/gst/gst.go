@@ -151,6 +151,24 @@ func (p *pipeline) BaseTime() uint64 {
 	return uint64(C.eg_base_time(el))
 }
 
+func (p *pipeline) SendEOS() bool {
+	el, done := p.use()
+	defer done()
+	return el != nil && C.eg_send_eos(el) != 0
+}
+
+func (p *pipeline) ZeroStart(video, audio string) bool {
+	el, done := p.use()
+	defer done()
+	if el == nil {
+		return false
+	}
+	cv, ca := C.CString(video), C.CString(audio)
+	defer C.free(unsafe.Pointer(cv))
+	defer C.free(unsafe.Pointer(ca))
+	return C.eg_zero_start(el, cv, ca) != 0
+}
+
 func (p *pipeline) Pop(timeout time.Duration, types MessageType) *Message {
 	el, done := p.use()
 	if el == nil {

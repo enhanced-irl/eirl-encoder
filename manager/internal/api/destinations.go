@@ -386,6 +386,8 @@ func saveError(w http.ResponseWriter, r *http.Request, s *Server, err error) {
 		failErr(w, r, 409, "active", err)
 	case errors.Is(err, errNotFound):
 		failErr(w, r, 404, "not_found", err)
+	case errors.Is(err, errRecordingNow):
+		failErr(w, r, 409, "recording", err)
 	default:
 		s.Log.Error("save configuration", "err", err)
 		fail(w, r, 500, "internal", "common.save_failed")

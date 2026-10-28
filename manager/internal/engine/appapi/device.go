@@ -188,7 +188,8 @@ func (d *DeviceState) Watch(w ui.AppWatch) {
 	}
 	if (w.Device && !old.Device) || (w.Setup && !old.Setup) || (w.Update && !old.Update) || (w.Slots && !old.Slots) ||
 		(w.Zones && !old.Zones) || (w.Cloud && !old.Cloud) || (w.About && !old.About) || (w.Dest && !old.Dest) ||
-		(w.Status && !old.Status) || (w.Sources && !old.Sources) || (w.Bluetooth && !old.Bluetooth) {
+		(w.Status && !old.Status) || (w.Sources && !old.Sources) || (w.Bluetooth && !old.Bluetooth) ||
+		(w.Recording && !old.Recording) {
 		d.kick = true
 	}
 	d.mu.Unlock()
@@ -312,14 +313,14 @@ func (d *DeviceState) take() (q *queued, kick bool, w ui.AppWatch, snap ui.AppSn
 }
 
 func (d *DeviceState) loop() {
-	var dev, setup, upd, slots, zones, cloud, about, dest, status, srcs, bt time.Time
+	var dev, setup, upd, slots, zones, cloud, about, dest, status, srcs, bt, rec time.Time
 	timer := time.NewTimer(time.Hour)
 	defer timer.Stop()
 	for d.ctx.Err() == nil {
 		q, kick, w, snap := d.take()
 		if kick {
 			dev, setup, upd, slots, cloud, about = time.Time{}, time.Time{}, time.Time{}, time.Time{}, time.Time{}, time.Time{}
-			dest, status, srcs, bt = time.Time{}, time.Time{}, time.Time{}, time.Time{}
+			dest, status, srcs, bt, rec = time.Time{}, time.Time{}, time.Time{}, time.Time{}, time.Time{}
 			if snap.Zones == nil {
 				zones = time.Time{}
 			}
@@ -341,6 +342,8 @@ func (d *DeviceState) loop() {
 				cloud = time.Time{}
 			case "bt_power", "bt_scan", "bt_visible", "bt_device", "bt_use":
 				bt = time.Time{}
+			case "rec_settings", "rec_eject", "rec_format":
+				rec = time.Time{}
 			}
 			d.changed()
 			continue
@@ -380,6 +383,7 @@ func (d *DeviceState) loop() {
 		due(&srcs, every(snap.SourcesAPI, false, SourcesEvery, SourcesEvery), w.Sources, d.pollSources)
 		due(&bt, every(snap.BluetoothAPI, btFast(snap.Bluetooth), BluetoothEvery, BluetoothFast), w.Bluetooth,
 			d.pollBluetooth)
+		due(&rec, every(snap.RecordingAPI, false, RecordingEvery, RecordingEvery), w.Recording, d.pollRecording)
 		if news {
 			d.changed()
 		}

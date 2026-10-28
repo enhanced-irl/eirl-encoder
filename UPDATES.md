@@ -334,10 +334,10 @@ tested with `tools/ota-sim.sh` (which includes that recovery) before they are pu
 
 | Route | Response |
 |---|---|
-| `GET /update` | `{"current","state","available":{"version","notes","size","released"}\|null,"progress":0-1,"lastCheck"\|null,"error"?,"message"?}`. Additive fields: `app` (running binary), `streaming`, `canInstall`, `blocked` (`streaming` \| `not_ready` \| `busy`) with `blockedMessage`, `lastResult` (`state` installed/rolled_back/failed/refused, `from`, `to`, `error`, `message`, `startedAt`, `finishedAt`), `autoCheck`, `testBuild`, `versions` |
+| `GET /update` | `{"current","state","available":{"version","notes","size","released"}\|null,"progress":0-1,"lastCheck"\|null,"error"?,"message"?}`. Additive fields: `app` (running binary), `streaming`, `canInstall`, `blocked` (`streaming` \| `recording` \| `not_ready` \| `busy`) with `blockedMessage`, `lastResult` (`state` installed/rolled_back/failed/refused, `from`, `to`, `error`, `message`, `startedAt`, `finishedAt`), `autoCheck`, `testBuild`, `versions` |
 | `POST /update/check` | `202` with the same body (the check runs in the background); `409 busy` while installing |
-| `POST /update/install` | `202`; `409 streaming`, `409 not_ready` (nothing verified downloaded yet), `409 busy`; `500 helper_failed` |
-| `POST /update/reboot` | Restart to finish an update (§12.5): `202 {"rebooting":true}`; `409 streaming`, `409 busy` (an update installs), `409 nothing_pending`; `503 power_unavailable`, `500 power_failed` |
+| `POST /update/install` | `202`; `409 streaming` (`409 recording` while only a local recording runs, RECORDING.md §6.4), `409 not_ready` (nothing verified downloaded yet), `409 busy`; `500 helper_failed` |
+| `POST /update/reboot` | Restart to finish an update (§12.5): `202 {"rebooting":true}`; `409 streaming` (or `recording`), `409 busy` (an update installs), `409 nothing_pending`; `503 power_unavailable`, `500 power_failed` |
 
 `GET /update` also has, additively: `downloadWaits` (`metered`: the automatic download waits for Wi-Fi or a cable, §12.7)
 with `downloadWaitsMessage`, and `system` (absent where the board has no system layer state): `release`, `appliedAt`,
@@ -526,7 +526,7 @@ our software: app, engine, helpers (files.txt)        OTA (§1-§11)
 | File | What |
 |---|---|
 | `tools/image/base.lock` | The frozen base: the packages of the image of 0.7.0 (recipe `0f07c8317eb5`), exactly. It never changes. Its `.deb` files are kept by the maintainers (`tools/image/base-debs.sh`, 474 packages, Oct 21), so the image can be rebuilt even when Ubuntu stops serving a version (`tools/image/build.sh --base-debs`) |
-| `system/packages.txt` | The Ubuntu packages added on top of the base, with why (`usbmuxd` today) |
+| `system/packages.txt` | The Ubuntu packages added on top of the base, with why (`usbmuxd`; `exfat-fuse`, `exfat-utils` and `dosfstools` for local recordings, RECORDING.md §4) |
 | `system/packages.lock` | Their closure over the base, exactly: name, version, arch, sha256, size, installed size, source package and version, path in Ubuntu's archive. `build/system.sh --update-lock` resolves it in an Ubuntu 18.04 arm64 container whose dpkg database is the base (each package's record from Ubuntu's signed archive) |
 | `system/built.txt` | What comes from `build/out`: our modules and firmware (`build/build.sh`), BlueALSA's ALSA plugins and their configuration (`build/bluealsa.sh`). Where each goes, which file it is, its area and its flags (`reboot`, `usedBy=`) |
 | `system/modules.lock` | The sha256 of every module `build/build.sh` builds. Its builds are reproducible (the 8 modules of the test board, built on Oct 16, and those built on Oct 21 are the same bytes), so a changed module is a reviewed change, never an accident |

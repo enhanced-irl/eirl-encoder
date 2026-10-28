@@ -73,8 +73,9 @@ func Main(args []string, stdout, stderr io.Writer, h *Hubs, emitting func() (on,
 	return 1
 }
 
-// EngineEmitting asks the engine's socket whether it is emitting (`get`, state.output.mode == "on").
-// known=false if it does not answer within 3 s or the answer lacks that field.
+// EngineEmitting asks the engine's socket whether it is emitting (`get`, state.output.mode == "on") or
+// recording to a USB disk (state.record.mode == "on": the cut would power the disk off too, RECORDING.md
+// §5.5). known=false if it does not answer within 3 s or the answer lacks output.mode.
 func EngineEmitting(sock string) func() (on, known bool) {
 	return func() (bool, bool) {
 		c, err := net.DialTimeout("unix", sock, 3*time.Second)
@@ -95,11 +96,15 @@ func EngineEmitting(sock string) func() (on, known bool) {
 				Output *struct {
 					Mode *string `json:"mode"`
 				} `json:"output"`
+				Record *struct {
+					Mode string `json:"mode"`
+				} `json:"record"`
 			} `json:"state"`
 		}
 		if json.Unmarshal(line, &reply) != nil || reply.State == nil || reply.State.Output == nil || reply.State.Output.Mode == nil {
 			return false, false
 		}
-		return *reply.State.Output.Mode == "on", true
+		recording := reply.State.Record != nil && reply.State.Record.Mode == "on"
+		return *reply.State.Output.Mode == "on" || recording, true
 	}
 }

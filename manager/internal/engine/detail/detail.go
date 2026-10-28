@@ -81,6 +81,7 @@ var texts = map[string]func(map[string]string) string{
 	},
 	"hung_given_up":       fixed("colgada: desenchúfala y vuelve a enchufarla"),
 	"hung_on_air_unknown": fixed("colgada: emitiendo no la reinicio (no sé qué hay al aire)"),
+	"hung_recording":      fixed("colgada: grabando no la reinicio (cortaría el disco)"),
 	"hung_on_air": func(a map[string]string) string { // only through HungOnAir: the text needs the names
 		return "colgada: reiniciarla apagaría " + a["shown"] + " (al aire)"
 	},

@@ -19,6 +19,7 @@
 #   eirl-enginectl lock on|off            # bloquear la pantalla táctil
 #   eirl-enginectl output on|off          # emitir / dejar de emitir en caliente (solo el motor: la
 #                                               # app guarda OUTPUT aparte; para el uso normal, la web)
+#   eirl-enginectl record on|off          # local recording (RECORDING.md §5.2): refused with REC_MODE=off or no disk
 #   eirl-enginectl auto 5 [minutos]       # cambia de escena cada 5 s (fuentes, composición, transición)
 #   eirl-enginectl camera 2               # a USB camera's image settings (SOURCES.md §7), as JSON
 #   eirl-enginectl camera 2 brightness 140   # change one (an integer; a switch is 0 or 1)
@@ -71,10 +72,12 @@ def summary(st):
     names = {s['id']: s['name'] for s in st['sources']}
     srcs = ' | '.join('%d %s %s %.0f fps' % (s['slot'], s['name'], s['state'], s['fps']) for s in st['sources'])
     o = st.get('output', {})
-    return '%s al aire %s, 2.ª %s, %s, programa %s fps | %s | pantalla %s | salida %s/%s%s' % (
+    r = st.get('record')
+    rec = ' | rec %s/%s%s' % (r.get('mode'), r.get('state'), ' (%s)' % r['reason'] if r.get('reason') else '') if r else ''
+    return '%s al aire %s, 2.ª %s, %s, programa %s fps | %s | pantalla %s | salida %s/%s%s%s' % (
         time.strftime('%H:%M:%S'), names.get(p['main'], p['main']), names.get(p['secondary'], p['secondary']),
         p['layout'] + '/' + p['transition'], p.get('measuredFps'), srcs, st['screen']['state'],
-        o.get('mode'), o.get('state'), ' (%s)' % o['reason'] if o.get('reason') else '')
+        o.get('mode'), o.get('state'), ' (%s)' % o['reason'] if o.get('reason') else '', rec)
 
 
 def main():
@@ -200,7 +203,7 @@ def main():
                 kw['size'] = int(x)
             else:
                 ap.error('pip tl|tr|bl|br [25|33]')
-    elif a.cmd in ('output', 'pause', 'lock'):
+    elif a.cmd in ('output', 'pause', 'lock', 'record'):
         if not a.args or a.args[0] not in ('on', 'off'):
             ap.error('%s on|off' % a.cmd)
         kw['on'] = a.args[0] == 'on'

@@ -83,6 +83,7 @@ eirl-encoder/
 ├─ manager/                  ← `eirl-encoderd` (Go, static binary: web, API, destinations, network, modems, cloud link)
 │                               + deploy/ (units, drop-ins, sudoers, uplinks dispatcher 90-eirl-uplinks, install.sh)
 │                               + `eirl-netsetup` (the cameras' network: AP, DHCP, firewall, MediaMTX) + `eirl-fan`
+│                               + `eirl-storage` (the USB disk of local recordings, RECORDING.md §4)
 │                               + `eirl-splash` + `eirl-update` / `eirl-release` (OTA) + `eirl-encoder-sim` + `eirl-ui-render`
 ├─ manager/deploy/eirl-engine.default ← the board settings → /etc/default/eirl-engine (install.sh creates it if missing)
 ├─ scripts/eirl-engine-start ← the service's ExecStart: runs eirl-engine-go (MALLOC_ARENA_MAX=2, GOGC=50)

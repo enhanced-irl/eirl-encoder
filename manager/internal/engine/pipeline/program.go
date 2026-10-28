@@ -24,6 +24,9 @@ type Program struct {
 	ThumbEvery              int // s
 	ThumbFile               string
 	Screen                  bool // pgmtap: the program, small, for the screen's multiview
+	// Record: recv/reca, the local recording's taps (RECORDING.md §2). The converter's pool grows by 4: a
+	// recording session holds program buffers too until its own converter has copied them
+	Record bool
 }
 
 // ScreenFPS is the multiview's rate (MV_FPS): a 7" screen to look at, half the conversions.
@@ -52,9 +55,13 @@ func (p Platform) Program(c Program) string {
 	}
 	w(src+" ! queue max-size-buffers=6 leaky=downstream ! %s output-buffers=10 ! %s,format=RGBA ! pgm.sink_%d",
 		"mp", nv12, p.Convert, p.Mem, c.Slots)
+	pool := 12
+	if c.Record {
+		pool = 16
+	}
 	w("%s name=pgm background=black latency=%d ! %s,format=RGBA,width=%d,height=%d,framerate=%d/1 ! identity name=vsrc "+
-		"! %s output-buffers=12 ! %s,format=NV12,width=%d,height=%d ! tee name=vt",
-		p.Compositor, c.LatencyNs, p.Mem, c.Width, c.Height, c.FPS, p.Convert, p.Mem, c.Width, c.Height)
+		"! %s output-buffers=%d ! %s,format=NV12,width=%d,height=%d ! tee name=vt",
+		p.Compositor, c.LatencyNs, p.Mem, c.Width, c.Height, c.FPS, p.Convert, pool, p.Mem, c.Width, c.Height)
 
 	acaps := "audio/x-raw,format=S16LE,rate=48000,channels=2"
 	w("audiotestsrc is-live=true wave=silence ! %s ! amix.", acaps)
@@ -76,6 +83,12 @@ func (p Platform) Program(c Program) string {
 	w("at. ! queue leaky=downstream max-size-buffers=12 ! valve name=phvalve drop=true " +
 		"! appsink name=phtap emit-signals=false sync=false async=false max-buffers=12 drop=true enable-last-sample=false")
 
+	if c.Record {
+		w("vt. ! queue leaky=downstream max-size-buffers=2 " +
+			"! appsink name=recv emit-signals=false sync=false async=false max-buffers=1 drop=true enable-last-sample=false")
+		w("at. ! queue leaky=downstream max-size-buffers=12 " +
+			"! appsink name=reca emit-signals=false sync=false async=false max-buffers=12 drop=true enable-last-sample=false")
+	}
 	if c.Live {
 		// A second, small hardware encode (Baseline, IDR every second so whoever opens the preview does
 		// not wait) and the program audio in Opus, by RTP to localhost; the app forwards them. The app
@@ -199,4 +212,41 @@ func (p Platform) Output(c Output) string {
 		return d + " ! tee name=rt rt. ! queue ! " + sink + " rt. ! queue ! filesink location=" + c.Record + " sync=false async=false"
 	}
 	return d + " ! " + sink
+}
+
+// Recording is a local recording session's pipeline (RECORDING.md §2): fed by recv/reca through pass
+// bridges, its own encode at the program's size and rate, and fragmented MP4 to the appsink `rout`, which
+// the recorder's writer drains. VBR with a peak 20 % above the bitrate, a keyframe every second (each
+// fragment of 1 s starts with one: what lets a FAT32 split start a new file without re-encoding).
+type Recording struct {
+	Width, Height, FPS int    // the program's: the appsrc's caps
+	Codec              string // h264 | h265
+	VKbps, AKbps       int
+	Profile, Preset    int    // Profile is H.264's (H.265 is always Main)
+	AEnc               string // voaacenc | avenc_aac
+}
+
+// Recording builds the recording session's pipeline. As in the output, the converter to I420 copies each
+// frame into the recording's own pool (an encoder that imports the program's buffers keeps them). mp4mux
+// wants H.264 as avc and H.265 as hvc1 (the tag QuickTime opens), which the parsers convert to.
+func (p Platform) Recording(c Recording) string {
+	kbps := c.VKbps * 1000
+	enc := fmt.Sprintf(`%s name=renc control-rate=0 bitrate=%d peak-bitrate=%d iframeinterval=%d idrinterval=%d `+
+		`profile=%d preset-level=%d maxperf-enable=true insert-sps-pps=true insert-vui=true poc-type=2 `+
+		`! h264parse ! video/x-h264,stream-format=avc,alignment=au`, p.H264Enc, kbps, kbps*6/5, c.FPS, c.FPS, c.Profile, c.Preset)
+	if c.Codec == "h265" {
+		enc = fmt.Sprintf(`%s name=renc control-rate=0 bitrate=%d peak-bitrate=%d iframeinterval=%d idrinterval=%d `+
+			`preset-level=%d maxperf-enable=true insert-sps-pps=true insert-vui=true `+
+			`! h265parse ! video/x-h265,stream-format=hvc1,alignment=au`, p.H265Enc, kbps, kbps*6/5, c.FPS, c.FPS, c.Preset)
+	}
+	return fmt.Sprintf(`appsrc name=rv is-live=true format=time do-timestamp=false max-bytes=0 block=false `+
+		`caps="%s,format=NV12,width=%d,height=%d,framerate=%d/1" `+
+		`! queue max-size-buffers=2 leaky=downstream ! %s output-buffers=6 ! %s,format=I420 `+
+		`! %s ! queue ! rmux. `+
+		`appsrc name=ra is-live=true format=time do-timestamp=false max-bytes=0 block=false `+
+		`caps="audio/x-raw,format=S16LE,rate=48000,channels=2,layout=interleaved" `+
+		`! queue max-size-buffers=100 leaky=downstream ! audioconvert ! %s bitrate=%d ! aacparse ! queue ! rmux. `+
+		`mp4mux name=rmux fragment-duration=1000 streamable=true `+
+		`! appsink name=rout emit-signals=false sync=false async=false max-buffers=256 drop=false enable-last-sample=false`,
+		p.Mem, c.Width, c.Height, c.FPS, p.Convert, p.Mem, enc, c.AEnc, c.AKbps*1000)
 }

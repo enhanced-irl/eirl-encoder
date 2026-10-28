@@ -332,7 +332,13 @@ func (u *UI) draw(c *Canvas, now time.Time) {
 	} else if trying {
 		dot = cWarn
 	}
-	c.FillCircle(x+6*s, mid, 6*s, dot)
+	// The local recording, on a second line under the stream's state (RECORDING.md §6.5's words)
+	rl := u.recHeadLine(now)
+	dotY, headY := mid, base
+	if rl.main != "" {
+		dotY, headY = mid-9*s, mid-2*s
+	}
+	c.FillCircle(x+6*s, dotY, 6*s, dot)
 	why := tx.Reasons[out.Reason]
 	hsize := 19.0
 	var head string
@@ -361,7 +367,16 @@ func (u *UI) draw(c *Canvas, now time.Time) {
 		head = tx.NotEmitting
 	}
 	x += 20 * s
-	leftEdge := x + d.text(x, base, head, hsize*s, textOpt{col: cInk, bold: true, width: sw * 0.3})
+	leftEdge := x + d.text(x, headY, head, hsize*s, textOpt{col: cInk, bold: true, width: sw * 0.3})
+	if rl.main != "" {
+		ry := mid + 17*s
+		c.FillCircle(x-14*s, ry-4.5*s, 5*s, rl.dot)
+		w := d.text(x, ry, rl.main, 14*s, textOpt{col: rl.col, bold: true, width: sw * 0.36})
+		if rl.tail != "" {
+			w += d.text(x+w, ry, tx.Sep+rl.tail, 14*s, textOpt{col: rl.tailColor, width: sw*0.36 - w})
+		}
+		leftEdge = max(leftEdge, x+w)
+	}
 	// On the right, next to the buttons, the board's temperature and voltage
 	var hw []string
 	low := false
@@ -628,6 +643,7 @@ func (u *UI) drawVideoView(d *dc, live, trying bool, holding func(string) (float
 		k := pw / float64(W)
 		d.frame(px+float64(r.X)*k, py+float64(r.Y)*k, float64(r.W)*k, float64(r.H)*k, cGood, 2.5, 4*s)
 	}
+	u.drawPlugWarn(d) // a disk plugged in while live: over the program, for a while
 
 	// --- composition, transition and emit ---
 	d.text(float64(lay.Labels["layout"][0]), float64(lay.Labels["layout"][1]), tx.LayoutLabel, 16*s, textOpt{col: cQuiet})
@@ -653,6 +669,8 @@ func (u *UI) drawVideoView(d *dc, live, trying bool, holding func(string) (float
 	d.button("fade", btn{label: tx.Fade, active: prog.Transition == "fade"})
 	eb := btn{active: true}
 	eb.progress, eb.hasProg = holding("emit")
+	rb := RecButtonState(st.Record)
+	lay.RecRow(rb.Shown)
 	switch {
 	case live:
 		eb.label, eb.col, eb.sub, eb.hasSub = tx.EmitLive, colp(cBad), tx.EmitHoldStop, true
@@ -660,8 +678,18 @@ func (u *UI) drawVideoView(d *dc, live, trying bool, holding func(string) (float
 		eb.label, eb.col, eb.sub, eb.hasSub = tx.EmitConnecting, colp(cWarn), tx.EmitHoldStop, true
 	default:
 		eb.label, eb.col, eb.sub, eb.hasSub = tx.Emit, colp(cBrand), tx.EmitHold, true
+		// REC_MODE=with_output: Go live records too (a disk ready), or says why it will not
+		if rec, noRec := EmitRecText(st.Record); rec {
+			eb.label = tx.Rec.EmitRec
+		} else if noRec != "" {
+			eb.sub, eb.subCol = tx.Rec.EmitNoRec[noRec], colp(cWarn)
+		}
 	}
 	d.button("emit", eb)
+	if rb.Shown {
+		p, held := holding("rec")
+		u.drawRecButton(d, rb, p, held)
+	}
 	au := st.Audio
 	if au != nil {
 		// The audio view: the mixer (what sounds, volumes, mode)

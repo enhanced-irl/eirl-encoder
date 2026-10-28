@@ -2,3 +2,6 @@
 # one per line, with why (UPDATES.md §12). build/system.sh --update-lock resolves them with their dependencies into
 # system/packages.lock, which is what boards and images install: review its diff.
 usbmuxd   # an iPhone's USB tethering (MODEMS.md §12): it switches the iPhone to its tethering configuration
+exfat-fuse   # local recording to a USB disk (RECORDING.md §4): mounts exFAT (FUSE; the 4.9 kernel has no exFAT driver)
+exfat-utils  # local recording: fsck.exfat (the read-only check when a disk is mounted) and mkfs.exfat (formatting)
+dosfstools   # local recording: fsck.vfat -n (the read-only check of a FAT32 disk when it is mounted)

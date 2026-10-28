@@ -23,7 +23,8 @@
 // Bluetooth input, a phone sending nothing, in the free strip)
 // +gone (audioset: a camera linked to an input that is unplugged) +nophones +ant3 +ant1 +antnoinet +antsearch +anterror (the former tools/ui_render.py's header explained each) +apoff
 // («Create my Wi-Fi» off, its name known: e.g. wizard-3-network+apoff). The Settings pages' variants (settings-…) are
-// listed in app.go, stream.go and bluetooth.go (settings-bluetooth…: Settings › Wireless › Bluetooth).
+// listed in app.go, stream.go and bluetooth.go (settings-bluetooth…: Settings › Wireless › Bluetooth); the local
+// recording's, on the main screen (rec-…) and its page (settings-recording-…: Settings › Stream › Recording), in rec.go.
 package main
 
 import (
@@ -263,6 +264,7 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir, frames string
 	if variant == "locked" {
 		st["screen"].(map[string]any)["locked"] = true
 	}
+	recState(variant, st)
 	settings := strings.HasPrefix(variant, "settings")
 	wizard := strings.HasPrefix(variant, "wizard-")
 	var net *fakeNet
@@ -380,6 +382,7 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir, frames string
 			app.snap.Device = &ui.DeviceInfo{Language: tx.Code} // only so the language stays
 		}
 		btFake(variant, &app.snap)
+		recApp(variant, st, &app.snap, now)
 	}
 	if has("noalias") && app.snap.Slots != nil {
 		for i := range app.snap.Slots.Slots {
@@ -569,6 +572,7 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir, frames string
 		cameraPreview(p, variant)
 		btPreview(p, variant)
 	}
+	recPreview(u, p, variant, status)
 	if strings.HasPrefix(variant, "settingsnets") {
 		p.OpenNetworks()
 		if variant == "settingsnets2" {

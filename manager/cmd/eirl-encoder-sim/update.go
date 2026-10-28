@@ -14,7 +14,8 @@ import (
 // simUpdate: a fake updater with the contract's shape (UPDATES.md; CONTRACT §4): GET /update, POST /update/check,
 // POST /update/install and POST /update/reboot. A check finds 0.2.0 (checking 1.5 s → available 3 s → downloading 8 s →
 // ready); installing takes 6 s and ends idle on 0.2.0, its system layer waiting for a restart (HDMI input, modems).
-// Installing while streaming: 409 streaming; before ready: 409 not_ready. Restarting: 409 streaming | nothing_pending;
+// Installing while streaming: 409 streaming (recording without streaming: 409 recording, RECORDING.md §6.4); before ready:
+// 409 not_ready. Restarting: 409 streaming | recording | nothing_pending;
 // it "restarts" at once (the pending areas are cleared). -update metered: 0.2.0 is known and waits for Wi-Fi (a check
 // downloads it); restart: on 0.2.0 with the restart pending; sysfailed: its system layer did not install.
 type simUpdate struct {
@@ -59,6 +60,8 @@ type simUpdateView struct {
 	LastCheck        *time.Time      `json:"lastCheck"`
 	Error            string          `json:"error,omitempty"`
 	Streaming        bool            `json:"streaming"`
+	Blocked          string          `json:"blocked,omitempty"`
+	BlockedMsg       string          `json:"blockedMessage,omitempty"`
 	DownloadWaits    string          `json:"downloadWaits,omitempty"`
 	DownloadWaitsMsg string          `json:"downloadWaitsMessage,omitempty"`
 	System           *simSystemView  `json:"system,omitempty"`
@@ -112,6 +115,9 @@ func (u *simUpdate) view(lang string) simUpdateView {
 	now := time.Now()
 	u.advance(now)
 	v := simUpdateView{Current: u.current, State: u.state, LastCheck: u.lastCheck, Streaming: u.eng.streaming()}
+	if busy := u.busy(); busy != "" && u.state == "ready" {
+		v.Blocked, v.BlockedMsg = busy, i18n.Msg(lang, "update."+busy)
+	}
 	if u.metered && u.state == "available" {
 		v.DownloadWaits, v.DownloadWaitsMsg = "metered", i18n.Msg(lang, "update.waits.metered")
 	}
@@ -144,6 +150,18 @@ func (u *simUpdate) view(lang string) simUpdateView {
 	return v
 }
 
+// busy: why the engine is busy for an update, like the app's (streaming first: with with_output, stopping the stream
+// also stops its recording); "" if it is not.
+func (u *simUpdate) busy() string {
+	switch {
+	case u.eng.streaming():
+		return "streaming"
+	case u.eng.recordingNow():
+		return "recording"
+	}
+	return ""
+}
+
 func (u *simUpdate) handler(dev *device.Store) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		lang, ok := i18n.LangFrom(r.Context())
@@ -172,8 +190,8 @@ func (u *simUpdate) handler(dev *device.Store) http.Handler {
 			u.mu.Unlock()
 			reply(202, u.view(lang))
 		case "POST /api/v1/update/install":
-			if u.eng.streaming() {
-				fail(409, "streaming", "update.streaming")
+			if busy := u.busy(); busy != "" {
+				fail(409, busy, "update."+busy)
 				return
 			}
 			u.mu.Lock()
@@ -192,11 +210,12 @@ func (u *simUpdate) handler(dev *device.Store) http.Handler {
 			u.mu.Lock()
 			pending := len(u.pending) > 0
 			u.mu.Unlock()
+			busy := u.busy()
 			switch {
 			case !pending:
 				fail(409, "nothing_pending", "update.nothing_pending")
-			case u.eng.streaming():
-				fail(409, "streaming", "update.reboot_streaming")
+			case busy != "":
+				fail(409, busy, "update.reboot_"+busy)
 			default:
 				u.mu.Lock()
 				u.pending = nil // the simulator "restarts" at once

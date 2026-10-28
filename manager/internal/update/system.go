@@ -15,7 +15,8 @@ import (
 
 // Streaming reports whether the engine is streaming (or trying to), from its run directory
 // (/run/eirl-engine). It reads both files in one go, like tools/deploy-engine.sh:
-//   - mixer.json (the live engine state, MIXER.md §5): output.mode "on", or output.state connecting/on;
+//   - mixer.json (the live engine state, MIXER.md §5): output.mode "on", or output.state connecting/on, or
+//     record.mode "on" (a local recording to a USB disk counts the same, RECORDING.md §5.5);
 //   - without a readable mixer.json, the state file of the launcher: OUTPUT=on (output at start).
 //
 // With the mixer, the state file only says how the engine STARTED (output can be switched off live), so
@@ -29,9 +30,14 @@ func Streaming(runDir string) (bool, string) {
 				Mode  string `json:"mode"`
 				State string `json:"state"`
 			} `json:"output"`
+			Record *struct {
+				Mode string `json:"mode"`
+			} `json:"record"`
 		}
 		if json.Unmarshal(b, &st) == nil && st.Output != nil {
 			switch {
+			case st.Record != nil && st.Record.Mode == "on":
+				return true, "mixer.json record.mode=on"
 			case st.Output.Mode == "on":
 				return true, "mixer.json output.mode=on"
 			case st.Output.State == "on" || st.Output.State == "connecting":

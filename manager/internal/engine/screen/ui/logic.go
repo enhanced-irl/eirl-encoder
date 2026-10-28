@@ -12,7 +12,7 @@ import (
 // Times and limits of the touch logic (engine_mixer.py).
 const (
 	TapLong     = 600 * time.Millisecond // long press on a tile = to the PiP; on erase = all
-	Hold        = time.Second            // held: Emit / Stop, Unlock
+	Hold        = time.Second            // held: Emit / Stop, REC, Unlock
 	HoldPower   = 2 * time.Second        // held: Reboot / Power off in the Power menu
 	PowerWait   = 20 * time.Second       // «Reiniciando…» before giving the request up
 	SecretGrace = 2 * time.Second        // after closing Settings, screen.jpg stays frozen
@@ -232,7 +232,7 @@ func AudioCommand(what string, y int, au *AudioStatus, lay *Layout) map[string]a
 	return map[string]any{"cmd": "audio_mix", "source": a.ID, "gain": max(GainMin, min(GainMax, round1(g)))}
 }
 
-// HoldKey is the button to hold under the finger, or "": Emit/Stop (not by a brush), Unlock when locked
+// HoldKey is the button to hold under the finger, or "": Emit/Stop and REC (not by a brush), Unlock when locked
 // (the only thing it answers) and, in the Power menu, Reboot and Power off.
 func HoldKey(h Hit, locked, menu bool) string {
 	if h.Kind != HitButton {
@@ -253,8 +253,8 @@ func HoldKey(h Hit, locked, menu bool) string {
 		}
 		return ""
 	}
-	if h.Key == "emit" {
-		return "emit"
+	if h.Key == "emit" || h.Key == "rec" {
+		return h.Key
 	}
 	return ""
 }

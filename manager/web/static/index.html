@@ -544,6 +544,53 @@ sudo systemctl restart eirl-encoderd</pre>
         </div>
       </section>
 
+      <!-- Local recording to a USB disk (RECORDING.md §6.5): its state and REC, the mode and the quality, and the disk
+           (eject, format). settings.js, from status.mixer.record and GET /recording; an older engine sends no record and
+           the card stays hidden -->
+      <section id="recording-card" class="card" aria-labelledby="rec-title" hidden>
+        <div class="card-head"><h3 id="rec-title" class="card-title" data-i18n="rec.title"></h3></div>
+        <div class="rec-bar">
+          <div class="rec-now">
+            <p id="rec-line" class="rec-line"></p>
+            <p id="rec-sub" class="sub" hidden></p>
+          </div>
+          <button id="rec-btn" class="btn" type="button" aria-describedby="rec-why"></button>
+        </div>
+        <p id="rec-why" class="hint" hidden></p>
+        <div class="form rec-set">
+          <label for="rec-mode" data-i18n="rec.mode"></label>
+          <select id="rec-mode" aria-describedby="rec-mode-hint"></select>
+          <p id="rec-mode-hint" class="hint"></p>
+          <div id="rec-mode-ask" class="dests-ask" role="alertdialog" hidden>
+            <p></p>
+            <div class="form-actions"><button class="btn small ghost" type="button" data-ask="no" data-i18n="common.cancel"></button><button class="btn small primary" type="button" data-ask="yes"></button></div>
+          </div>
+          <label for="rec-quality" data-i18n="rec.quality"></label>
+          <select id="rec-quality" aria-describedby="rec-quality-hint"></select>
+          <p id="rec-quality-hint" class="hint"></p>
+        </div>
+        <div class="rec-disk">
+          <div class="rec-disk-head"><h4 id="rec-disk-title" class="sub-title" data-i18n="rec.disk"></h4><span id="rec-disk-state" class="sub"></span></div>
+          <p id="rec-disk-hint" class="hint" hidden></p>
+          <div id="rec-disk-info" class="rec-dinfo" hidden>
+            <p id="rec-disk-name" class="rec-dname"></p>
+            <p id="rec-disk-meta" class="rec-dmeta"></p>
+            <p id="rec-disk-time" class="rec-dmeta" hidden></p>
+          </div>
+          <div id="rec-warns" class="uplinks-warn rec-warns" role="status" hidden></div>
+          <div id="rec-format-ask" class="dests-ask" role="alertdialog" hidden>
+            <p></p>
+            <div class="form-actions"><button class="btn small ghost" type="button" data-ask="no" data-i18n="common.cancel"></button><button class="btn small primary" type="button" data-ask="yes"></button></div>
+          </div>
+          <p id="rec-busy" class="hint" aria-live="polite" hidden></p>
+          <p id="rec-disk-why" class="hint" hidden></p>
+          <div class="form-actions">
+            <button id="rec-eject" class="btn small" type="button" data-i18n="rec.eject" hidden></button>
+            <button id="rec-format" class="btn small danger" type="button" data-i18n="rec.format" hidden></button>
+          </div>
+        </div>
+      </section>
+
       <section class="card" aria-labelledby="input-title">
         <div class="card-head">
           <h3 id="input-title" class="card-title" data-i18n="input.title"></h3>

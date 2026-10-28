@@ -29,7 +29,8 @@ import (
 // security checks and messages as eirl-encoderd, with fakes underneath: the stream unit, the HDMI signal, an
 // engine on a Unix socket (mixer state, slots with a catalogue, live commands), the clock and hostname
 // (device.MemSystem), the EnhancedIRL linking (a code that is approved after 30 s), the updater (/update, a state
-// machine idle → available 0.2.0 → downloading → ready → installing → idle) and the board's access point (network.go).
+// machine idle → available 0.2.0 → downloading → ready → installing → idle), the board's access point (network.go) and
+// the local recording with its USB disk, plugged and pulled through <data>/disk (recording.go).
 
 // simPassword: the admin password of the simulator outside -fresh (it is a simulator: not a secret).
 const simPassword = "eirl-sim-1234"
@@ -38,6 +39,8 @@ type localOpts struct {
 	addr, socket, dataDir, webDir, hwID string
 	fresh                               bool
 	update                              string // the fake updater's start (newSimUpdate)
+	disk                                string // what <data>/disk says at start ("" = leave it as it is)
+	recPowerLost                        bool   // the engine starts as after a power cut while recording
 }
 
 func runLocal(ctx context.Context, o localOpts, log *slog.Logger) error {
@@ -89,10 +92,15 @@ func runLocal(ctx context.Context, o localOpts, log *slog.Logger) error {
 		return err
 	}
 	go func() { <-ctx.Done(); os.RemoveAll(sockDir) }()
-	eng, err := startSimEngine(ctx, sockDir, log)
+	disk, err := newSimStorage(o.dataDir, o.disk, log)
 	if err != nil {
 		return err
 	}
+	eng, err := startSimEngine(ctx, sockDir, disk, o.recPowerLost, log)
+	if err != nil {
+		return err
+	}
+	go disk.run(ctx)
 
 	var webFS fs.FS = web.FS()
 	if o.webDir != "" {
@@ -114,6 +122,8 @@ func runLocal(ctx context.Context, o localOpts, log *slog.Logger) error {
 		Device:       st, System: sys, Zones: &device.Zones{Sys: sys}, SetupCodePath: codePath,
 		Versions:  api.Versions{ReleaseFile: filepath.Join(o.dataDir, "VERSION"), EngineFile: filepath.Join(o.dataDir, "ENGINE")},
 		SlotsPath: filepath.Join(o.dataDir, "slots.json"),
+		// The local recording's disk: the fake helper's state file, its eject and format
+		StoragePath: disk.statePath, StorageRunner: disk,
 	}
 	// The board's access point (a fake eirl-netsetup), with its name and password from the first start like the app
 	if o.hwID == "" {
@@ -160,6 +170,13 @@ func runLocal(ctx context.Context, o localOpts, log *slog.Logger) error {
 		writeRunState(cfg.EffectiveProtocol())
 		return cfg.EffectiveProtocol(), cfg.Codec(), cfg.OutputSize, fps
 	}
+	eng.recConfig = func() (string, string) {
+		cfg, err := srv.Config.Load()
+		if err != nil {
+			return config.RecOff, config.DefaultRecQuality
+		}
+		return cfg.RecMode, cfg.RecQuality
+	}
 	// A restart of the "stream" makes the engine take OUTPUT from what is saved, like the real one at start
 	unit.onStart = func() {
 		if cfg, err := srv.Config.Load(); err == nil {
@@ -197,6 +214,7 @@ func runLocal(ctx context.Context, o localOpts, log *slog.Logger) error {
 	}
 	log.Info("local web", "url", "http://"+displayAddr(o.addr), "data", o.dataDir, "password", pw, "setupCode", code,
 		"fresh", o.fresh, "language", st.Language())
+	log.Info("recording disk: write its kind to plug it in, remove the file to pull it out (see -disk)", "control", disk.ctlPath)
 	if err := hs.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
 	}

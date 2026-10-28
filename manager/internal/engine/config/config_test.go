@@ -86,6 +86,7 @@ func TestDefaults(t *testing.T) {
 		SRTStats:    "/run/eirl-engine/srt-stats.json",
 		RISTProfile: "main", OutputLatencyMs: 1000, VCodec: "h264", SendBin: "/usr/local/bin/eirl-send",
 		RISTBin: "/usr/local/bin/ristsender", RISTLocalPort: 6100,
+		RecMode: "off", RecQuality: "high", RecDir: "/media/eirl-rec", RecStorageState: "/run/eirl-storage/state.json",
 		Levels: true, LevelsPort: 5005, Live: true, LiveSize: "640x360", LiveVBitrate: 800, LiveABitrate: 96,
 		LiveVPort: 5006, LiveAPort: 5008,
 		Thumb: true, ThumbSize: "320x180", ThumbEvery: 5, ThumbFile: "/run/eirl-engine/thumb.jpg",
@@ -149,6 +150,10 @@ func TestKeys(t *testing.T) {
 		{"H264_TWOPASS", "0", func(c *Config) bool { return !c.H264TwoPass }, []string{"true"}},
 		{"OUTPUT", "off", func(c *Config) bool { return !c.OutputAtBoot }, []string{"ON", "1"}},
 		{"RECORD", "/tmp/rec.ts", func(c *Config) bool { return c.Record == "/tmp/rec.ts" }, []string{"/tmp/rec .ts"}},
+		{"REC_MODE", "with_output", func(c *Config) bool { return c.RecMode == RecWithOutput && c.RecordingEnabled() }, []string{"on", "manual "}},
+		{"REC_QUALITY", "efficient", func(c *Config) bool { return c.Recording() == RecQuality{"h265", 20000, 256} }, []string{"ultra", "HIGH"}},
+		{"REC_DIR", "/media/x", func(c *Config) bool { return c.RecDir == "/media/x" }, []string{"/media/x y"}},
+		{"REC_STORAGE_STATE", "/run/s.json", func(c *Config) bool { return c.RecStorageState == "/run/s.json" }, []string{"/run/s s.json"}},
 		{"SRT_URL", "srt://relay.example.com:9000", func(c *Config) bool { return c.SRTURL == "srt://relay.example.com:9000" }, []string{"srt://h:9000?streamid=x", "rtmp://h:1"}},
 		{"SRT_MODE", "listener", func(c *Config) bool { return c.SRTMode == "listener" }, []string{"rendezvous"}},
 		{"SRT_LATENCY", "500", func(c *Config) bool { return c.SRTLatencyMs == 500 }, []string{"2000ms"}},
@@ -267,8 +272,8 @@ func TestWhitelist(t *testing.T) {
 	if len(got) != 1 || got["VBITRATE"] != "5000" {
 		t.Fatalf("ParseConfFile kept %v", got)
 	}
-	if len(Whitelist) != 27 {
-		t.Fatalf("whitelist has %d keys: the launcher's 16 and the output's 11 (OUTPUTS.md §3)", len(Whitelist))
+	if len(Whitelist) != 29 {
+		t.Fatalf("whitelist has %d keys: the launcher's 16, the output's 11 (OUTPUTS.md §3) and the recording's 2", len(Whitelist))
 	}
 }
 
@@ -472,5 +477,33 @@ func TestInvalidErrorMessage(t *testing.T) {
 	_, err = load(t, fake{env: map[string]string{"SOURCE": "x"}})
 	if err.Error() != "invalid configuration: SOURCE" {
 		t.Fatalf("%q", err.Error())
+	}
+}
+
+// The recording's defaults, and its paths only from the board's settings: the app's file can set the mode
+// and the quality, never REC_DIR or REC_STORAGE_STATE (RECORDING.md §5.1).
+func TestRecordingKeys(t *testing.T) {
+	c := mustLoad(t, fake{})
+	if c.RecMode != RecOff || c.RecordingEnabled() || c.Recording() != (RecQuality{"h264", 25000, 256}) ||
+		c.RecDir != "/media/eirl-rec" || c.RecStorageState != "/run/eirl-storage/state.json" {
+		t.Fatalf("recording defaults: %q %q %q %q", c.RecMode, c.RecQuality, c.RecDir, c.RecStorageState)
+	}
+	conf := "REC_MODE=manual\nREC_QUALITY=max\nREC_DIR=/tmp/evil\nREC_STORAGE_STATE=/tmp/evil.json\n"
+	c = mustLoad(t, fake{env: map[string]string{"EIRL_CONF": confPath}, conf: &conf})
+	if c.RecMode != RecManual || c.Recording().VKbps != 40000 || c.RecDir != "/media/eirl-rec" ||
+		c.RecStorageState != "/run/eirl-storage/state.json" {
+		t.Fatalf("app file: %q %q %q %q", c.RecMode, c.RecQuality, c.RecDir, c.RecStorageState)
+	}
+	n := mustLoad(t, fake{env: map[string]string{"REC_MODE": "with_output", "REC_QUALITY": "standard"}})
+	if w := c.WithOutput(n); w.RecMode != RecWithOutput || w.RecQuality != "standard" || !c.SameDevice(n) {
+		t.Fatalf("output_config does not take the recording's keys live: %q %q", w.RecMode, w.RecQuality)
+	}
+	// The recording's keys alone leave the output (a stream on air) alone; a bitrate does not
+	if !c.SameOutput(c.WithOutput(n)) {
+		t.Fatal("only the recording's keys changed, yet the output would restart")
+	}
+	b := mustLoad(t, fake{env: map[string]string{"VBITRATE": "4000"}})
+	if c.SameOutput(c.WithOutput(b)) {
+		t.Fatal("a new bitrate is the output's")
 	}
 }

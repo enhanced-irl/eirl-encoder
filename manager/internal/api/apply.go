@@ -122,5 +122,5 @@ func (s *Server) logConfig(msg string, cfg config.Settings) {
 		"vbitrate", cfg.VideoKbps, "abitrate", cfg.AudioKbps, "abr", cfg.ABR, "vbitrateMin", cfg.VideoMinKbps,
 		"output", cfg.Output, "edid", cfg.EDIDPreferred, "managedBy", cfg.ManagedBy,
 		"streamid", cfg.StreamID != "", "passphrase", cfg.Passphrase != "" || cfg.OutputPassphrase != "",
-		"ristUser", cfg.OutputUser != "")
+		"ristUser", cfg.OutputUser != "", "recording", cfg.RecMode, "recQuality", cfg.RecQuality)
 }

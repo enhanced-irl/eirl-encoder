@@ -1,7 +1,7 @@
 # Multi-camera: composition, multiview and touch screen
 
 > **Status:** IN PROGRESS (F0, F1 —single engine— and F2 —web ↔ screen— in main; F3 —no rehearsal mode— on the board; next F4, per-source audio)
-> **Updated:** 2026-10-15 (Oct 15: the HDMI output stays lit when the screen closes, §3 trap 27; USB cameras plugged and unplugged while running, "Sources and slots" in §4, and a camera's audio follows its video slot, §10; the output protocols and encoding settings in the state and `output_config`, §5, [`OUTPUTS.md`](OUTPUTS.md); translated to English; the Python engine retired, the Go engine is the only one: [`ENGINE_GO.md`](ENGINE_GO.md); last content change Oct 13: header and Settings, §18; Wi-Fi in Settings, §19; Oct 14: renaming "Create my Wi-Fi", §19; everything the web configures, on the screen, §21; fades one step per program frame and the screen's tiles in step with the program, §22)
+> **Updated:** 2026-10-28 (Oct 28: the local recording on the screen, §23; Oct 15: the HDMI output stays lit when the screen closes, §3 trap 27; USB cameras plugged and unplugged while running, "Sources and slots" in §4, and a camera's audio follows its video slot, §10; the output protocols and encoding settings in the state and `output_config`, §5, [`OUTPUTS.md`](OUTPUTS.md); translated to English; the Python engine retired, the Go engine is the only one: [`ENGINE_GO.md`](ENGINE_GO.md); last content change Oct 13: header and Settings, §18; Wi-Fi in Settings, §19; Oct 14: renaming "Create my Wi-Fi", §19; everything the web configures, on the screen, §21; fades one step per program frame and the screen's tiles in step with the program, §22)
 
 **The mixer is the encoder.** `eirl-engine` captures all the sources it detects at the same time, and what
 comes out is always the composed **program** (cut, PiP, side by side, fades). That includes SRT/SRTLA
@@ -350,6 +350,7 @@ state is also copied to `/run/eirl-engine/mixer.json` (0644) on every change.
 | `pip` | `corner`: `tl` · `tr` · `bl` · `br` and/or `size`: `25` · `33` (PiP width, % of the canvas) | `bad_request` |
 | `pause` | `on`: bool, `text`: 1-60 characters (letters, digits, space and `.,:;!?¡¿'"()-–—…·/+#@%€$*`; no `< > &`, line breaks or emoji), `mute`: bool. At least one | `bad_request`, `unsupported` (pipeline without the `mp` layer) |
 | `lock` | `on`: bool. Lock the touch screen | `bad_request` |
+| `record` | `on`: bool. Start or stop the local recording to a USB disk ([`RECORDING.md`](RECORDING.md) §5.2) | `unsupported` (no recorder), `disabled` (`REC_MODE=off`), `no_disk` (the storage helper has no disk ready), `disk_full` (less room than a clean stop needs), `bad_request` |
 | `preview` | `on`: bool. The web's WebRTC preview: the app stops it while nobody is watching and repeats it every 30 s (§17). The state reports it in `preview.on` | `bad_request`, `unsupported` (no preview, `LIVE=0`) |
 | `phones` | `on`: bool and/or `gain`: integer dB from −40 (silence) to 0. The screen headphones: the program audio over the board's HDMI ([`HEADPHONES.md`](HEADPHONES.md)). At least one | `bad_request`, `unsupported` (pipeline without `phvalve`/`phtap`) |
 | `camera_control` | `source`: a USB source id, `control`: a control id, `value`: integer. A camera's image setting ([`SOURCES.md`](SOURCES.md) §7): answered once the camera took it, with the state already carrying it | `unknown_source`, `unsupported` (the source has no `controls`), `unknown_control`, `bad_request`, `inactive` (its automatic is on), `busy`, `camera_error` |
@@ -411,6 +412,17 @@ survives a restart and the cloud sees it.
 engine rereads the app's file and takes the output's keys live (destination, bitrates, codec, size, rate), restarting the
 output session if it is on air; it answers `restart_required` when anything else changed, `invalid_config` when the file
 is invalid, and an older engine `unknown_command` (the app then restarts it).
+
+**Local recording ([`RECORDING.md`](RECORDING.md) §5.2)**, additive: `record` (absent when the engine cannot record:
+no `mp4mux` or no recording root) with `mode` (`on` · `off`), `state` (`off` · `starting` · `on` · `error`),
+`setting` and `quality` (`REC_MODE` and `REC_QUALITY` as the engine has them now), `reason`
+(`no_disk` · `disk_removed` · `disk_full` · `disk_slow` · `write_error` · `encoder_error` · `power_lost` · `internal`),
+`detail`, `by` (`start` · `socket` · `screen` · `output`: Go live with `REC_MODE=with_output`) and `seq` like `output`;
+while on, `elapsedS`, `kbps`, `droppedS` and `file`; always `disk` (`state` and `reason` from the storage helper, `fs`,
+`label`, `sizeBytes`, and with a disk ready `freeBytes` and `minutesLeft`). With `REC_MODE=with_output`, `output on`
+also starts recording and `output off` stops a recording that `output on` started. `output_config` also takes
+`REC_MODE` and `REC_QUALITY` live. While recording, the engine is busy as while streaming: no HDMI replug pulse, no
+slot change that displaces what is on air, no USB hub cut (a source's detail `hung_recording`).
 
 `output` is used by the screen's panel ("LIVE · Mbps · RTT") and `eirl-encoderd` forwards it,
 bounded, in `GET /api/v1/mixer` and in the `mixer` SSE (F5 review: before, this document said the
@@ -1123,6 +1135,8 @@ never calls NetworkManager or `eirl-netsetup`.
 - **Settings parity:** everything the web configures, on the screen (Oct 14): §21.
 - **Fades and the screen's tiles** (Oct 14): §22. Open: a change mid-fade still jumps (§22.3).
 - **Lining the inputs up to the slowest one** (optional; plan, Oct 24): [`INPUT_SYNC.md`](INPUT_SYNC.md).
+- **Local recording on the screen** (Oct 28): REC, the header's line and Stream › Recording, §23
+  ([`RECORDING.md`](RECORDING.md) R4).
 
 ## 21. Settings: everything the web configures, on the screen (Oct 14)
 
@@ -1140,7 +1154,7 @@ title row (`SettingsGroups`, settings_layout.go; a list entry is `s_page_<group>
 
 | Group | Tabs (pages) |
 |---|---|
-| Stream | Destination (`dest`) · Uplinks (`uplinks`) · Pause (`pause`) |
+| Stream | Destination (`dest`) · Uplinks (`uplinks`) · Pause (`pause`) · Recording (`recording`, since Oct 28: §23) |
 | Sources | Slots (`sources`) · Input (`input`) · Image (`camera`) |
 | Wireless (since Oct 15; Wi-Fi before) | Wi-Fi (`wifi`) · Bluetooth (`bluetooth`, [`BLUETOOTH.md`](BLUETOOTH.md) §3.6). The group's id stays `wifi` |
 | Network cameras | — (`cams`) |
@@ -1340,3 +1354,49 @@ per-source delay removes.
   of one core and system 90 → 94 %, the difference in the capture threads (the compositor's thread, where the
   animator runs, 7.3 → 7.5 %); RAM ~105 MB in both. The two builds also differ in the screen work merged in
   between (Settings and the connections' dots).
+
+## 23. The local recording on the screen (Oct 28, R4 of RECORDING.md)
+
+What the web's Recording card does ([`RECORDING.md`](RECORDING.md) §6.5), on the touch screen, with the same words
+(shorter where a line is narrower). The recording's state comes from the engine's (`record`, RECORDING.md §5.2); its
+settings and the disk from the app (`GET /recording` over the local socket).
+
+- **REC** at Go live's right, a third of its row (`Layout.RecRow`); with `REC_MODE=off` it is not there and Go live
+  takes the whole row again (unless a recording is still on: it can be stopped). Held 1 s like Go live, with the same
+  progress: the engine's `record` command with `by=screen` (`screenHost` runs it as `setRecord(on, "screen")`, as it
+  runs `output`). Idle: a red dot, «REC» and «hold 1 s»; recording: red, «hold to stop». It cannot start (no disk,
+  ejected, checking, full, a disk it cannot use): grey, why in amber («Connect a USB disk»), holding it sends nothing
+  and a tap says why in a line. The engine's refusals (`disabled`, `no_disk`, `disk_full`) are said in words.
+- **Go live** with `with_output`: «GO LIVE + RECORD» with a disk ready and nothing recording; without one it still
+  streams and its second line says it will not record («no disk: not recording»; full; a disk it cannot use). Stop
+  stops both (the engine's rule).
+- **The header**: a second line under the stream's state. Recording: «● REC 01:12:34 · 3 h 20 min left» (the
+  engine's `elapsedS` counted on between states, never more than 10 s past it; the time left from
+  `disk.minutesLeft`, amber under 10 min, or «the disk cannot keep up» while it drops fragments). A recording that
+  stopped on its own: why, in amber (red when the disk was pulled out), for `RecNoticeFor` (5 min) from when the screen
+  first saw it (`power_lost` at start after a power cut); still asked to record (waiting for the disk, retrying), for
+  as long as it lasts. The network's middle part moves right and drops whole parts if it must (§18).
+- **A disk plugged in while live** (the storage state leaves `none`/`ejected` with the output on): an amber band over
+  the program for 15 s, that plugging disks while live can cut the board's power and a hard disk goes only through
+  a powered hub (RECORDING.md §3).
+- **Stream › Recording** (`recpage.go`, a fourth tab: the list keeps seven entries, §21.1): the mode and the quality as
+  fields with their pickers (each mode with its line; each quality with its rate and GB/h, the codec first when it is
+  H.265), `PUT /recording`; the quality waits while recording. Under them, the disk: why the last recording stopped,
+  its state, name and model, filesystem, free space of its size, measured write speed, how long it can record at the
+  quality, and the web's warnings (FAT32, not ejected properly, read-only, NTFS or unknown, too small, unformatted,
+  another disk, under 10 min); with no disk, how to connect one; ejected, to unplug it. «Eject» (a disk ready) and
+  «Format» (any disk but one under 1 GB or write-protected), both waiting while recording. Format and turning the
+  recording off while it records ask first, in the page, with Cancel and the answer (no timer): the format question
+  names the disk («EIRL-REC» (DataTraveler 3.0 · 62 GB)) and says everything is erased, and sends the `seq` of the disk
+  it named (`POST /storage/format`: a disk swapped after the question answers `disk_changed`); it goes by itself if
+  the disk changes or a recording starts. Under way and after: «Formatting the disk… it can take up to 2 minutes»,
+  «Disk ejected: you can unplug it now», or the app's message.
+- **The app's client** (`appapi/recording.go`): `AppWatch.Recording` → `GET /recording` every 2 s while the page is on
+  view; actions `rec_settings` (`PUT /recording`, only `mode` and/or `quality` of their closed lists), `rec_eject` and
+  `rec_format` (only `seq`), checked before they go and waited for 100 and 130 s (the app waits 90 and 120 s for the
+  storage helper). What comes back is validated: closed lists, the disk's model and label by the rule of a device's
+  name, no paths.
+- Previews: `eirl-ui-render rec rec-live rec-only rec-low rec-slow rec-starting rec-hold rec-withoutput
+  rec-withoutput-live rec-nodisk rec-withoutput-nodisk rec-full rec-powerlost rec-diskremoved rec-refused rec-plugwarn
+  rec-off` and `settings-recording` with `-on -fat32 -ntfs -unformatted -readonly -none -ejected -format -formatting
+  -formatted -modes -qualities -offask -powerlost -old` (its `rec.go` describes each).

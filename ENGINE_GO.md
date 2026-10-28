@@ -527,7 +527,7 @@ additive: `detail` keeps its Spanish text byte for byte for whoever already read
   - `output` already had its stable code, `output.reason` (`no_destination`, `no_uplinks`, `relay_unreachable`,
     `rejected`, `connection_lost`, `encoder_error`, `internal`). Its `detail` stays technical text, much of it lines
     from the tools after masking the streamid, so it gets no arguments.
-- **The closed list** (`manager/internal/engine/detail`, 40 codes): adding a code is a contract change, and
+- **The closed list** (`manager/internal/engine/detail`, 41 codes): adding a code is a contract change, and
   `detail_test.go` fails until the list here and the test are updated.
 
 | Code | Arguments | Spanish `detail` today |
@@ -548,6 +548,7 @@ additive: `detail` keeps its Spanish text byte for byte for whoever already read
 | `probe_failed` | `rc`, `error` | eirl-encoderd probe ha fallado ({rc}): {error} |
 | `hung_given_up` | | colgada: desenchúfala y vuelve a enchufarla |
 | `hung_on_air_unknown` | | colgada: emitiendo no la reinicio (no sé qué hay al aire) |
+| `hung_recording` | | colgada: grabando no la reinicio (cortaría el disco): while recording no hub is cut (RECORDING.md §5.5) |
 | `hung_on_air` | `video`, `audio`: the ids on air (`sources[].id`, `audio.inputs[].id`), comma separated, each absent when empty | colgada: reiniciarla apagaría {names as shown} (al aire) |
 | `port_reset` | | reiniciando su puerto USB |
 | `net_receiver_down` | | el receptor de cámaras no responde |

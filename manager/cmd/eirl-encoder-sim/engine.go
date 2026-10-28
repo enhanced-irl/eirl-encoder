@@ -10,14 +10,16 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"time"
 
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/config"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/mixer"
 )
 
 // simEngine: a mixer engine on a Unix socket, enough for the web: a catalogue of five sources (the fifth, a capture
 // card, without a slot until one is given to it), the slots command (with the on_air rule), take/secondary/hide/layout/
-// output, the USB cameras' image settings (camera.go), and the state in mixer.json and to subscribers. Other commands
-// are accepted and change nothing.
+// output, the USB cameras' image settings (camera.go), the local recording (record and Go live with with_output,
+// recording.go), and the state in mixer.json and to subscribers. Other commands are accepted and change nothing.
 type simEngine struct {
 	sock, statePath string
 	log             *slog.Logger
@@ -35,6 +37,10 @@ type simEngine struct {
 	// (OUTPUTS.md §8): the real engine rereads engine.env. nil = nothing in the state
 	outputConfig func() (protocol, codec, size string, fps float64)
 	out          mixer.Output // what outputConfig gave last
+	// recConfig: the saved REC_MODE and REC_QUALITY, read at start and on output_config like outputConfig
+	recConfig func() (mode, quality string)
+	rec       simRecord
+	storage   *simStorage // the disk the recording writes to
 }
 
 var simCatalog = []mixer.CatalogEntry{
@@ -45,9 +51,15 @@ var simCatalog = []mixer.CatalogEntry{
 	{ID: simMS2109, Name: "USB Video (MS2109)", Kind: "usb"},
 }
 
-func startSimEngine(ctx context.Context, dir string, log *slog.Logger) (*simEngine, error) {
+// startSimEngine: the engine, recording to disk. powerLost: it starts as after a power cut while recording (D6).
+func startSimEngine(ctx context.Context, dir string, disk *simStorage, powerLost bool, log *slog.Logger) (*simEngine, error) {
 	e := &simEngine{sock: filepath.Join(dir, "mixer.sock"), statePath: filepath.Join(dir, "mixer.json"), log: log,
-		main: "hdmi", layout: "full", hidden: map[string]bool{}, cams: simCameras(), subs: map[chan []byte]struct{}{}}
+		main: "hdmi", layout: "full", hidden: map[string]bool{}, cams: simCameras(), subs: map[chan []byte]struct{}{},
+		storage: disk, rec: simRecord{mode: config.RecOff, quality: config.DefaultRecQuality, state: "off"}}
+	if powerLost {
+		e.rec.reason, e.rec.detail = "power_lost", "the power was cut while recording "+time.Now().Add(-time.Hour).Format("2006-01-02_1504")+".mp4"
+	}
+	disk.recording, disk.onChange = e.recordingNow, e.diskChanged
 	for i := 1; i <= mixer.MaxSlots; i++ {
 		e.slots = append(e.slots, mixer.SlotAssign{Slot: i, Assign: mixer.AssignAuto})
 	}
@@ -57,6 +69,7 @@ func startSimEngine(ctx context.Context, dir string, log *slog.Logger) (*simEngi
 	}
 	go func() { <-ctx.Done(); ln.Close() }()
 	e.publish()
+	go e.runRecorder(ctx)
 	go func() {
 		for {
 			c, err := ln.Accept()
@@ -85,6 +98,9 @@ func (e *simEngine) setOutput(on bool) {
 func (e *simEngine) loadOutputLocked() {
 	if e.outputConfig != nil {
 		e.out.Protocol, e.out.Codec, e.out.Size, e.out.FPS = e.outputConfig()
+	}
+	if e.recConfig != nil {
+		e.setRecConfigLocked(e.recConfig())
 	}
 }
 
@@ -163,6 +179,7 @@ func (e *simEngine) stateLocked() mixer.State {
 		}
 	}
 	st.Audio = simAudio(slotOf)
+	st.Record = e.recordStateLocked()
 	return st
 }
 
@@ -310,7 +327,12 @@ func (e *simEngine) command(c mixer.Command) string {
 	case "layout":
 		e.layout = c.Layout
 	case "output":
+		if e.output != *c.On {
+			e.recordWithOutputLocked(*c.On)
+		}
 		e.output = *c.On
+	case "record":
+		code = e.recordCommandLocked(*c.On)
 	case "output_config": // the app saved a new destination: taken hot, like the real engine with only output keys
 		e.loadOutputLocked()
 	case "slots":

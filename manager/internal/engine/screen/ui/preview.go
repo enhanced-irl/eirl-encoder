@@ -144,3 +144,11 @@ func (p Preview) OpenBTDevice(addr string) { p.u.btp.view = addr }
 
 // BTListPage shows a page of the Bluetooth page's list.
 func (p Preview) BTListPage(n int) { p.u.btp.page = n }
+
+// RecAsk shows a question of the Recording page: format (naming the disk on view) or off (turning the recording off
+// while it records).
+func (p Preview) RecAsk(ask string) {
+	app := p.u.app().AppSnapshot()
+	disk := p.u.recDisk(&app)
+	p.u.rp = recPage{ask: ask, seq: disk.Seq, who: p.u.diskWho(&disk)}
+}

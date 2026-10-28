@@ -168,6 +168,49 @@ func TestProgramWithoutOptionalBranches(t *testing.T) {
 			t.Errorf("missing %s", present)
 		}
 	}
+	if strings.Contains(got, "name=recv") || !strings.Contains(got, "output-buffers=12 ") {
+		t.Errorf("recording taps without Record:\n%s", got)
+	}
+}
+
+// The recording's taps (RECORDING.md §2): two more leaky branches and a pool of 16 for the converter
+func TestProgramRecordTaps(t *testing.T) {
+	got := Tegra.Program(Program{Width: 1920, Height: 1080, FPS: 60, Slots: 2, AudioSlots: 1, LatencyNs: 1, Record: true})
+	for _, want := range []string{"nvvidconv output-buffers=16 ! video/x-raw(memory:NVMM),format=NV12,width=1920,height=1080 ! tee name=vt",
+		"vt. ! queue leaky=downstream max-size-buffers=2 ! appsink name=recv emit-signals=false sync=false async=false max-buffers=1 drop=true",
+		"at. ! queue leaky=downstream max-size-buffers=12 ! appsink name=reca emit-signals=false sync=false async=false max-buffers=12 drop=true"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("program lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+// A recording session (RECORDING.md §2, D2-D3): VBR with a peak, a keyframe a second, fragmented MP4
+func TestRecording(t *testing.T) {
+	h264 := Tegra.Recording(Recording{Width: 1920, Height: 1080, FPS: 60, Codec: "h264", VKbps: 25000, AKbps: 256,
+		Profile: 4, Preset: 2, AEnc: "voaacenc"})
+	for _, want := range []string{`appsrc name=rv is-live=true format=time do-timestamp=false max-bytes=0 block=false caps="video/x-raw(memory:NVMM),format=NV12,width=1920,height=1080,framerate=60/1"`,
+		"! queue max-size-buffers=2 leaky=downstream ! nvvidconv output-buffers=6 ! video/x-raw(memory:NVMM),format=I420 ! nvv4l2h264enc name=renc control-rate=0",
+		"bitrate=25000000 peak-bitrate=30000000 iframeinterval=60 idrinterval=60 profile=4 preset-level=2",
+		"h264parse ! video/x-h264,stream-format=avc,alignment=au ! queue ! rmux.",
+		"audioconvert ! voaacenc bitrate=256000 ! aacparse ! queue ! rmux.",
+		"mp4mux name=rmux fragment-duration=1000 streamable=true ! appsink name=rout",
+		"max-buffers=256 drop=false"} {
+		if !strings.Contains(h264, want) {
+			t.Errorf("h264 recording lacks %q:\n%s", want, h264)
+		}
+	}
+	h265 := Tegra.Recording(Recording{Width: 1280, Height: 720, FPS: 50, Codec: "h265", VKbps: 20000, AKbps: 256,
+		Profile: 4, Preset: 2, AEnc: "avenc_aac"})
+	for _, want := range []string{"nvv4l2h265enc name=renc control-rate=0 bitrate=20000000 peak-bitrate=24000000 iframeinterval=50",
+		"h265parse ! video/x-h265,stream-format=hvc1,alignment=au", "avenc_aac bitrate=256000", "framerate=50/1"} {
+		if !strings.Contains(h265, want) {
+			t.Errorf("h265 recording lacks %q:\n%s", want, h265)
+		}
+	}
+	if strings.Contains(h265, "profile=") || strings.Contains(h265, "poc-type") {
+		t.Errorf("h265 recording with H.264's settings:\n%s", h265)
+	}
 }
 
 // testdata/output.txt is the board's output pipeline (EIRL_ENGINE_OUTPUT_PIPELINE, same engine):

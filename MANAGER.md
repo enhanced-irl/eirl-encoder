@@ -1,5 +1,5 @@
 > **Status:** IN PROGRESS — v1 complete and deployed (phases 0-4, Oct 8); phase 5 (WebRTC preview with audio) deployed on Oct 8; in `main` (MR !1); pending: testing it on a real phone and the items in §12
-> **Updated:** 2026-10-19 (the SRTLA sender's figures per link in `/status`, §3: [`SRTLA.md`](SRTLA.md) §9)
+> **Updated:** 2026-10-28 (local recording's API: settings, REC, the USB disk, §3 "Local recording"; [`RECORDING.md`](RECORDING.md) §6)
 >
 > SRTLA and adaptive bitrate (branch `feat/srtla`, not deployed): design in [`SRTLA.md`](SRTLA.md); here, what changes in the API.
 >
@@ -398,6 +398,39 @@ uplinks and modems logic stays SRTLA-only.
 | `POST /cloud/pair` | `{}` → starts linking or renews the code: `200` + the same as `GET /cloud`. `409 already_linked`, `429 rate_limited`, `502 cloud_unreachable`/`cloud_error` |
 | `DELETE /cloud` | Unlinks (or cancels a code in progress): deletes the link even if the cloud does not answer and notifies it with `DELETE /encoders/self`. `200` + the view + `"cloudNotified": bool` |
 
+### Local recording (Oct 28, [`RECORDING.md`](RECORDING.md) §6)
+
+The program recorded to a USB disk with its own encode, with or without the stream. The settings are `REC_MODE` and
+`REC_QUALITY` in `engine.env` (global keys, like `OUTPUT`; closed lists): taken hot with `output_config` and **never with
+a restart** (`config.DiffEnv` counts them as output keys; an engine that cannot take them takes them at its next start).
+Recording itself is never saved (D6). The disk is the storage helper's (`eirl-storage`, §5): the app reads its state file
+(`-storage-state`, `/run/eirl-storage/state.json`) and runs its two actions with `sudo -n /usr/local/sbin/eirl-storage
+eject|format`, its exit status as the answer.
+
+| Method and route | What |
+|---|---|
+| `GET /recording` | `{"mode", "quality", "qualities": [{"id", "codec", "videoKbps", "audioKbps"}], "record": <the engine's, as in the state> \| null, "storage": <the storage object>}`. `record` is `null` with an older engine or the engine stopped |
+| `PUT /recording` | `{"mode"?: "off"\|"manual"\|"with_output", "quality"?: "standard"\|"high"\|"max"\|"efficient"}` (at least one) → `200` the view. `400 validation` (`mode`, `quality`); `409 recording`: the quality while recording or starting (the mode can change: `off` stops the recording) |
+| `PUT /record` | `{"on": bool}` → the engine's `record` command; `200` the view. `409 disabled` (`REC_MODE=off`), `no_disk`, `disk_full`, `unsupported` (also `unknown_command`, an engine older than the recording); `503` when the engine does not answer (`mixer_disabled`, `mixer_off`, `mixer_error`, `timeout`); `422` with any other engine code |
+| `GET /storage` | The storage object: the helper's state file with only `state`, `reason`, `seq`, `device`, `model`, `fs`, `label`, `sizeBytes`, `readOnly`, `dirty`, `writeMBps`, `anotherDisk`. Closed lists for the state and the reason, `sd[a-z]` disks and blkid-style filesystems; model and label by a device name's rule (third-party data); no paths, no UUID. Without the file, `{"state": "none", "seq": 0}`; a state outside the list reads as `none` |
+| `POST /storage/eject` | `sudo -n … eject` (up to 90 s) → `200` the storage object. Exit 2 `409 no_disk`, 3 `409 recording`, 4 `409 busy` (a disk is being checked); anything else, or no answer in time, `500 eject_failed` |
+| `POST /storage/format` | `{"seq": n}`: `409 disk_changed` unless the state's `seq` is still `n` and a disk is there (not `none` or `checking`), so that a disk swapped after the confirmation is never the one formatted; then `sudo -n … format` (up to 120 s: past it the helper's own unit goes on and the state says how it ends) → `200` the storage object. The same codes, with `500 format_failed` |
+
+`status.mixer.record` (and the SSE's `mixer`) is the engine's object ([`RECORDING.md`](RECORDING.md) §5.2) with closed
+lists, like `output`: `mode` (`on` · `off`), `state` (`off` · `starting` · `on` · `error`), `reason` (§5.2's list),
+`detail` (redacted, ≤ 200), `by` (`start` · `socket` · `screen` · `output`), `seq`, `elapsedS`, `kbps`, `droppedS`, `file`
+(a name, no folder) and `disk` (`state` and `reason` from the helper's lists, `fs`, `label`, `sizeBytes`, `freeBytes`,
+`minutesLeft`, `dirty`); absent with an older engine, and the web then hides the recording. `POST /mixer` also takes
+`{"cmd": "record", "on": bool}` (`422` with the engine's code). **Updates** while recording: `POST /update/install` and
+`POST /update/reboot` answer `409 recording` and `GET /update` `blocked: "recording"` (with `streaming: false`), each with
+a message that says to stop the recording; streaming, with or without a recording, stays `streaming` (with
+`REC_MODE=with_output`, Stop streaming also stops its recording).
+
+The simulator (`-http`) has a fake helper and recorder (`cmd/eirl-encoder-sim/recording.go`): `-disk exfat` plugs a
+disk in at start; writing `<data>/disk` while it runs plugs another one (`exfat`, `fat32`, `ext4`, `ntfs`, `small`,
+`blank`, `readonly`, then `dirty`, `another`, `low`, `full`, `slow`, `checking`) and removing it pulls it out;
+`-rec-power-lost` starts as after a power cut.
+
 ### Network cameras and their access point (F7, [`NETWORK_SOURCES.md`](NETWORK_SOURCES.md) §6)
 
 Only with `eirl-netsetup` installed (otherwise `503 network_unavailable` and `/status` without `network`). A phone or
@@ -470,6 +503,7 @@ is, [`SETUP.md`](SETUP.md) §3). **No session or CSRF**: the
   | `GET/PUT /device`, `GET /device/timezones`, `GET /setup`, `POST /setup/{password,step,complete,restart}`, `GET/PUT /sources/slots`, `GET /update`, `POST /update/{check,install,reboot}` | The device settings, the wizard (the setup code only here), the slots and the updates ([`SETUP.md`](SETUP.md) §8) |
   | `GET /cloud`, `POST /cloud/pair`, `DELETE /cloud` | The link, the pairing code (`?qr=rows` → `linkQrRows`) and unlinking (Oct 14). With a destination the cloud set, unlinking restarts the engine, and the cloud is still notified when the socket closes |
   | `GET/PUT /bluetooth`, `POST /bluetooth/{scan,visible}`, `POST /bluetooth/devices/{address}/{action}`, `PUT /bluetooth/devices/{address}` | Same as in the web (Oct 15, [`BLUETOOTH.md`](BLUETOOTH.md)): no keys in them, and opening the visible window from the screen is physical access |
+  | `GET/PUT /recording`, `PUT /record`, `GET /storage`, `POST /storage/{eject,format}` | Same as in the web (Oct 28, [`RECORDING.md`](RECORDING.md) §6.2): the local recording's settings, REC and the disk. No paths or secrets in them; the storage helper refuses eject and format while recording |
 
   Left out on purpose: `start`/`stop` of the service, reboot and power off (they go through `screen.power`), the logs,
   the mixer and `PUT /output` (the engine already is the mixer), the live preview, the QR images and the web session.
@@ -598,6 +632,8 @@ the file it writes is read as data with a key whitelist (see below).
 | HDMI signal and `AU_STATUS0` | Groups `video` and `i2c` (only `QUERY_DV_TIMINGS` and a 1-byte I2C read) |
 | Power (ina3221) | `/etc/tmpfiles.d/eirl-encoder.conf` with `z …/ina3221x/6-0040/iio:device0/in_*_input 0444`: opens **reading** of those files (telemetry) on every boot |
 | Port 80 | `AmbientCapabilities=CAP_NET_BIND_SERVICE` in the unit, without root |
+| Eject or format the USB disk of local recordings ([`RECORDING.md`](RECORDING.md) §4) | The same sudoers rule: `/usr/local/sbin/eirl-storage eject` and `/usr/local/sbin/eirl-storage format`, exactly (any other argument, `attach`/`detach`/`status` included, is denied); format reads the seq of the disk the user confirmed on stdin. The helper does not act inside the app's sandbox: it starts `eirl-storage-eject.service` / `eirl-storage-format@<seq>.service` and returns their exit status (below) |
+| Reading the disk's state and the recordings | `/run/eirl-storage/state.json` (root, 0644). The disk is mounted with the recordings owned by `eirl-engine` and readable by the group `eirl-encoder` (exFAT and FAT: `fmask=0137,dmask=0027`) |
 
 **Network cameras (F7, [`NETWORK_SOURCES.md`](NETWORK_SOURCES.md) §6.2-6.3).** The app does not touch the network: it writes
 into `/etc/eirl-encoder` `cameras.json` (the keys, **0600**), `ap.psk` (the Wi-Fi password, **0600**),
@@ -617,6 +653,32 @@ QR; not the cameras' keys. MediaMTX's local API asks for the key in
 only stores its hash). No IPv6 on `ap0` and with the firewall in place before the AP comes up. With "cameras by
 cable" (NETWORK_SOURCES.md §6.11), RTMP and SRT listen on `0.0.0.0` and the `EIRL-MEDIA` chain (set up earlier)
 only lets them in through `lo`, `ap0` and `eth0`.
+
+**Local recordings: the USB disk ([`RECORDING.md`](RECORDING.md) §4).** The image has no automounter. A udev rule
+(`71-eirl-storage.rules`) makes a USB disk (the disk, not its partitions; only on the USB bus, `sd[a-z]`, size above 0)
+want `eirl-storage@<disk>.service`, a oneshot bound to the disk's device (`BindsTo=dev-<disk>.device`) that runs
+`eirl-storage attach <disk>` as root: it checks the disk read-only, mounts the right partition at `/media/eirl-rec`
+(`nosuid,nodev,noexec,noatime`; exFAT through `exfat-fuse`, from the system layer), measures it and writes
+`/run/eirl-storage/state.json`. Pulling the disk out stops the unit, whose `detach` unmounts (lazily when the disk is
+gone). udev itself runs nothing: its time limit and sandbox would kill a check or the exFAT FUSE daemon, which lives in
+the disk unit's cgroup. **None of these units is sandboxed** (`ProtectSystem`, `PrivateTmp`… would give them a mount
+namespace of their own, and the mount would exist only there), and that is also why the app's two commands do not run
+in the app: `sudo eirl-storage eject|format`, started from the app's sandbox (`ProtectSystem=strict`, `PrivateTmp`),
+would unmount only in the app's own mount namespace and could not write `/run`. So the helper, unless
+`EIRL_STORAGE_DIRECT=1` (set only by those units' `Environment=`; sudo's `env_reset` drops it from the app), refuses at
+once while the engine records (`/run/eirl-engine/mixer.json`, `record.mode` = `on`, or `record.state` `starting`/`on`:
+exit 3), then `systemctl start eirl-storage-<action>.service` and returns that unit's `ExecMainStatus`: 0 done, 1
+failed, 2 no disk, 3 recording, 4 busy (a disk being checked holds the helper's lock), 5 the disk changed (format: the
+state's seq is not the one confirmed), 64 usage. The direct path also
+refuses to run in a mount namespace other than PID 1's. Formatting ends with `systemctl restart
+eirl-storage@<disk>.service`, so that the new exFAT's FUSE daemon lives in the disk's unit and not in the format unit,
+whose processes systemd kills when it finishes. The helper reads the disk as data: names only `sd[a-z]`, the USB bus
+checked in sysfs, never a disk any of whose partitions is mounted elsewhere (the boot device) or used as swap, blkid's
+values bounded and sanitised, and `EnhancedIRL/` and the write test through `os.Root` (a link planted on an ext4 disk
+never takes root outside it). A compromised app could eject or format the plugged-in disk, never while it records,
+and nothing else: no path, device or option comes from the app. The packages bring a setuid `/bin/fusermount`
+(package `fuse`, a dependency of `exfat-fuse`); the engine (`NoNewPrivileges`) cannot use it, the app could mount FUSE
+filesystems of its own, as any user of a stock Ubuntu can.
 
 **Why its own file and not `/etc/default/eirl-engine`**: the atomic write is a temporary file
 + `fsync` + `rename()` in the **same directory**, and for that the app would need write
@@ -927,6 +989,12 @@ JETSON=jetson manager/build.sh --restart-engine   # and restarts the stream if t
 destination from `/etc/default/eirl-engine` to `/etc/eirl-encoder/engine.env` (and comments those keys out there,
 with a `.bak-<date>` copy), and installs the binary, unit, drop-in, sudoers (validated with `visudo -cf`) and
 tmpfiles, the SRT output (`srt-live-transmit` and its `libsrt` in `/usr/lib/eirl-encoder/lib`), and the boot splash (`splash/install.sh`, see [`SPLASH.md`](SPLASH.md)).
+Local recordings ([`RECORDING.md`](RECORDING.md) §4): `/usr/local/sbin/eirl-storage`, its units
+`eirl-storage@.service`, `eirl-storage-eject.service` and `eirl-storage-format@.service` (none enabled: udev and the
+helper start them) and `/etc/udev/rules.d/71-eirl-storage.rules`, then `udevadm control --reload` after `daemon-reload`,
+never `trigger`: a disk already plugged in during an install is mounted when it is plugged in again, or at the next
+boot. `/run/eirl-storage` and its `none` state come from the tmpfiles; `exfat-fuse`, `exfat-utils` and `dosfstools`
+from the system layer ([`UPDATES.md`](UPDATES.md) §12).
 On a **new device** (no `/etc/default/eirl-engine` to migrate) it writes `engine.env` with the output **off** and no
 destination, and creates a commented default `/etc/default/eirl-engine` (root, 0644; `SOURCE=hdmi`), never
 overwritten afterwards. With the engine in the package (a release bundle) it also enables `eirl-engine` and
@@ -942,7 +1010,9 @@ The drop-in sets `EIRL_CONF`, which the engine reads (`internal/engine/config`);
 - **Access**: `http://jetson.local` or `http://<board-ip>` (port 80, LAN only).
 - **Logs**: `journalctl -u eirl-encoderd` (method, route and code; never bodies or secrets).
 
-Undo: for SRTLA, see [`SRTLA.md` §8](SRTLA.md#8-install-and-undo); the boot splash, [`SPLASH.md` §4](SPLASH.md#4-build-install-and-undo); the fan control, [`FAN.md` §4](FAN.md#4-install-and-undo). The rest: `sudo systemctl disable --now eirl-encoderd`, delete `/usr/local/bin/eirl-encoderd`,
+Undo: for SRTLA, see [`SRTLA.md` §8](SRTLA.md#8-install-and-undo); the boot splash, [`SPLASH.md` §4](SPLASH.md#4-build-install-and-undo); the fan control, [`FAN.md` §4](FAN.md#4-install-and-undo). Local recordings: `sudo eirl-storage eject` (or `systemctl stop 'eirl-storage@*'`), delete
+`/etc/udev/rules.d/71-eirl-storage.rules`, `/etc/systemd/system/eirl-storage{@,-eject,-format}.service` and
+`/usr/local/sbin/eirl-storage`, then `udevadm control --reload` and `daemon-reload`. The rest: `sudo systemctl disable --now eirl-encoderd`, delete `/usr/local/bin/eirl-encoderd`,
 `/etc/systemd/system/eirl-encoderd.service`, `/etc/systemd/system/eirl-engine.service.d/eirl-encoder.conf`,
 `/etc/sudoers.d/eirl-encoder`, `/etc/tmpfiles.d/eirl-encoder.conf`, `/etc/default/eirl-encoderd` and `/etc/eirl-encoder`
 (with `cloud.json` and `identity`: unlink first from the web to revoke the token in the cloud; without

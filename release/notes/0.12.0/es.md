@@ -1,0 +1,5 @@
+- Nuevo: grabación local en un disco USB. El codificador guarda el programa (lo que sale al aire, con su audio) en un pendrive o un disco USB, a alta calidad (25 Mbps por defecto) y por separado del directo: si se cae la conexión, la grabación sigue. Se configura en la pantalla, en Ajustes › Emisión › Grabación, o en la tarjeta «Grabación» de la web.
+- Tres modos: Desactivada (como hasta ahora), Independiente (REC graba o para, emitas o no) y Con el directo (Emitir también graba, y Dejar de emitir para las dos).
+- Discos en exFAT, FAT32 (las grabaciones se parten en archivos de 3,9 GB) o ext4. Desde el codificador se puede formatear un disco en exFAT. Cada grabación es un archivo MP4 en la carpeta EnhancedIRL.
+- Enchufa el disco antes de emitir y pulsa Expulsar antes de desconectarlo. Un disco duro de 2,5" solo con un hub USB con alimentación propia: sin ella puede dejar sin corriente al codificador.
+- Tras un corte de corriente la grabación se queda parada (el directo sí se reanuda) y el archivo se repara al volver a conectar el disco.

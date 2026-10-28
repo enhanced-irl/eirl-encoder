@@ -8,7 +8,7 @@ const $ = (id) => document.getElementById(id);
 // connection opens: also when the tab is shown again), stop (it closes), status (every status) and mixer (a
 // new mixer state, or null)
 const hooks = { start: [], live: [], stop: [], status: [], mixer: [] };
-const state = { status: null, dest: null, catalog: null, catalogAt: 0, inputDirty: false, inputSaved: '', cloud: null, cloudTimer: 0, es: null, previewTimer: 0, previewGen: 0, levelTimer: 0, live: false, pc: null, frames: 0, frameAt: 0, statsTimer: 0, rtcError: '', mixer: null, mixerImgTimer: 0, pauseDirty: false, audioRows: 0, device: null };
+const state = { status: null, dest: null, catalog: null, catalogAt: 0, inputDirty: false, inputSaved: '', cloud: null, cloudTimer: 0, es: null, previewTimer: 0, previewGen: 0, levelTimer: 0, live: false, pc: null, frames: 0, frameAt: 0, statsTimer: 0, rtcError: '', mixer: null, mixerImgTimer: 0, pauseDirty: false, audioRows: 0, device: null, recView: null };
 
 // --- API -----------------------------------------------------------------------------------
 
@@ -336,7 +336,7 @@ const DETAIL_ARGS = {
   hdmi_no_signal: [], hdmi_signal_lost: [], hdmi_locking: [], hdmi_mode_changed: ['from', 'to'], hdmi_interlaced: ['mode'],
   hdmi_too_fast: ['mode'], hdmi_set_mode_failed: ['error'], hdmi_hung: [], hdmi_no_audio: [],
   gone: [], no_bus: [], no_format: [], unsupported: ['error'], probe_failed: ['rc', 'error'], hung_given_up: [],
-  hung_on_air_unknown: [], hung_on_air: [], port_reset: [],
+  hung_on_air_unknown: [], hung_recording: [], hung_on_air: [], port_reset: [],
   net_receiver_down: [], net_waiting: [], net_no_video: ['tracks'], net_no_audio: [], net_disconnected: [], net_behind: ['seconds'],
   bt_no_audio: [],
   phones_waiting_screen: [], phones_screen_no_audio: [], phones_no_device: [], phones_not_opening: [],
@@ -540,10 +540,20 @@ function renderLiveBtn() {
   if (!state.status) return;
   const emitting = outputOn();
   const live = $('btn-live');
-  live.textContent = emitting ? t('live.stop') : t('live.start');
+  live.textContent = emitting ? t('live.stop') : liveRecords() ? t('live.startRec') : t('live.start');
   live.dataset.action = emitting ? 'off' : 'on';
   live.classList.toggle('primary', !emitting);
   live.classList.toggle('danger', emitting);
+}
+
+// Local recording «with the stream» (RECORDING.md §6.5) and a disk ready: Go live starts the recording too, and says
+// so. state.recView is GET /recording's view (settings.js); a recording already on is not started again
+function liveRecords() {
+  const r = state.mixer && state.mixer.record;
+  const v = state.recView;
+  if (!r || !v || v.mode !== 'with_output') return false;
+  const disk = (r.disk && r.disk.state) || (v.storage && v.storage.state);
+  return disk === 'ready' && r.mode !== 'on' && r.state !== 'on' && r.state !== 'starting';
 }
 
 // Internet uplinks (SRTLA). Only shown if the device has the uplinks dispatcher and the stream goes

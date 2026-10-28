@@ -292,6 +292,12 @@ destination is preset). Linking gives code `SIMX-2345`, approved after 30 s. `/u
 (1.5 s) → `downloading` (3 s) → `ready` (8 s); install → `installing` (6 s) → `idle` on 0.2.0; `409 streaming` /
 `409 not_ready`.
 
+Local recording (RECORDING.md §6): `-disk exfat` plugs a fake USB disk at start; while it runs, writing
+`<data>/disk` plugs, changes or pulls it (`exfat`, `fat32`, `ext4`, `ntfs`, `small`, `blank`, `readonly`, plus
+`dirty`, `another`, `full`, `low`, `slow`, `checking`; no file = no disk), and `-rec-power-lost` starts with a
+recording a power cut stopped. The fake recorder and helper follow the engine's rules (`with_output`, eject and format
+refused while recording, the FAT32 split); `eirl-encoder-sim -h` lists them.
+
 Tests: `internal/i18n` (catalog completeness, negotiation, refs), `internal/device` (migration, hostname, steps,
 setup code, commands passed to timedatectl/hostnamectl, zones), `internal/slots` (validation, duplicates, file),
 `internal/mixer` (slots command, state bounding), `internal/api` (`setup_test.go`: gating with and without a

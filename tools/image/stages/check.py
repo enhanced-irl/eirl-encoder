@@ -312,6 +312,7 @@ def main():
        not missing, ", ".join(missing[:10]))
     # Every file of the bundle at the path install.sh gives it (manager/deploy/install.sh), with the bundle's bytes
     deploy_dst = {"70-eirl-capture.rules": "etc/udev/rules.d/70-eirl-capture.rules",
+                  "71-eirl-storage.rules": "etc/udev/rules.d/71-eirl-storage.rules",  # RECORDING.md §4
                   "90-eirl-uplinks": "etc/NetworkManager/dispatcher.d/90-eirl-uplinks",
                   "eirl-engine-eirl-encoder.conf": "etc/systemd/system/eirl-engine.service.d/eirl-encoder.conf",
                   "sudoers": "etc/sudoers.d/eirl-encoder", "tmpfiles.conf": "etc/tmpfiles.d/eirl-encoder.conf",
@@ -324,7 +325,7 @@ def main():
             if n in ("eirl-encoderd", "srtla_send", "srtla_send_rs", "mediamtx", "srt-live-transmit", "eirl-send",
                      "ristsender"):  # OUTPUTS.md §4, SRTLA.md §9
                 return "usr/local/bin/" + n
-            if n in ("eirl-netsetup", "eirl-update", "eirl-fan"):
+            if n in ("eirl-netsetup", "eirl-update", "eirl-fan", "eirl-storage"):  # RECORDING.md §4
                 return "usr/local/sbin/" + n
             if n.startswith("libsrt.so."):
                 return "usr/lib/eirl-encoder/lib/" + n

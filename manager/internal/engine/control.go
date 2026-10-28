@@ -217,6 +217,12 @@ func (e *Engine) command(cmd string, msg map[string]any) (bool, string) {
 		return e.setPreview(on)
 	case "output_config":
 		return e.reloadOutput()
+	case "record":
+		on, ok := msg["on"].(bool)
+		if !ok {
+			return false, "bad_request"
+		}
+		return e.setRecord(on, "socket")
 	case "output", "lock":
 		on, ok := msg["on"].(bool)
 		if !ok {
@@ -338,6 +344,7 @@ func (e *Engine) state() State {
 		Sources:    []SourceState{},
 		Screen:     e.screenState(),
 		Output:     e.outputState(),
+		Record:     e.recordState(),
 	}
 	for _, s := range e.sources {
 		if s != nil {
@@ -370,6 +377,24 @@ func (e *Engine) outputState() OutputState {
 	o.Kbps, o.InFPS, o.EncFPS, o.EncMbps, o.SentKbps, o.RTTMs = i.Kbps, i.InFPS, i.EncFPS, i.EncMbps, i.SentKbps, i.RTTMs
 	o.Protocol, o.Codec, o.Size, o.FPS = i.Protocol, i.Codec, i.Size, i.FPS
 	return o
+}
+
+// recordState: the recording's info with who changed its mode last; nil without a recorder.
+func (e *Engine) recordState() *RecordState {
+	if e.rec == nil {
+		return nil
+	}
+	i := e.rec.Info()
+	c := e.rec.Config()
+	setting, quality := c.RecMode, c.RecQuality
+	if setting == "" {
+		setting = "off"
+	}
+	if quality == "" {
+		quality = "high"
+	}
+	return &RecordState{Mode: i.Mode, State: i.State, Setting: setting, Quality: quality, Reason: i.Reason, Detail: i.Detail,
+		By: e.recBy, Seq: e.recSeq, ElapsedS: i.ElapsedS, Kbps: i.Kbps, DroppedS: i.DroppedS, File: i.File, Disk: i.Disk}
 }
 
 // publish writes mixer.json and tells subscribers, only when something changed. A source with another

@@ -70,12 +70,12 @@ scp -q $(for f in $EDIDS; do printf 'build/out/%s ' "$f"; done) "$HOST:$tmp/"
 ssh "$HOST" bash -s -- "$tmp" "'$ver'" "'$FILES755'" "'$FILES644 $EDIDS'" "$UNIT" "$RESTART" "'$UNITS'" "$DEST" "'$RETIRED'" <<'EOF'
 set -eu
 tmp=$1; ver=$2; f755=$3; f644=$4; unit=$5; restart=$6; units=$7; D=$8; retired=$9
-# Streaming? With the current name and with the old one (a board not migrated yet)
+# Streaming or recording? With the current name and with the old one (a board not migrated yet)
 emitting() {
   local d
   for d in /run/eirl-engine /run/hdmi2srt; do
     grep -q '^OUTPUT=on' "$d/state" 2>/dev/null && return 0
-    python3 -c 'import json,sys; o=json.load(open(sys.argv[1])).get("output") or {}; sys.exit(0 if o.get("mode") in ("on","connecting") else 1)' \
+    python3 -c 'import json,sys; s=json.load(open(sys.argv[1])); o=s.get("output") or {}; r=s.get("record") or {}; sys.exit(0 if o.get("mode") in ("on","connecting") or r.get("mode")=="on" else 1)' \
       "$d/mixer.json" 2>/dev/null && return 0
   done
   return 1

@@ -1,0 +1,20 @@
+# /etc/udev/rules.d/71-eirl-storage.rules — the USB disk of local recordings (RECORDING.md §4).
+#
+# A USB disk (the disk, never each of its partitions) wants eirl-storage@<disk>.service, which checks it, mounts the right
+# partition (or a whole-disk filesystem) at /media/eirl-rec and says what it found in /run/eirl-storage/state.json. The
+# unit is BindsTo= the disk's device: pulling it out stops the unit, whose stop unmounts. Nothing runs inside udev itself
+# (its time limit and sandbox would kill a check or the exFAT FUSE daemon): udev only names the unit, systemd runs it.
+# SUBSYSTEMS=="usb" and not ID_BUS: a hard disk in a USB enclosure gets ID_BUS=ata from ata_id. The helper checks the
+# USB bus in sysfs again, and never touches the boot device or a disk mounted elsewhere.
+#
+# A card reader without a card is a disk of size 0: nothing until a card is inserted, which the kernel says with a
+# "change" event; taking the card out, another one with size 0, stops the unit. A "change" of a disk whose unit already
+# runs (the partition table re-read after formatting) is a no-op start.
+ACTION=="remove", GOTO="eirl_storage_end"
+SUBSYSTEM!="block", GOTO="eirl_storage_end"
+ENV{DEVTYPE}!="disk", GOTO="eirl_storage_end"
+KERNEL!="sd[a-z]", GOTO="eirl_storage_end"
+ACTION=="add", SUBSYSTEMS=="usb", ATTR{size}!="0", TAG+="systemd", ENV{SYSTEMD_WANTS}+="eirl-storage@%k.service"
+ACTION=="change", SUBSYSTEMS=="usb", ATTR{size}!="0", TAG+="systemd", ENV{SYSTEMD_WANTS}+="eirl-storage@%k.service", RUN+="/bin/systemctl --no-block start eirl-storage@%k.service"
+ACTION=="change", SUBSYSTEMS=="usb", ATTR{size}=="0", RUN+="/bin/systemctl --no-block stop eirl-storage@%k.service"
+LABEL="eirl_storage_end"

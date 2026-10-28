@@ -57,7 +57,7 @@ type Host interface {
 	// It is called from the screen's command goroutine, one at a time and in order, never from the drawing.
 	// It must return (unsupported, or any code) once the engine is stopping. The held «Emitir» sends
 	// {"cmd":"output","on":…,"by":"screen"}: the engine records by=screen (out_by/out_seq), which the socket
-	// never sends.
+	// never sends; the held REC, {"cmd":"record","on":…,"by":"screen"}, the same (record.by/seq).
 	Command(cmd string, msg map[string]any) (bool, string)
 	// ProgramPeak and InputPeak: the VU meters' levels, read 20 times a second from the UI goroutine.
 	ui.Levels

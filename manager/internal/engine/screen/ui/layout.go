@@ -109,6 +109,8 @@ type Layout struct {
 	SettingsQR     Rect
 	SettingsCams   Rect
 	settingsClient int // -1 unset, 0 no client row, 1 with it
+	recRow         int // RecRow: -1 unset, 0 Go live alone, 1 with REC
+	emitRow        Rect
 	btWarn         int // the Bluetooth page's warning band: -1 unset, 0 none, 1 on top of its controls
 	ListRows       int // network list rows per page
 	// The Date & time page: the clock's block; the zone picker: its grid
@@ -133,7 +135,7 @@ type Layout struct {
 
 // NewLayout is Layout(dw, dh, nslots).
 func NewLayout(dw, dh, nslots int) *Layout {
-	l := &Layout{DW: dw, DH: dh, N: nslots, Buttons: map[string]Rect{}, settingsClient: -1}
+	l := &Layout{DW: dw, DH: dh, N: nslots, Buttons: map[string]Rect{}, settingsClient: -1, recRow: -1}
 	m := max(8, dw/80)
 	l.M = m
 	// Header: logo and status on the left, icon buttons (≥ 44 for a finger) on the right, with the same margin m
@@ -180,7 +182,8 @@ func NewLayout(dw, dh, nslots int) *Layout {
 	b["pause"] = Rect{x0 + bw + m, y2, bw, bh}
 	b["cut"] = Rect{x0, y3, bw, th2}
 	b["fade"] = Rect{x0 + bw + m, y3, bw, th2}
-	b["emit"] = Rect{x0, py + ph - eh, cw, eh}
+	l.emitRow = Rect{x0, py + ph - eh, cw, eh}
+	l.RecRow(false)
 	b["power"] = Rect{dw - m - ib, m, ib, hb}
 	b["lock"] = Rect{dw - m - 3*ib - 2*gap, m, ib, hb}
 	b["settings"] = Rect{dw - m - 2*ib - gap, m, ib, hb}
@@ -269,6 +272,31 @@ func NewLayout(dw, dh, nslots int) *Layout {
 	l.Scale = float64(dw) / 1280.0
 	l.sortKeys()
 	return l
+}
+
+// RecRow places Go live's row: Go live alone, or with REC at its right, a third of the row (the local recording,
+// RECORDING.md D1: REC is there unless the recording is off). Recomputed only when it changes.
+func (l *Layout) RecRow(rec bool) {
+	n := 0
+	if rec {
+		n = 1
+	}
+	if n == l.recRow {
+		return
+	}
+	l.recRow = n
+	r := l.emitRow
+	if rec {
+		ew := (r.W - l.M) * 2 / 3
+		l.Buttons["emit"] = Rect{r.X, r.Y, ew, r.H}
+		l.Buttons["rec"] = Rect{r.X + ew + l.M, r.Y, r.W - ew - l.M, r.H}
+	} else {
+		l.Buttons["emit"] = r
+		delete(l.Buttons, "rec")
+	}
+	if l.keys != nil {
+		l.sortKeys()
+	}
 }
 
 func (l *Layout) sortKeys() {

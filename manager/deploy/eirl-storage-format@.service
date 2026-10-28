@@ -1,0 +1,14 @@
+# eirl-storage-format@<seq>: `eirl-storage format <seq>` in the system's mount namespace (RECORDING.md §4), like
+# eirl-storage-eject.service: the app runs `sudo eirl-storage format` with the seq of the disk the user confirmed on
+# stdin, which starts this unit and returns its exit status. It formats only if the state's seq is still that one. It ends by restarting eirl-storage@<disk>.service, which mounts the new filesystem: the exFAT FUSE daemon must
+# live in that unit, not in this one, whose processes systemd kills when it finishes. Not enabled.
+[Unit]
+Description=eirl-storage: format the USB disk of local recordings as exFAT
+Documentation=https://github.com/enhanced-irl/eirl-encoder/blob/main/RECORDING.md
+
+[Service]
+Type=oneshot
+Environment=EIRL_STORAGE_DIRECT=1
+ExecStart=/usr/local/sbin/eirl-storage format %i
+# Partitioning and mkfs.exfat, then the disk's unit restarted (its own limit is 10 minutes)
+TimeoutStartSec=1200

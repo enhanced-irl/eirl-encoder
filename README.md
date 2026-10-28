@@ -209,6 +209,7 @@ and [`MANAGER.md`](MANAGER.md).
 | `manager/cmd/eirl-send`, `manager/internal/rtmpsend` | The RTMP/RTMPS sender | [`OUTPUTS.md`](OUTPUTS.md) |
 | `scripts/`, `systemd/` | The engine's launcher (`eirl-engine-start`), its socket client (`eirl-enginectl`), the boot HDMI init and the systemd units | [`DEVELOPMENT.md`](DEVELOPMENT.md): "Operating" |
 | `manager/` | The management app `eirl-encoderd` (Go: local web and API, destinations, network, modems, cloud link), the network helper `eirl-netsetup`, the fan daemon `eirl-fan`, the boot splash `eirl-splash`, a simulated encoder (`eirl-encoder-sim`), a screen renderer (`eirl-ui-render`) and the deploy files | [`MANAGER.md`](MANAGER.md), [`NETWORK_SOURCES.md`](NETWORK_SOURCES.md), [`WIFI.md`](WIFI.md), [`MODEMS.md`](MODEMS.md), [`SRTLA.md`](SRTLA.md), [`SPLASH.md`](SPLASH.md), [`SETUP.md`](SETUP.md), [`FAN.md`](FAN.md) |
+| `manager/cmd/eirl-storage`, `manager/internal/storage/`, `manager/internal/engine/record/` | Local recording to a USB disk: the root helper that mounts the disk and the engine's recorder | [`RECORDING.md`](RECORDING.md) |
 | `release/`, `manager/internal/update/`, `manager/cmd/eirl-update/`, `manager/cmd/eirl-release/` | Signed releases and over-the-air updates | [`UPDATES.md`](UPDATES.md) |
 | `base/`, `tools/image/` | The slimmed-down base OS and the microSD image | [`BASE.md`](BASE.md), [`IMAGE.md`](IMAGE.md) |
 | `tools/`, `latency/`, `monitor/` | Deployment, release, test and measurement tools | The doc of each piece |
@@ -233,6 +234,7 @@ operating, the measurements, the bugs found and the history of the test board) i
 | Wi-Fi (access point and client) | ✅ Released; measurements and the cloud's side are next | [`WIFI.md`](WIFI.md) |
 | Web app | ✅ Released, reviewed (code and security) | [`MANAGER.md`](MANAGER.md) |
 | Setup wizard, translations | ✅ Released in 0.1.0 | [`SETUP.md`](SETUP.md) |
+| Local recording to a USB disk | ✅ Released in 0.12.0: the program at 25 Mbps (up to 40, or H.265) on exFAT, FAT32 or ext4, alone or with the stream, from the screen and the web; 4 h streaming and recording on the board with nothing lost. Missing: the cloud's view of it, a test cutting the power by its cable | [`RECORDING.md`](RECORDING.md) |
 | Over-the-air updates | ✅ Released in 0.1.0; since 0.11.0 they also bring drivers, firmware and system packages (the system layer), so a card never has to be written again; the test board updates itself from GitHub Releases like any device | [`UPDATES.md`](UPDATES.md) |
 | Fan control | ✅ Released in 0.6.0 (one curve); profiles next | [`FAN.md`](FAN.md) |
 | Boot splash | ✅ Released | [`SPLASH.md`](SPLASH.md) |

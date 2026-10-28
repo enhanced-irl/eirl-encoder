@@ -14,6 +14,9 @@ int eg_set_state(GstElement *el, int state);
 int eg_get_state(GstElement *el, gint64 timeout_ns);
 void eg_fix_base(GstElement *pipe, GstClockTime base);
 GstClockTime eg_base_time(GstElement *el);
+int eg_send_eos(GstElement *pipe);
+// A recording's timeline starts at its first video buffer (RECORDING.md §5.4); 0 if a source is missing
+int eg_zero_start(GstElement *pipe, const char *video, const char *audio);
 GstClockTime eg_now(void);
 int eg_set_arg(GstElement *el, const char *prop, const char *value);
 int eg_set_pad_arg(GstElement *el, const char *pad, const char *prop, const char *value);

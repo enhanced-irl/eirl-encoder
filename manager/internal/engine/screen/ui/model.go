@@ -18,6 +18,8 @@ type Status struct {
 	} `json:"screen"`
 	Output OutputStatus `json:"output"`
 	Audio  *AudioStatus `json:"audio,omitempty"`
+	// Record is the local recording (RECORDING.md §5.2); nil from an engine without a recorder: no REC
+	Record *RecordStatus `json:"record,omitempty"`
 }
 
 type ProgramStatus struct {
@@ -81,6 +83,35 @@ type OutputStatus struct {
 	// (h264 | h265)
 	Protocol string `json:"protocol,omitempty"`
 	Codec    string `json:"codec,omitempty"`
+}
+
+// RecordStatus is the engine's record object (RECORDING.md §5.2): its mode and state like the output's, the settings
+// as the engine has them now (REC_MODE, REC_QUALITY), why it stopped, while on its time, and always the disk.
+type RecordStatus struct {
+	Mode     string     `json:"mode"`    // on | off
+	State    string     `json:"state"`   // off | starting | on | error
+	Setting  string     `json:"setting"` // off | manual | with_output
+	Quality  string     `json:"quality"` // standard | high | max | efficient
+	Reason   string     `json:"reason,omitempty"`
+	By       string     `json:"by,omitempty"`
+	Seq      int        `json:"seq"`
+	ElapsedS *int       `json:"elapsedS,omitempty"`
+	Kbps     *int       `json:"kbps,omitempty"`
+	DroppedS *int       `json:"droppedS,omitempty"`
+	File     string     `json:"file,omitempty"`
+	Disk     RecordDisk `json:"disk"`
+}
+
+// RecordDisk is record.disk: the storage helper's state (RECORDING.md §4.3) and the room left at the quality.
+type RecordDisk struct {
+	State       string `json:"state"` // none | checking | ready | unsupported | unformatted | error | ejected
+	Reason      string `json:"reason,omitempty"`
+	FS          string `json:"fs,omitempty"`
+	Label       string `json:"label,omitempty"`
+	SizeBytes   *int64 `json:"sizeBytes,omitempty"`
+	FreeBytes   *int64 `json:"freeBytes,omitempty"`
+	MinutesLeft *int   `json:"minutesLeft,omitempty"`
+	Dirty       bool   `json:"dirty,omitempty"`
 }
 
 type AudioStatus struct {
@@ -327,7 +358,7 @@ func (noNet) Say(string)                  {}
 // page's (page) and the audio settings' (audioset) are shown in their view.
 type Command struct {
 	Msg    map[string]any
-	Origin string // touch | audio | hold | page | audioset
+	Origin string // touch | audio | hold | rec | page | audioset
 	X, Y   int    // where the finger was (logs)
 }
 

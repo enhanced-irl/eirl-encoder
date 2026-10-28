@@ -12,7 +12,7 @@ type SettingsGroup struct {
 // SettingsGroups are the Settings list's entries, in order (seven: what fits at 1024×600 with entries a finger
 // can hit). A list entry is s_page_<group>; a tab, s_tab_<page>. A group of one page has the page's id.
 var SettingsGroups = []SettingsGroup{
-	{"stream", []string{"dest", "uplinks", "pause"}},
+	{"stream", []string{"dest", "uplinks", "pause", "recording"}}, // Recording (RECORDING.md §6): a tab, the list keeps seven
 	{"sources", []string{"sources", "input", "camera"}},
 	{"wifi", []string{"wifi", "bluetooth"}}, // Wireless (BLUETOOTH.md D6: a tab, so the list keeps seven entries)
 	{"cams", []string{"cams"}},

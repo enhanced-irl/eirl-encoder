@@ -28,6 +28,7 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/phones"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/pipeline"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/probe"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/record"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/scene"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/screen"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/server"
@@ -81,7 +82,8 @@ type Engine struct {
 	usbSig usbsignal.Sys
 	nslots int
 	tc     bool
-	out    *output.Output // the hot output (F3): SRT, SRTLA, RTMP(S), RIST or UDP, with ABR (OUTPUTS.md)
+	out    *output.Output   // the hot output (F3): SRT, SRTLA, RTMP(S), RIST or UDP, with ABR (OUTPUTS.md)
+	rec    *record.Recorder // the local recording to a USB disk (RECORDING.md); nil without its taps
 	// loadConfig reads the configuration again for output_config (config.Load; the tests replace it)
 	loadConfig func() (*config.Config, error)
 	// readyState is the state file's second write (main's), rewritten when output_config changes the
@@ -140,6 +142,9 @@ type Engine struct {
 	pauseSeq    int // the newest Pause text whose image is being made
 	outBy       string
 	outSeq      int
+	recBy       string // who changed the recording's mode last: start | socket | screen | output
+	recSeq      int
+	recByOutput bool // the recording was started by Go live (with_output): Stop stops it
 	newFPS      *float64
 	measured    *float64
 	per         periodicState
@@ -179,7 +184,7 @@ func New(o Options) *Engine {
 		nvcam:   c.MixerHDMICapture == "nvcam" && o.Media.HasElement(o.Platform.CSICapture),
 		runDir:  c.RunDir, configMain: o.MixerMain,
 		net:       &netcam.Client{KeyFile: netcam.KeyFile(c.NetConfDir)},
-		previewOn: true, outBy: "start",
+		previewOn: true, outBy: "start", recBy: "start",
 		hidden:   map[string]bool{},
 		lastSlot: map[string]int{}, unpluggedAt: map[string]time.Time{},
 		events:     make(chan func(), 64),
@@ -226,7 +231,13 @@ func (e *Engine) programDesc(screen bool) string {
 		Levels: c.Levels, LevelsPort: c.LevelsPort,
 		Thumb: c.Thumb && c.ThumbFile != "", ThumbWidth: tw, ThumbHeight: th, ThumbEvery: c.ThumbEvery, ThumbFile: c.ThumbFile,
 		Screen: screen,
+		Record: e.recordable(),
 	})
+}
+
+// recordable: the recording's taps go in the program (RECORDING.md §2) when a recording can be made here.
+func (e *Engine) recordable() bool {
+	return e.cfg.RecDir != "" && e.media.HasElement("mp4mux") && e.media.HasElement(e.plat.H264Enc)
 }
 
 func splitSize(s string, dw, dh int) (int, int) {
@@ -302,6 +313,7 @@ func (e *Engine) Start(withScreen bool) error {
 		e.audio.Start(e.scene.Pause.On && e.scene.Pause.Mute)
 	}
 	e.startOutput(pgm)
+	e.startRecorder(pgm)
 	go e.watchProgram()
 	mark("audio_output_ms")
 
@@ -689,6 +701,33 @@ func (e *Engine) outputDesc(c *config.Config, sink pipeline.Sink) string {
 		TSPackets: c.TSPerPacket()})
 }
 
+// startRecorder builds the local recording on the program's recv/reca (RECORDING.md §2): nothing is
+// recorded until it is switched on.
+func (e *Engine) startRecorder(pgm gst.Pipeline) {
+	if pgm.ByName("recv") == nil {
+		return
+	}
+	stateDir := ""
+	if e.sceneFile != "" { // STATE_DIR usable
+		stateDir = e.cfg.StateDir
+	}
+	r, err := record.New(record.Options{Config: e.cfg, Media: e.media, Program: pgm, Desc: e.recordDesc,
+		StateDir: stateDir, OnChange: e.changed})
+	if err != nil {
+		elog.Event("engine", "record_unavailable", "err", err)
+		return
+	}
+	e.rec = r
+}
+
+// recordDesc is a recording session's pipeline: the quality's codec and bitrates at the program's size and
+// rate, with the output's H.264 profile and preset.
+func (e *Engine) recordDesc(c *config.Config) string {
+	q := c.Recording()
+	return e.plat.Recording(pipeline.Recording{Width: e.width, Height: e.height, FPS: e.fps, Codec: q.Codec,
+		VKbps: q.VKbps, AKbps: q.AKbps, Profile: c.Profile, Preset: c.H264Preset, AEnc: c.AENC})
+}
+
 // SetReadyState is the state file's ready write (main's), for output_config to rewrite it with the new
 // output keys. Before Run.
 func (e *Engine) SetReadyState(s config.State) { e.readyState = &s }
@@ -710,7 +749,12 @@ func (e *Engine) reloadOutput() (bool, string) {
 		return false, "restart_required"
 	}
 	next := cur.WithOutput(fresh)
-	e.out.SetConfig(next)
+	if !cur.SameOutput(next) {
+		e.out.SetConfig(next) // a session on air restarts with it: not for the recording's keys alone
+	}
+	if e.rec != nil {
+		e.rec.SetConfig(next)
+	}
 	if e.readyState != nil {
 		_ = next.WriteState(*e.readyState)
 	}
@@ -724,13 +768,63 @@ func (e *Engine) setOutput(on bool, by string) (bool, string) {
 	if e.out == nil {
 		return false, "unsupported"
 	}
-	if e.out.Emitting() != on {
+	changed := e.out.Emitting() != on
+	if changed {
 		e.outBy, e.outSeq = by, e.outSeq+1
 		elog.Event("mixer", "output_toggled", "on", on, "by", by)
 	}
 	e.out.Set(on)
+	if changed {
+		e.recordWithOutput(on)
+	}
 	e.publish()
 	return true, ""
+}
+
+// recordWithOutput: with REC_MODE=with_output, Go live also records (without a disk the recording waits for
+// one and says no_disk; the stream goes on regardless), and Stop stops a recording that Go live started. A
+// recording started with REC only stops with REC (RECORDING.md §5.2).
+func (e *Engine) recordWithOutput(on bool) {
+	if e.rec == nil || e.rec.Config().RecMode != config.RecWithOutput {
+		return
+	}
+	switch {
+	case on && !e.rec.Recording():
+		e.toggleRecord(true, "output")
+		e.recByOutput = true
+	case !on && e.recByOutput:
+		e.toggleRecord(false, "output")
+		e.recByOutput = false
+	}
+}
+
+// setRecord: record or stop, live (the socket's record command; the screen's REC button). Starting needs the
+// recording on in the settings and a disk ready with room; the recording is then the REC button's, not Go live's.
+func (e *Engine) setRecord(on bool, by string) (bool, string) {
+	if e.rec == nil {
+		return false, "unsupported"
+	}
+	if on && !e.rec.Config().RecordingEnabled() {
+		return false, "disabled"
+	}
+	if on && !e.rec.Recording() && !e.rec.DiskReady() {
+		return false, "no_disk"
+	}
+	if on && !e.rec.Recording() && !e.rec.RoomLeft() {
+		return false, "disk_full"
+	}
+	e.toggleRecord(on, by)
+	e.recByOutput = false
+	e.publish()
+	return true, ""
+}
+
+func (e *Engine) toggleRecord(on bool, by string) {
+	if e.rec.Recording() != on {
+		e.recBy, e.recSeq = by, e.recSeq+1
+		elog.Event("mixer", "record_toggled", "on", on, "by", by)
+	}
+	e.rec.Set(on)
 }
 
 // hdmiID is the board's HDMI in the catalogue (probe).
@@ -754,7 +848,7 @@ func (e *Engine) mayReplugHDMI() bool {
 
 // replugAllowed is mayReplugHDMI's answer, on the actor.
 func (e *Engine) replugAllowed() bool {
-	if e.emitting() {
+	if e.busy() {
 		return false
 	}
 	for _, id := range e.onAirIDs() {
@@ -768,14 +862,28 @@ func (e *Engine) replugAllowed() bool {
 // emitting: the hot output wants to be on air.
 func (e *Engine) emitting() bool { return e.out != nil && e.out.Emitting() }
 
+// recording: the local recording is on (its mode).
+func (e *Engine) recording() bool { return e.rec != nil && e.rec.Recording() }
+
+// busy: streaming or recording. What must not cut a live stream must not cut a recording either: the HDMI's
+// replug pulse, slot changes that displace what is on air, the USB hub's power cut (RECORDING.md §5.5).
+func (e *Engine) busy() bool { return e.emitting() || e.recording() }
+
 // onAirFor is usb_on_air for source me while emitting (nil when not): what a power cut of its hub must
-// not switch off. Asked from the source's goroutine; the actor answers.
+// not switch off; while recording, usbhub.ErrRecording (nothing may be cut). Asked from the source's
+// goroutine; the actor answers.
 func (e *Engine) onAirFor(me *Source) (map[string]usbhub.OnAir, error) {
 	type answer struct {
 		air map[string]usbhub.OnAir
+		err error
 	}
 	ch := make(chan answer, 1)
 	e.post(func() {
+		if e.recording() {
+			// The cut powers off the whole hub (MIXER.md §16), the recording's disk with it
+			ch <- answer{err: usbhub.ErrRecording}
+			return
+		}
 		if !e.emitting() {
 			ch <- answer{}
 			return
@@ -797,11 +905,11 @@ func (e *Engine) onAirFor(me *Source) (map[string]usbhub.OnAir, error) {
 		me.mu.Lock()
 		dev := me.usbDev
 		me.mu.Unlock()
-		ch <- answer{air.Devices(me.id, dev, e.hubs.Sys.DeviceOfCard)}
+		ch <- answer{air: air.Devices(me.id, dev, e.hubs.Sys.DeviceOfCard)}
 	})
 	select {
 	case a := <-ch:
-		return a.air, nil
+		return a.air, a.err
 	case <-time.After(2 * time.Second):
 		return nil, errors.New("engine does not answer")
 	case <-e.stopped:
@@ -840,6 +948,9 @@ func (e *Engine) Stop() {
 		if e.out != nil && !e.out.Close(min(stopBudget, time.Until(end)-3*time.Second)) {
 			elog.Event("engine", "output_close_timeout")
 		}
+		if e.rec != nil && !e.rec.Close(min(stopBudget, time.Until(end)-3*time.Second)) {
+			elog.Event("engine", "record_close_timeout")
+		}
 	}()
 	until := t0.Add(stopBudget)
 	for _, s := range e.sources {
@@ -872,6 +983,9 @@ func (e *Engine) Stop() {
 		}
 		if sideDone && e.out != nil {
 			e.out.Release()
+		}
+		if sideDone && e.rec != nil {
+			e.rec.Release()
 		}
 		if sideDone && e.mvBridge != nil {
 			e.mvBridge.Free()

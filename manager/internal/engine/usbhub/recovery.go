@@ -1,6 +1,7 @@
 package usbhub
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -28,6 +29,9 @@ const (
 // Unknown, alone in what holds a cut: what is on air is not known.
 const Unknown = "?"
 
+// Recording names the local recording among what holds a cut.
+const Recording = "recording"
+
 // OnAir is something on air that a cut would power off: a video source or the audio input that sounds.
 type OnAir struct {
 	ID    string // the source's or the input's id (Unknown: cannot tell)
@@ -44,6 +48,13 @@ func (o OnAir) Text() string {
 }
 
 var unknownOnAir = OnAir{ID: Unknown, Name: Unknown}
+
+// ErrRecording is OnAirIfEmitting's answer while the local recording is on: the cut would power off its USB
+// disk with the whole hub (RECORDING.md §5.5), so nothing is cut until it stops.
+var ErrRecording = errors.New("recording to a USB disk")
+
+// recordingOnAir is the hold while recording.
+var recordingOnAir = OnAir{ID: Recording, Name: Recording}
 
 // The source states the recovery looks at (engine.State*).
 const (
@@ -108,6 +119,8 @@ func (r *Recovery) NoteDetail() detail.D {
 		return detail.New("hung_given_up")
 	case len(r.held) == 1 && r.held[0] == unknownOnAir:
 		return detail.New("hung_on_air_unknown")
+	case len(r.held) == 1 && r.held[0] == recordingOnAir:
+		return detail.New("hung_recording")
 	case len(r.held) > 0:
 		var video, audio []string
 		for _, o := range r.held {
@@ -194,12 +207,15 @@ func (r *Recovery) Recover(h Host, name, state, dev string, now time.Time) (cut 
 	var held []OnAir
 	if plan.OK() {
 		onAir, err := h.OnAirIfEmitting()
-		if err != nil {
+		switch {
+		case errors.Is(err, ErrRecording):
+			held = []OnAir{recordingOnAir}
+		case err != nil:
 			if len(r.held) == 0 {
 				elog.Event("mixer", "usb_recovery_held_unknown", "source", name, "err", err)
 			}
 			held = []OnAir{unknownOnAir}
-		} else {
+		default:
 			held = Blockers(plan, onAir)
 		}
 	}

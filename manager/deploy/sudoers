@@ -3,7 +3,8 @@
 # menu of the touch screen) or power it off (that menu, MIXER.md §14), apply the network of the cameras
 # as their files ask (eirl-ap.service = eirl-netsetup apply, NETWORK_SOURCES.md §6.2) and start the
 # update helper (eirl-update.service, which takes nothing from the app but data it verifies itself,
-# UPDATES.md §7).
+# UPDATES.md §7), and eject or format the USB disk of local recordings (eirl-storage, RECORDING.md §4: it runs the
+# action in its own unit, eirl-storage-eject/-format.service, outside the app's sandbox, and refuses while recording).
 # EXACT commands, no wildcards: sudo rejects any other argument (e.g. `systemctl reboot --force`).
-eirl-encoder ALL=(root) NOPASSWD: /bin/systemctl start eirl-engine.service, /bin/systemctl stop eirl-engine.service, /bin/systemctl restart eirl-engine.service, /bin/systemctl reboot, /bin/systemctl poweroff, /bin/systemctl start eirl-ap.service, /bin/systemctl --no-block start eirl-update.service
+eirl-encoder ALL=(root) NOPASSWD: /bin/systemctl start eirl-engine.service, /bin/systemctl stop eirl-engine.service, /bin/systemctl restart eirl-engine.service, /bin/systemctl reboot, /bin/systemctl poweroff, /bin/systemctl start eirl-ap.service, /bin/systemctl --no-block start eirl-update.service, /usr/local/sbin/eirl-storage eject, /usr/local/sbin/eirl-storage format
 Defaults:eirl-encoder !lecture

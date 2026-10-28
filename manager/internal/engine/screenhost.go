@@ -41,7 +41,8 @@ func (e *Engine) phonesScreen() phones.ScreenView {
 type screenHost struct{ e *Engine }
 
 // Command runs a screen command on the actor. Emitting from the screen records by=screen (the app sees
-// it through by/seq and saves OUTPUT); the socket's commands can never say so.
+// it through by/seq and saves OUTPUT), and so does recording (REC: the record command, RECORDING.md §5.2); the
+// socket's commands can never say so.
 func (h screenHost) Command(cmd string, msg map[string]any) (bool, string) {
 	type res struct {
 		ok   bool
@@ -53,13 +54,19 @@ func (h screenHost) Command(cmd string, msg map[string]any) (bool, string) {
 			h.e.cameraCommand(cmd, msg, func(ok bool, code string) { ch <- res{ok, code} })
 			return
 		}
-		if cmd == "output" {
+		if cmd == "output" || cmd == "record" {
 			on, ok := msg["on"].(bool)
 			if !ok {
 				ch <- res{false, "bad_request"}
 				return
 			}
-			r1, r2 := h.e.setOutput(on, "screen")
+			var r1 bool
+			var r2 string
+			if cmd == "output" {
+				r1, r2 = h.e.setOutput(on, "screen")
+			} else {
+				r1, r2 = h.e.setRecord(on, "screen")
+			}
 			ch <- res{r1, r2}
 			return
 		}

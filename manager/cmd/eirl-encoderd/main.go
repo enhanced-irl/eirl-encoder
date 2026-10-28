@@ -78,6 +78,7 @@ func main() {
 	netsetup := flag.String("netsetup", "/usr/local/sbin/eirl-netsetup", "root helper of the network cameras (without it, no network cameras)")
 	camerasMax := flag.Int("cameras-max", netcfg.DefaultMax, "network cameras at most (1-8)")
 	apState := flag.String("ap-state", "/run/eirl-ap/state.json", "access point state (left by eirl-netsetup)")
+	storageState := flag.String("storage-state", "/run/eirl-storage/state.json", "the USB disk of local recordings (left by eirl-storage, RECORDING.md §4.3; empty = none)")
 	localSock := flag.String("local-socket", "/run/eirl-encoder/api.sock", "Unix socket of the API for the engine's screen (MANAGER.md §3, \"Local socket\"; empty = none)")
 	// GET /device version (SETUP.md §2): the release and the installed engine
 	releaseFile := flag.String("device-version-file", "/usr/lib/eirl-encoder/VERSION", "release version file (GET /device)")
@@ -132,6 +133,9 @@ func main() {
 		Web:       webFS(),
 		Log:       log,
 	}
+	// The USB disk of local recordings (RECORDING.md §6.2): the storage helper's state file; its eject and format run
+	// with sudo -n, the sudoers rule's exact commands
+	srv.StoragePath = *storageState
 	setupDevice(srv, *confDir, *releaseFile, *engineFile, log)
 	var previewWatch api.PreviewWatch
 	if *liveMax > 0 {

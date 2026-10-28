@@ -17,8 +17,9 @@ import (
 
 // --- updates (OTA, UPDATES.md §8; CONTRACT §4) -------------------------------------------------------------
 //
-// GET /update, POST /update/check (202), POST /update/install (202; 409 streaming | not_ready | busy), POST
-// /update/reboot (202; 409 streaming | nothing_pending; 503 power_unavailable: "restart to finish", UPDATES.md §12.5). Web
+// GET /update, POST /update/check (202), POST /update/install (202; 409 streaming | recording | not_ready | busy), POST
+// /update/reboot (202; 409 streaming | recording | nothing_pending; 503 power_unavailable: "restart to finish", UPDATES.md
+// §12.5). A local recording keeps the engine busy like streaming (RECORDING.md §5.5), with its own code and message. Web
 // (session + CSRF, like every mutation) and local socket (the touch screen has the button; local.go whitelists the
 // three routes). Messages come from the i18n catalog (update.*) in the request language. The app only
 // checks, downloads and verifies; installing is the root helper's job (eirl-update.service).
@@ -49,9 +50,9 @@ type UpdateView struct {
 	Message   string               `json:"message,omitempty"`
 	// Additive
 	App        string          `json:"app"`               // the running app binary's version (the helper's health check compares it)
-	Streaming  bool            `json:"streaming"`         // installing is refused while streaming
+	Streaming  bool            `json:"streaming"`         // installing is refused while streaming (and while recording: blocked)
 	CanInstall bool            `json:"canInstall"`        // the "Update" button is enabled
-	Blocked    string          `json:"blocked,omitempty"` // why it is not: streaming | not_ready | busy
+	Blocked    string          `json:"blocked,omitempty"` // why it is not: streaming | recording | not_ready | busy
 	BlockedMsg string          `json:"blockedMessage,omitempty"`
 	LastResult *UpdateRunView  `json:"lastResult,omitempty"` // the helper's last run
 	AutoCheck  bool            `json:"autoCheck"`
@@ -135,8 +136,12 @@ func (s *Server) installedVersions() *update.Versions {
 func (s *Server) updateView(r *http.Request) UpdateView {
 	st := s.Update.Status()
 	lang := reqLang(r)
+	busy := "" // st.Streaming counts a recording too: streaming | recording
+	if st.Streaming {
+		busy = s.busyWith()
+	}
 	v := UpdateView{Current: st.Current, State: st.State, Progress: st.Progress, Error: st.Error,
-		Message: updateMessage(lang, st.Error), App: s.Info.Version, Streaming: st.Streaming, CanInstall: st.CanInstallNow(),
+		Message: updateMessage(lang, st.Error), App: s.Info.Version, Streaming: busy == "streaming", CanInstall: st.CanInstallNow(),
 		AutoCheck: st.AutoCheck, TestBuild: update.TestBuild()}
 	if v.Current == "" {
 		v.Current = s.Info.Version // an install from before the OTA (no VERSION file): the app's own
@@ -156,7 +161,7 @@ func (s *Server) updateView(r *http.Request) UpdateView {
 	case st.State == update.StateInstalling:
 		v.Blocked = "busy"
 	case st.Available != nil && st.Ready && st.Streaming:
-		v.Blocked = "streaming"
+		v.Blocked = busy
 	case st.Available != nil:
 		v.Blocked = "not_ready"
 	}
@@ -207,7 +212,8 @@ func (s *Server) postUpdateInstall(w http.ResponseWriter, r *http.Request) {
 	case err == nil:
 		writeJSON(w, 202, s.updateView(r))
 	case errors.Is(err, update.ErrStreaming):
-		fail(w, r, 409, "streaming", "update.streaming")
+		busy := s.busyWith()
+		fail(w, r, 409, busy, "update."+busy)
 	case errors.Is(err, update.ErrNotReady):
 		fail(w, r, 409, "not_ready", "update.not_ready")
 	case errors.Is(err, update.ErrBusy):
@@ -275,7 +281,7 @@ func areaOrder(a string) int {
 }
 
 // postUpdateReboot: "restart to finish the update" (UPDATES.md §12.5), only when something waits for it and never
-// while streaming.
+// while streaming or recording.
 func (s *Server) postUpdateReboot(w http.ResponseWriter, r *http.Request) {
 	if s.Power == nil {
 		fail(w, r, 503, "power_unavailable", "update.power_unavailable")
@@ -288,7 +294,8 @@ func (s *Server) postUpdateReboot(w http.ResponseWriter, r *http.Request) {
 	if s.Update != nil {
 		st := s.Update.Status()
 		if st.Streaming {
-			fail(w, r, 409, "streaming", "update.reboot_streaming")
+			busy := s.busyWith()
+			fail(w, r, 409, busy, "update.reboot_"+busy)
 			return
 		}
 		if st.State == update.StateInstalling {

@@ -2,6 +2,11 @@
 # over the frozen base (tools/image/base.lock) by build/system.sh --update-lock. Every line is installed on every
 # board and image, at this version: review a change. Columns:
 # name version arch sha256 size installed-size(KiB) source source-version path-in-archive
+dosfstools 4.1-1 arm64 234bebf1b198d2f4eb1432c0bfc2128223d218edbbf14f8dbbe87e0dbbc80fed 52710 201 dosfstools 4.1-1 pool/main/d/dosfstools/dosfstools_4.1-1_arm64.deb
+exfat-fuse 1.2.8-1 arm64 ce6d71e83761f51d8ce0d0c4e53a0c9404ab85c012228a4014fc1eb26fc1b062 21440 60 fuse-exfat 1.2.8-1 pool/universe/f/fuse-exfat/exfat-fuse_1.2.8-1_arm64.deb
+exfat-utils 1.2.8-1 arm64 9c7033cbebcefccda08d3a410686f8275ba4abf11f5e57046060dcdd5aedb819 34292 183 exfat-utils 1.2.8-1 pool/universe/e/exfat-utils/exfat-utils_1.2.8-1_arm64.deb
+fuse 2.9.7-1ubuntu1 arm64 acad29459043a9581813264245eaa21f577b34685802378578ab8d5692a3d435 22698 103 fuse 2.9.7-1ubuntu1 pool/main/f/fuse/fuse_2.9.7-1ubuntu1_arm64.deb
+libfuse2 2.9.7-1ubuntu1 arm64 b292e89f44c403a862242be7c365ef446617c0e291bb7e4f6216e23095eb71b9 68398 282 fuse 2.9.7-1ubuntu1 pool/main/f/fuse/libfuse2_2.9.7-1ubuntu1_arm64.deb
 libimobiledevice6 1.2.1~git20171128.5a854327+dfsg-0.1 arm64 3eafcd93aee10817224f892d624885987314da732657a901def3e38968438bf2 53432 166 libimobiledevice 1.2.1~git20171128.5a854327+dfsg-0.1 pool/main/libi/libimobiledevice/libimobiledevice6_1.2.1~git20171128.5a854327+dfsg-0.1_arm64.deb
 libplist3 2.0.0-2ubuntu1 arm64 8bcaaa566f33aec69f098d2cd972f86ff076d924a818e49f1f8ab38af00da96f 27728 75 libplist 2.0.0-2ubuntu1 pool/main/libp/libplist/libplist3_2.0.0-2ubuntu1_arm64.deb
 libusbmuxd4 1.1.0~git20171206.c724e70f-0.1 arm64 25b2a8efad1380961df4a89683cdf485b96e85a844a5b35739055bf9ec454e27 13928 54 libusbmuxd 1.1.0~git20171206.c724e70f-0.1 pool/main/libu/libusbmuxd/libusbmuxd4_1.1.0~git20171206.c724e70f-0.1_arm64.deb

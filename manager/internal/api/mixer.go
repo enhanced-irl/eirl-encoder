@@ -42,6 +42,10 @@ var mixerErrors = map[string]string{
 var mixerCmdErrors = map[string]map[string]string{
 	"camera_control": {"unsupported": "mixer.camera_unsupported"},
 	"camera_reset":   {"unsupported": "mixer.camera_unsupported"},
+	// the local recording (RECORDING.md §5.2): without a recorder (or an engine older than it), off in the settings,
+	// no disk ready, a full disk
+	"record": {"unsupported": "record.unsupported", "unknown_command": "record.unsupported", "disabled": "record.disabled",
+		"no_disk": "record.no_disk", "disk_full": "record.disk_full"},
 }
 
 // mixerErrorKey: the catalog key of an engine error code in a command; mixer.rejected if unknown

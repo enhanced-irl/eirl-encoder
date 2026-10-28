@@ -216,7 +216,7 @@ func (e *Engine) setSlots(msg map[string]any) (bool, string) {
 	if err != nil {
 		return false, "bad_request"
 	}
-	if e.emitting() {
+	if e.busy() {
 		for _, id := range e.onAirIDs() {
 			if id != "" && e.displaces(cfg, id) {
 				return false, "on_air"

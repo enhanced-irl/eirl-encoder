@@ -1,7 +1,8 @@
 // Settings cards of the dashboard that came with the device API (setup batch, 2026-10): source slots
 // (GET/PUT /sources/slots), updates (GET /update, POST /update/check|install|reboot) and the device (GET/PUT
-// /device: language, name, time zone and clock); later, Bluetooth audio (GET/PUT /bluetooth). Loaded after
-// app.js: it uses its helpers (api, t, toast, option, state, hooks, syncRows).
+// /device: language, name, time zone and clock); later, Bluetooth audio (GET/PUT /bluetooth) and local recording
+// (GET/PUT /recording, PUT /record, POST /storage/eject|format). Loaded after app.js: it uses its helpers (api, t,
+// toast, option, state, hooks, syncRows, askInline).
 'use strict';
 
 // --- Source slots (slots.json) ---------------------------------------------------------------
@@ -755,6 +756,408 @@ hooks.live.push(loadBluetooth);
 hooks.stop.push(() => clearTimeout(bt.timer));
 onLangChange(() => { if (bt.data) renderBluetooth(bt.data); });
 
+// --- Local recording (RECORDING.md §6) -------------------------------------------------------
+// The program to a USB disk, with its own encode: REC, the mode (off · manual · with_output), the quality and the disk
+// (eject, format). The recording's state comes with the mixer's (status.mixer.record, with every status and mixer
+// event); the view (mode, quality, the qualities, the storage helper's state) from GET /recording, asked when the card
+// first shows, after each action and when the disk's state changes (a disk plugged in or out). An older engine sends
+// no record and an older app answers 404: no card. Errors are the app's message, already in the page's language.
+
+const rec = { view: null, viewAt: 0, gone: false, shown: false, disk: '', gen: 0, loadAt: 0, busy: '', timer: 0,
+  seq: null, base: 0, at: 0, shownS: 0, warnKey: '' };
+const REC_MODES = ['off', 'manual', 'with_output'];
+const REC_QUALITIES = ['standard', 'high', 'max', 'efficient'];
+const REC_REASONS = ['no_disk', 'disk_removed', 'disk_full', 'disk_slow', 'write_error', 'encoder_error', 'power_lost', 'internal'];
+const DISK_STATES = ['none', 'checking', 'ready', 'unsupported', 'unformatted', 'error', 'ejected'];
+const FS_NAMES = { exfat: 'exFAT', fat32: 'FAT32', fat16: 'FAT16', fat12: 'FAT12', ext4: 'ext4', ntfs: 'NTFS' };
+// GB in an hour at a bitrate in kbps: 3600 s / 8 bits / 10^6 kB per GB
+const GB_PER_KBPS_HOUR = 3600 / 8 / 1e6;
+
+// Recording, or asked to: the button stops, the quality and the disk wait
+const recOn = (r) => !!r && (r.mode === 'on' || r.state === 'starting' || r.state === 'on');
+const recQualityName = (id) => (REC_QUALITIES.includes(id) ? t('rec.q.' + id) : id || '');
+const fsName = (fs) => FS_NAMES[fs] || fs || t('rec.fsUnknown');
+const diskName = (d) => d.label || d.model || t('rec.unnamed');
+// 4521 → «01:15:21»
+const recClock = (s) => [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map((n) => String(n).padStart(2, '0')).join(':');
+
+// Minutes → «3 h 20 min», «45 min», «12 h»
+function recSpan(min) {
+  const m = Math.max(0, Math.floor(min));
+  const h = Math.floor(m / 60);
+  if (!h) return t('rec.min', { m });
+  return m % 60 ? t('rec.hm', { h, m: m % 60 }) : t('rec.h', { h });
+}
+
+// Bytes → «62 GB», «1,2 TB», «740 MB»: decimal units, as disks are sold
+function diskSize(b) {
+  if (typeof b !== 'number' || !(b >= 0)) return '';
+  if (b >= 1e12) return t('unit.tb', { v: fmtNum(b / 1e12, 1) });
+  if (b >= 1e9) return t('unit.gb', { v: fmtNum(b / 1e9, b >= 1e10 ? 0 : 1) });
+  return t('unit.mb', { v: fmtNum(b / 1e6, 0) });
+}
+
+// «Alta · 25 Mbps · 11,4 GB/h»; the codec only when it is not H.264
+function qualityLabel(q) {
+  const mbps = t('unit.mbps', { v: fmtNum((q.videoKbps || 0) / 1000, 0) });
+  const rate = q.codec && q.codec !== 'h264' ? `${codecLabel(q.codec) || q.codec.toUpperCase()} ${mbps}` : mbps;
+  const gb = fmtNum(((q.videoKbps || 0) + (q.audioKbps || 0)) * GB_PER_KBPS_HOUR, 1);
+  return t('rec.qOption', { name: recQualityName(q.id), rate, gb });
+}
+
+// The disk in the format question: «EIRL-REC» (DataTraveler 3.0 · 62 GB)
+function diskWho(d) {
+  const name = t('common.quoted', { s: diskName(d) });
+  const more = [d.label ? d.model : '', diskSize(d.sizeBytes)].filter(Boolean).join(' · ');
+  return more ? `${name} (${more})` : name;
+}
+
+// The recording's state: the mixer's, unless an action's answer (the view's record) is newer by a moment
+function curRecord() {
+  const r = state.mixer && state.mixer.record;
+  const v = rec.view && rec.view.record;
+  if (r && v && Date.now() - rec.viewAt < 3000 && typeof v.seq === 'number' && typeof r.seq === 'number' && v.seq > r.seq) {
+    return { ...v, disk: r.disk || v.disk };
+  }
+  return r || null;
+}
+
+// The disk as the card shows it: the helper's view (model, write speed, read-only, another disk, seq) under the
+// engine's live figures (state, free space, time left). While the view is behind (another state: it is being asked
+// again), only the engine's
+function recDisk(r) {
+  const s = (rec.view && rec.view.storage) || { state: 'none', seq: 0 };
+  const live = r && r.disk;
+  if (!live) return s;
+  if (live.state !== s.state) return { ...live, seq: s.seq };
+  const d = { ...s };
+  for (const [k, val] of Object.entries(live)) if (val !== undefined && val !== null) d[k] = val;
+  return d;
+}
+
+// The clock: the engine's elapsedS, counted on here between states (they come every ~2 s), never backwards within one
+// recording and never more than 10 s past the last figure (a frozen engine stops it)
+function recElapsed(r) {
+  const now = Date.now();
+  const s = Number(r.elapsedS) || 0;
+  // Another recording: a new seq, or the same one going back (a retry in a new file)
+  if (r.seq !== rec.seq || s + 2 < rec.base) { rec.seq = r.seq; rec.shownS = 0; rec.base = -1; }
+  if (s !== rec.base) { rec.base = s; rec.at = now; }
+  rec.shownS = Math.max(rec.shownS, rec.base + Math.min(10, Math.floor((now - rec.at) / 1000)));
+  return rec.shownS;
+}
+
+function recTick(on) {
+  if (on && !rec.timer) {
+    rec.timer = setInterval(() => {
+      const r = curRecord();
+      if (r && r.state === 'on') renderRecLine(r);
+    }, 1000);
+  } else if (!on && rec.timer) {
+    clearInterval(rec.timer);
+    rec.timer = 0;
+  }
+}
+
+async function loadRecording() {
+  if (rec.gone) return;
+  const gen = ++rec.gen;
+  rec.loadAt = Date.now();
+  let v;
+  try {
+    v = await api('GET', '/recording', undefined, { quiet: true });
+  } catch (e) {
+    // An app without the route (404): no card, and it is not asked again
+    if (e.status === 404) {
+      rec.gone = true;
+      $('recording-card').hidden = true;
+      recTick(false);
+      state.recView = null;
+      renderLiveBtn();
+    }
+    return;
+  }
+  if (gen === rec.gen) applyRecView(v);
+}
+
+// A view (GET /recording, PUT /recording, PUT /record): it replaces the one in flight. Go live's label depends on it
+function applyRecView(v) {
+  if (!v || typeof v !== 'object' || !v.storage) return;
+  rec.gen++;
+  rec.view = v;
+  rec.viewAt = Date.now();
+  state.recView = v;
+  renderRecording();
+  renderLiveBtn();
+}
+
+// A storage object (eject, format): the view's disk until GET /recording answers
+function applyStorage(s) {
+  if (rec.view && s && typeof s === 'object' && s.state) applyRecView({ ...rec.view, storage: s });
+}
+
+// Every mixer state (or null): the card shows with the engine's record, and the view is asked again when the disk's
+// state changes. A first answer that failed is asked again, at most every 10 s
+function recFromMixer(m) {
+  const r = m && m.record;
+  if (!r || rec.gone) {
+    $('recording-card').hidden = true;
+    rec.shown = false;
+    recTick(false);
+    return;
+  }
+  const disk = (r.disk && r.disk.state) || '';
+  // The mode or the quality changed elsewhere (the screen, another browser): the engine's state says so at once,
+  // and the view is asked once per change
+  const set = (r.setting || '') + '/' + (r.quality || '');
+  const moved = rec.shown && set !== rec.set;
+  if (!rec.shown || disk !== rec.disk || moved || (!rec.view && Date.now() - rec.loadAt > 10000)) loadRecording();
+  rec.shown = true;
+  rec.disk = disk;
+  rec.set = set;
+  $('recording-card').hidden = false;
+  renderRecording();
+}
+
+// The state line: off, «REC 01:12:34 · 3 h 20 min left» with the file under it, or why it stopped
+function renderRecLine(r) {
+  const v = rec.view;
+  const d = recDisk(r);
+  const reason = REC_REASONS.includes(r.reason) ? r.reason : '';
+  let text;
+  let cls = '';
+  let sub = '';
+  let subCls = '';
+  if (r.state !== 'on') rec.seq = null; // the next one starts its clock from the engine's figure
+  if (r.state === 'on') {
+    text = t('rec.onAir', { time: recClock(recElapsed(r)) });
+    // «3 h 20 min left» never split over two lines
+    if (typeof d.minutesLeft === 'number') text += ' · ' + t('rec.left', { time: recSpan(d.minutesLeft) }).replace(/ /g, '\u00a0');
+    cls = 'on';
+    const parts = [r.file || '', r.kbps > 0 ? t('unit.mbps', { v: fmtNum(r.kbps / 1000, 1) }) : ''];
+    if (r.droppedS > 0) {
+      const n = Math.max(1, Math.round(r.droppedS));
+      parts.push(t('rec.dropped', { n }));
+      subCls = 'warn';
+    }
+    sub = parts.filter(Boolean).join(' · ');
+  } else if (r.state === 'starting') {
+    text = t('rec.starting');
+  } else if (reason || r.state === 'error') {
+    text = t('rec.reason.' + (reason || 'internal'));
+    cls = reason === 'disk_removed' ? 'bad' : 'warn';
+    // Still asked to record: it goes on in a new file when it can (the disk back, after a retry)
+    if (r.mode === 'on') sub = t(reason === 'disk_removed' || reason === 'no_disk' ? 'rec.waitDisk' : 'rec.retrying');
+  } else if (v && v.mode === 'off') {
+    text = t('rec.offMode');
+  } else {
+    text = t('rec.idle');
+    if (v && v.mode === 'with_output' && d.state === 'ready' && !emittingNow()) sub = t('rec.withOutputIdle');
+  }
+  const line = $('rec-line');
+  line.textContent = text;
+  line.className = 'rec-line' + (cls ? ' ' + cls : '');
+  const s = $('rec-sub');
+  s.textContent = sub;
+  s.className = 'sub' + (subCls ? ' ' + subCls : '');
+  s.hidden = !sub;
+}
+
+function renderRecording() {
+  const r = curRecord();
+  if (!r) return;
+  const v = rec.view;
+  const on = recOn(r);
+  const d = recDisk(r);
+  const busy = !!rec.busy;
+  renderRecLine(r);
+  recTick(r.state === 'on' && state.live && !$('recording-card').hidden);
+
+  // REC: disabled with the reason (the mode is off, no disk ready, the disk full)
+  const btn = $('rec-btn');
+  btn.textContent = t(on ? 'rec.stop' : 'rec.start');
+  btn.classList.toggle('danger', on);
+  const st = DISK_STATES.includes(d.state) ? d.state : 'none';
+  const full = st === 'ready' && typeof d.minutesLeft === 'number' && d.minutesLeft < 1;
+  const why = on || !v ? ''
+    : v.mode === 'off' ? t('rec.why.off')
+      : st === 'checking' ? t('rec.why.checking')
+        : st === 'none' ? t('rec.why.noDisk') : st === 'ejected' ? t('rec.why.ejected')
+          : st !== 'ready' ? t('rec.why.unusable')
+            : full ? t('rec.why.full') : '';
+  btn.disabled = busy || !v || !!why;
+  $('rec-why').textContent = why;
+  $('rec-why').hidden = !why;
+
+  // The mode and the quality: their options only when they change (redoing them closes an open dropdown); the value
+  // is not repainted while a change is being sent or asked
+  const ms = $('rec-mode');
+  if (ms.dataset.key !== getLang()) {
+    ms.dataset.key = getLang();
+    ms.replaceChildren(...REC_MODES.map((m) => option(m, t('rec.mode.' + m))));
+  }
+  if (v && !ms.dataset.busy) ms.value = v.mode;
+  ms.disabled = !v || busy || !!ms.dataset.busy;
+  $('rec-mode-hint').textContent = REC_MODES.includes(ms.value) ? t('rec.modeHint.' + ms.value) : '';
+  const qs = $('rec-quality');
+  const list = ((v && v.qualities) || []).filter((q) => q && typeof q.id === 'string');
+  const qk = getLang() + JSON.stringify(list);
+  if (qs.dataset.key !== qk) {
+    qs.dataset.key = qk;
+    qs.replaceChildren(...list.map((q) => option(q.id, qualityLabel(q))));
+  }
+  if (v && !qs.dataset.busy) qs.value = v.quality;
+  qs.disabled = !v || on || busy || !!qs.dataset.busy;
+  $('rec-quality-hint').textContent = t(on ? 'rec.qLocked' : 'rec.qHint');
+
+  renderRecDisk(v, d, st, on, busy);
+}
+
+// The disk: its state, what it is, and why it cannot be used (or what to know before using it); Eject with a disk ready
+// and Format with any disk, never while recording
+function renderRecDisk(v, d, st, on, busy) {
+  const ds = $('rec-disk-state');
+  ds.textContent = t('rec.disk.' + st);
+  ds.className = 'sub' + (st === 'ready' ? ' ok' : ['unsupported', 'unformatted', 'error'].includes(st) ? ' warn' : '');
+  const hint = st === 'none' ? t('rec.noneHint') : st === 'ejected' ? t('rec.ejectedHint') : '';
+  $('rec-disk-hint').textContent = hint;
+  $('rec-disk-hint').hidden = !hint;
+
+  // What it is: its name, then «exFAT · 41 GB free of 62 GB · writes at 31 MB/s» and how long it can record
+  $('rec-disk-info').hidden = st === 'none';
+  if (st !== 'none') {
+    const size = diskSize(d.sizeBytes);
+    const free = st === 'ready' ? diskSize(d.freeBytes) : '';
+    const space = free && size ? t('rec.freeOf', { free, size }) : free ? t('rec.free', { free }) : size;
+    const speed = d.writeMBps > 0 ? t('rec.writes', { v: fmtNum(d.writeMBps, d.writeMBps >= 10 ? 0 : 1) }) : '';
+    $('rec-disk-name').textContent = diskName(d);
+    const fs = d.fs ? fsName(d.fs) : st === 'unsupported' && d.reason === 'fs_unknown' ? t('rec.fsUnknown') : '';
+    $('rec-disk-meta').textContent = [fs, space, speed].filter(Boolean).join(' · ');
+    const time = st === 'ready' && d.minutesLeft >= 1 && v
+      ? t('rec.timeAt', { time: recSpan(d.minutesLeft), quality: inSentence(recQualityName(v.quality)) }) : '';
+    $('rec-disk-time').textContent = time;
+    $('rec-disk-time').hidden = !time;
+  }
+
+  // A disk under 1 GB is not worth formatting (it would still be too small), and a write-protected one cannot be
+  const tiny = st === 'unsupported' && d.reason === 'too_small' && d.sizeBytes > 0 && d.sizeBytes < 1e9;
+  const locked = d.readOnly === true || (st === 'error' && d.reason === 'readonly');
+  const warns = [];
+  const warn = (key, p) => warns.push(t('rec.warn.' + key, p));
+  if (st === 'unsupported') {
+    if (d.reason === 'fs_ntfs') warn('ntfs');
+    else if (d.reason === 'too_small') warn(tiny ? 'tooSmall' : 'tooSmallPart');
+    else warn('unknownFs');
+  } else if (st === 'unformatted') {
+    warn('unformatted');
+  } else if (st === 'error') {
+    warn(d.reason === 'readonly' ? 'readonly' : d.reason === 'check_failed' ? 'checkFailed' : 'mountFailed');
+  }
+  if (locked && !(st === 'error' && d.reason === 'readonly')) warn('readonly');
+  if (st === 'ready' && /^fat/.test(d.fs || '')) warn('fat', { fs: fsName(d.fs) });
+  if (d.dirty === true) warn('dirty');
+  if (st === 'ready' && typeof d.minutesLeft === 'number' && d.minutesLeft >= 1 && d.minutesLeft < 10) warn('low');
+  if (d.anotherDisk) warn('another');
+  const wk = warns.join('\n');
+  if (rec.warnKey !== wk) {
+    rec.warnKey = wk;
+    $('rec-warns').replaceChildren(...warns.map((w) => {
+      const p = document.createElement('p');
+      p.textContent = w;
+      return p;
+    }));
+  }
+  $('rec-warns').hidden = !warns.length;
+
+  // A recording, or a disk gone, answers an open format question with no
+  const fask = $('rec-format-ask');
+  if (on || st === 'none' || st === 'checking' || tiny || locked) closeAsk(fask);
+  const asking = !fask.hidden;
+  const ej = $('rec-eject');
+  const fm = $('rec-format');
+  ej.hidden = st !== 'ready' || asking;
+  fm.hidden = !v || st === 'none' || st === 'checking' || tiny || locked || asking;
+  ej.disabled = fm.disabled = on || busy;
+  const dwhy = on && (!ej.hidden || !fm.hidden) ? t('rec.warn.busyRec') : '';
+  $('rec-disk-why').textContent = dwhy;
+  $('rec-disk-why').hidden = !dwhy;
+  const doing = rec.busy === 'format' ? t('rec.formatting') : rec.busy === 'eject' ? t('rec.ejecting') : '';
+  $('rec-busy').textContent = doing;
+  $('rec-busy').hidden = !doing;
+}
+
+// An action: the card waits for it (busy) and shows its answer; GET /recording follows anyway. true when it went well
+async function recAction(kind, method, path, body, apply) {
+  rec.busy = kind;
+  renderRecording();
+  let ok = false;
+  try {
+    const res = await api(method, path, body);
+    apply(res);
+    ok = true;
+  } catch (e) {
+    toast(e.message, true); // 409 disabled / no_disk / disk_full / recording / disk_changed…, in the page's language
+  } finally {
+    rec.busy = '';
+    renderRecording();
+    loadRecording();
+  }
+  return ok;
+}
+
+$('rec-btn').addEventListener('click', () => {
+  const r = curRecord();
+  if (r) recAction('rec', 'PUT', '/record', { on: !recOn(r) }, applyRecView);
+});
+
+$('rec-mode').addEventListener('change', async (ev) => {
+  const sel = ev.target;
+  const mode = sel.value;
+  sel.dataset.busy = '1';
+  // Off stops the recording that is on: asked first, in the page
+  if (mode === 'off' && recOn(curRecord())) {
+    renderRecording();
+    if (!(await askInline($('rec-mode-ask'), t('rec.modeOffAsk'), t('rec.modeOffYes'), true))) {
+      delete sel.dataset.busy;
+      renderRecording();
+      return;
+    }
+  }
+  await recAction('mode', 'PUT', '/recording', { mode }, applyRecView);
+  delete sel.dataset.busy;
+  renderRecording();
+});
+
+$('rec-quality').addEventListener('change', async (ev) => {
+  const sel = ev.target;
+  sel.dataset.busy = '1';
+  await recAction('quality', 'PUT', '/recording', { quality: sel.value }, applyRecView);
+  delete sel.dataset.busy;
+  renderRecording();
+});
+
+$('rec-eject').addEventListener('click', async () => {
+  if (await recAction('eject', 'POST', '/storage/eject', undefined, applyStorage)) toast(t('rec.ejected'));
+});
+
+// Format: the question names the disk; seq is the disk the page saw, so a disk swapped after the question is not the
+// one formatted (409 disk_changed)
+$('rec-format').addEventListener('click', async () => {
+  const v = rec.view;
+  if (!v) return;
+  const seq = v.storage.seq;
+  const ask = askInline($('rec-format-ask'), t('rec.formatAsk', { disk: diskWho(recDisk(curRecord())) }), t('rec.formatYes'), true);
+  renderRecording(); // the buttons hide while it asks
+  const yes = await ask;
+  renderRecording();
+  if (yes && await recAction('format', 'POST', '/storage/format', { seq }, applyStorage)) toast(t('rec.formatted'));
+});
+
+hooks.mixer.push(recFromMixer);
+hooks.live.push(() => { if (rec.shown) loadRecording(); });
+hooks.stop.push(() => recTick(false));
+onLangChange(() => { rec.warnKey = ''; renderRecording(); });
+
 // --- Updates (OTA) ---------------------------------------------------------------------------
 // The app checks by itself (every ~6 h) and downloads; installing is only on a button press, never while
 // streaming, and a version that does not come up healthy is rolled back. Polled every 2 s while something
@@ -889,9 +1292,10 @@ function renderUpdateGate() {
   // The app says whether it would install now (canInstall, blockedMessage); what this page sees streaming
   // counts too, as it is fresher than the last poll
   const streaming = emittingNow() || u.streaming === true;
+  const recording = recOn(state.mixer && state.mixer.record); // busy like streaming (RECORDING.md §5.5)
   const serverOk = typeof u.canInstall === 'boolean' ? u.canInstall : true;
-  $('update-install').disabled = !shown || streaming || !serverOk;
-  const why = !shown ? '' : streaming ? t('update.streaming') : !serverOk ? (u.blockedMessage || '') : '';
+  $('update-install').disabled = !shown || streaming || recording || !serverOk;
+  const why = !shown ? '' : streaming ? t('update.streaming') : recording ? t('update.recording') : !serverOk ? (u.blockedMessage || '') : '';
   $('update-why').hidden = !why;
   $('update-why').textContent = why;
 }
@@ -925,14 +1329,15 @@ function renderRebootGate() {
   const u = upd.data;
   if (!u || $('update-restart').hidden) return;
   const streaming = emittingNow() || u.streaming === true;
+  const recording = recOn(state.mixer && state.mixer.record);
   const going = updRebooting();
   const btn = $('update-reboot');
-  btn.disabled = going || streaming || UPD_BUSY.includes(u.state);
+  btn.disabled = going || streaming || recording || UPD_BUSY.includes(u.state);
   btn.hidden = !$('update-reboot-ask').hidden;
-  const why = going ? t('update.rebooting') : streaming ? t('update.rebootStreaming') : '';
+  const why = going ? t('update.rebooting') : streaming ? t('update.rebootStreaming') : recording ? t('update.rebootRecording') : '';
   $('update-restart-why').textContent = why;
   $('update-restart-why').hidden = !why;
-  if (streaming) closeAsk($('update-reboot-ask'));
+  if (streaming || recording) closeAsk($('update-reboot-ask'));
 }
 
 const UPDATE_STATES = ['idle', 'checking', 'available', 'downloading', 'ready', 'installing', 'rolled_back', 'error'];
@@ -972,6 +1377,7 @@ $('update-install').addEventListener('click', async () => {
   if (!u || !u.available) return;
   const v = verOf(u.available.version);
   if (emittingNow()) { toast(t('update.streaming'), true); return; }
+  if (recOn(state.mixer && state.mixer.record)) { toast(t('update.recording'), true); return; }
   if (!confirm(t('update.confirm', { v }))) return;
   $('update-install').disabled = true;
   try {
@@ -990,7 +1396,7 @@ $('update-install').addEventListener('click', async () => {
 $('update-reboot').addEventListener('click', async () => {
   const u = upd.data;
   if (!u || !u.system || !u.system.restartRequired) return;
-  if (emittingNow()) { renderRebootGate(); return; }
+  if (emittingNow() || recOn(state.mixer && state.mixer.record)) { renderRebootGate(); return; }
   const ask = $('update-reboot-ask');
   $('update-reboot').hidden = true;
   const yes = await askInline(ask, t('update.rebootAsk'), t('update.rebootYes'), true);

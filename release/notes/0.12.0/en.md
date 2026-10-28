@@ -1,0 +1,5 @@
+- New: local recording to a USB disk. The encoder saves the program (what goes on air, with its audio) to a USB stick or disk, at high quality (25 Mbps by default) and apart from the stream: if the connection drops, the recording goes on. Set it up on the screen, in Settings › Stream › Recording, or in the web's "Recording" card.
+- Three modes: Off (as before), Independent (REC records or stops, live or not) and With the stream (Go live also records, and Stop streaming ends both).
+- Disks in exFAT, FAT32 (recordings are split into 3.9 GB files) or ext4. The encoder can format a disk as exFAT. Each recording is an MP4 file in the EnhancedIRL folder.
+- Plug the disk in before going live, and press Eject before unplugging it. A 2.5" hard disk only through a USB hub with its own power supply: without one, it can cut the encoder's power.
+- After a power cut the recording stays stopped (the stream does resume), and the file is repaired when the disk is plugged in again.

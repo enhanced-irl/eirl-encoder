@@ -114,7 +114,9 @@ type UI struct {
 	// the uplink being switched (its row's switch halfway meanwhile) and to what
 	uplinkPend    string
 	uplinkPendOff bool
-	btp           btPage // the Bluetooth page (btpage.go)
+	btp           btPage  // the Bluetooth page (btpage.go)
+	rec           recView // the recording between states: its clock, the notice of a stop (rec.go)
+	rp            recPage // the Recording page (recpage.go)
 
 	lastAppLang string    // the device language the app last said (a change there is applied once)
 	lastResult  time.Time // the last action result handled (a failed language change goes back)
@@ -275,6 +277,7 @@ func (u *UI) SetStatus(st *Status) {
 		u.liveSince = time.Time{}
 	}
 	u.st = st
+	u.recFollow(st)
 	u.Dirty = true
 }
 
@@ -318,6 +321,8 @@ func (u *UI) CommandDone(c Command, ok bool, code string) {
 	switch c.Origin {
 	case "hold":
 		u.say(sprintf(u.Tx.CannotF, code), 3*time.Second)
+	case originRec: // REC: why, in words
+		u.recRefused(code)
 	case "page": // a Settings page's change: the page says it could not
 		u.notePage(sprintf(u.Tx.CannotF, u.commandError(code)), true)
 	case originAudioSet: // the audio view's settings: that view says it could not
@@ -366,6 +371,7 @@ func (u *UI) OnTouch(ev string, fx, fy float64, held time.Duration) {
 		snap := u.Net.Snapshot()
 		keys = u.settingsKeys(&snap)
 	}
+	lay.RecRow(u.recShown())
 	h := lay.Hit(x, y, u.menuOpen, u.hitView(), u.settingsOpen || u.wizardOn(), keys)
 	if h.Key == "a_follow" && u.st.audioMode() == "mix" {
 		h = Hit{} // «Sigue al vídeo» is not shown in the mix
@@ -384,7 +390,11 @@ func (u *UI) OnTouch(ev string, fx, fy float64, held time.Duration) {
 			(!u.locked() || h.Key == "lock") {
 			u.press = &press{hit: h, since: now}
 		}
-		if key := HoldKey(h, u.locked(), u.menuOpen); key != "" {
+		key := HoldKey(h, u.locked(), u.menuOpen)
+		if key == "rec" && !RecButtonState(u.st.Record).Ready {
+			key = "" // it cannot start: a tap says why
+		}
+		if key != "" {
 			u.hold = &hold{key: key, since: now}
 		} else if u.locked() && !u.menuOpen {
 			u.say(u.Tx.LockedHint, 3*time.Second)
@@ -444,6 +454,10 @@ func (u *UI) OnTouch(ev string, fx, fy float64, held time.Duration) {
 	}
 	if h.Kind == HitButton && h.Key == "audio" {
 		u.view = "audio"
+		return
+	}
+	if h.Kind == HitButton && h.Key == "rec" {
+		u.recTap()
 		return
 	}
 	u.fromTouch(h, held >= TapLong, x, y)
@@ -1169,13 +1183,15 @@ func (u *UI) zoneKeys() []string {
 	return keys
 }
 
-// fromHold is a held button done: Emit ↔ Stop, Unlock, Reboot or Power off.
+// fromHold is a held button done: Emit ↔ Stop, REC ↔ stop recording, Unlock, Reboot or Power off.
 func (u *UI) fromHold(key string, now time.Time) {
 	switch key {
 	case "unlock":
 		u.send("hold", map[string]any{"cmd": "lock", "on": false}, 0, 0)
 	case "reboot", "poweroff":
 		u.requestPower(key, now)
+	case "rec": // the engine's record command, by=screen like Go live (the web sees who through by/seq)
+		u.send(originRec, map[string]any{"cmd": "record", "on": !recOn(u.st.Record), "by": "screen"}, 0, 0)
 	default:
 		u.send("hold", map[string]any{"cmd": "output", "on": u.st.Output.Mode != "on", "by": "screen"}, 0, 0)
 	}
