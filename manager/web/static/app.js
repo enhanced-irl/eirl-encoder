@@ -60,6 +60,8 @@ function show(name) {
 function showLogin() {
   show('login');
   stopLive();
+  $('login-form').hidden = false;
+  $('reset-form').hidden = true;
   $('login-pw').value = '';
   $('login-pw').focus();
 }
@@ -139,6 +141,40 @@ $('login-form').addEventListener('submit', async (ev) => {
     err.textContent = e.status === 401 ? t('login.wrong') : e.message;
     err.hidden = false;
   }
+});
+
+// Forgot the password: a new one with the setup code (POST /password/reset). It closes every session and opens one here
+function showReset(on) {
+  $('login-form').hidden = on;
+  $('reset-form').hidden = !on;
+  $('reset-err').hidden = true;
+  for (const id of ['reset-code', 'reset-pw', 'reset-pw2']) $(id).value = '';
+  (on ? $('reset-code') : $('login-pw')).focus();
+}
+
+$('login-forgot').addEventListener('click', () => showReset(true));
+$('reset-back').addEventListener('click', () => showReset(false));
+
+$('reset-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const err = $('reset-err');
+  const fail = (msg) => { err.textContent = msg; err.hidden = false; };
+  err.hidden = true;
+  const code = $('reset-code').value.toUpperCase().replace(/[\s-]/g, '');
+  const pw = $('reset-pw').value;
+  if (!code) return fail(t('setup.codeEmpty'));
+  if ([...pw].length < 10) return fail(t('setup.pwShort'));
+  if (pw !== $('reset-pw2').value) return fail(t('setup.pwMismatch'));
+  try {
+    await api('POST', '/password/reset', { code, password: pw }, { quiet: true });
+  } catch (e) {
+    const fields = e.data && e.data.fields;
+    return fail((fields && (fields.code || fields.password)) || e.message); // 403 bad_code, 429, 503…
+  }
+  // Never kept in the page once used
+  showReset(false);
+  toast(t('reset.done'));
+  afterLogin();
 });
 
 $('logout').addEventListener('click', async () => {
@@ -1819,35 +1855,50 @@ function renderCloudQR(rows) {
   box.replaceChildren(svg);
 }
 
-async function cloudPair() {
+// Linking and unlinking from the web ask for the current web password (MANAGER.md §6): a session alone does not hand
+// the encoder to an account. Renewing a code in progress and cancelling it do not. The field is emptied after every try
+function cloudFail(e, field) {
+  const msg = (e.data && e.data.fields && e.data.fields.password) || e.message;
+  toast(msg, true);
+  if (field && (e.status === 400 || e.status === 403)) field.focus();
+}
+
+async function cloudPair(renew) {
+  const field = renew ? null : $('cloud-pw-link');
+  const body = field ? { password: field.value } : {};
+  if (field) field.value = '';
   for (const id of ['cloud-pair', 'cloud-renew']) $(id).disabled = true;
   try {
-    renderCloud(await api('POST', '/cloud/pair?qr=rows'));
+    renderCloud(await api('POST', '/cloud/pair?qr=rows', body));
     loadCloud(); // reschedules the fast poll
   } catch (e) {
-    toast(e.message, true);
+    cloudFail(e, field);
   } finally {
     for (const id of ['cloud-pair', 'cloud-renew']) $(id).disabled = false;
   }
 }
 
 async function cloudUnlink(ask) {
+  const field = ask ? $('cloud-pw-unlink') : null;
   if (ask) {
+    if (!field.value) { toast(t('cloud.pwEmpty'), true); field.focus(); return; }
     const who = (state.cloud && state.cloud.accountLabel) || t('cloud.yourAccount');
     if (!confirm(t('cloud.unlinkConfirm', { who }))) return;
   }
+  const body = field ? { password: field.value } : {};
+  if (field) field.value = '';
   try {
-    const r = await api('DELETE', '/cloud');
+    const r = await api('DELETE', '/cloud', body);
     renderCloud(r);
     if (ask) toast(r.cloudNotified ? t('cloud.unlinkedToast') : t('cloud.unlinkedLocal'), !r.cloudNotified);
     loadDestination();
   } catch (e) {
-    toast(e.message, true);
+    cloudFail(e, field);
   }
 }
 
-$('cloud-pair').addEventListener('click', cloudPair);
-$('cloud-renew').addEventListener('click', cloudPair);
+$('cloud-pair').addEventListener('click', () => cloudPair(false));
+$('cloud-renew').addEventListener('click', () => cloudPair(true));
 $('cloud-cancel').addEventListener('click', () => cloudUnlink(false));
 $('cloud-unlink').addEventListener('click', () => cloudUnlink(true));
 

@@ -1,4 +1,4 @@
-> **Status:** IN PROGRESS · **Updated:** 2026-10-15
+> **Status:** IN PROGRESS · **Updated:** 2026-10-29 (the setup code as the rescue credential, §6)
 >
 > Device settings, first-boot wizard, source slots and the languages of the API messages, app side
 > (`eirl-encoderd`). The screen and the web build on this API; the engine side of the slots is in
@@ -187,16 +187,38 @@ root, which an unprivileged app cannot do). A file that exists but holds no vali
 replaced (the code may be printed on a label). The touch screen shows it (from `GET /setup` over the socket), later
 the label too.
 
-- Needed only by `POST /setup/password` from the **web**, and only while there is no admin password. Compared in
-  constant time after normalising what a person types (case, spaces, a dash in the middle).
-- Attempts limited like the login: 5 per minute per IP (IPv6: per /64) and 20 per minute in total, counted before
-  comparing; a right code clears that IP's count. The password rules are checked first, so a short password does
-  not cost an attempt. 31^8 ≈ 8.5·10^11 codes at ≤ 20 tries/min: not guessable.
+- Needed by `POST /setup/password` from the **web** while there is no admin password, and by `POST /password/reset`
+  (the rescue, below) once there is one. Compared in constant time after normalising what a person types (case,
+  spaces, a dash in the middle).
+- Attempts limited like the login, with **its own budget** (both routes share it: the same secret): 5 per minute per
+  IP (IPv6: per /64) and 20 per minute in total, counted before comparing; a right code clears that IP's count. The
+  total does not apply to a known client (one that signed in or used the code in the last 30 days, MANAGER.md §6),
+  so nobody on the LAN can keep the owner out by spending it. The password rules are checked first, so a short
+  password does not cost an attempt. 31^8 ≈ 8.5·10^11 codes at ≤ 20 tries/min: not guessable.
 - **Threat**: a fresh device on a LAN with other people (venue Wi-Fi, a shared office). Without the code, the first
   person to open the web would own the device. With it, setting the password needs to see the screen or the label.
   Before the password exists the web may only read the device settings and change the language (harmless).
-- **Not** done tonight (do not widen): the code as a rescue credential once a password exists (MANAGER.md §6,
-  the counterweight to the cloud's `set_local_password`). That needs its own design (reset flow, label printing).
+- **Rescue credential** (Oct 29; MANAGER.md §6, the counterweight to the cloud's `set_local_password`). Linked to
+  EnhancedIRL, a compromised account can set the web password to one the owner does not know. The code gets the
+  owner back in:
+  - **Shown on demand after the setup**: the screen's Settings › Device › Name & password has a "Setup code" row
+    behind an eye. Opening it asks the app (`GET /setup/code`, only over the local socket: `404` on the web); closing
+    it, or leaving the page, forgets it (the engine keeps it only while it is on view). `GET /setup` keeps giving it
+    to the screen only while there is no password.
+  - **The reset**: the web's sign-in has "Forgot the password?" → code + new password (≥ 10, typed twice) →
+    `POST /password/reset {"code","password"}` → the new password, **every session closed**, a session opened for
+    whoever used it, and a log line (`password reset with the setup code`, with the IP; never the code or the
+    password). Without a password, `503 setup_required` (the wizard's route sets the first one).
+  - **The screen without the code**: the same page has "Forgot the web password?", the same route over the socket
+    without `code`. Whoever holds the screen holds the board (they could read the code anyway), and no limit on the
+    LAN can block it.
+  - **Threat model, updated**: the code is now a standing credential, not only a first-boot one. Whoever reads it
+    (the screen, the label, a photo of either) can set the web password, which is what the screen could already do.
+    So: it is never sent to the web or the cloud, never logged, the screen shows it only behind its eye, and the
+    owner should treat the label like a key (cover or remove it on a device left in a public place). A code cannot be
+    rotated yet: it may be printed on a label, and a new one would make the label lie. If that is ever needed, it
+    is a root step (the file is the app's, but a label is physical) with its own design.
+  - **Not done** (do not widen): printing the label, and rotating the code.
 
 ## 7. Privileges
 
@@ -244,6 +266,7 @@ registered there, like the updater's, needs no second registration); the rest st
 | `POST /service/restart` | "Apply" of saved changes, like the web's pending banner (Oct 14). Only `restart`: `start` and `stop` stay `403`. It restarts the engine, which is the caller: the screen never sees the `202`, and the restart (like `"apply": true` in a `PUT`) is not cut when the socket closes |
 | `POST /cameras`, `PATCH /cameras/{id}`, `DELETE /cameras/{id}` | Network cameras (Oct 14). The answers carry the camera's URLs with its key, as on the web |
 | `GET/PUT /bluetooth`, `POST /bluetooth/{scan,visible}`, `POST /bluetooth/devices/{address}/{action}`, `PUT /bluetooth/devices/{address}` | Bluetooth audio (Oct 15, BLUETOOTH.md §3.4): nothing secret in them (BlueZ keeps the keys, root only). Opening the 2-minute visible window from the screen is physical access, as on the web with a session |
+| `POST /password/reset`, `GET /setup/code` (socket only) | The rescue (Oct 29, §6): a new web password without the current one or the code, and the code itself for its eye. Whoever holds the screen holds the board: the code is already on the screen and the label |
 | `PUT /password` | The admin password with the current one (Oct 14). The same validation and errors as the web (`403 bad_password`, `400 validation`); `429` after 5 wrong current passwords in a minute (the screen counts as one caller, the web per IP); `503 setup_required` without a password. No session to keep: **every web session is closed** |
 
 Two routes have **their own handlers on the socket** (not forwarded): `GET /destination/secrets` does not exist on the web
@@ -327,7 +350,7 @@ a rename; mDNS of the new name; the Python engine answering `unknown_command` to
 
 - On the board: the checks at the end of §9.
 - `/etc/hosts` after a rename (a root step), and the avahi name.
-- The setup code as a rescue credential (MANAGER.md §6).
+- The setup code's label (printing) and, if ever needed, rotating the code (§6).
 - User-visible texts outside the app that still arrive in Spanish: the names and not-ready details the engine puts
   in its state (`HDMI de la placa`, "no ofrece un formato…": `internal/engine`), and the `probe` errors
   (`sources.ErrNoMode`…) that the frozen Python engine copies to its screen as they are.

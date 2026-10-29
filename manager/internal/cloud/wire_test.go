@@ -187,18 +187,32 @@ func TestApplyWireVariants(t *testing.T) {
 	}
 }
 
-// D9: when linked, only hosts ending in .enhancedirl.com.
+// D9: when linked, only EnhancedIRL's ingest relays: <zone>.relay.enhancedirl.com (production: the relays table of
+// prod holds eu1, us1 and as1) and relay.dev.enhancedirl.com (development), plus future zones of either.
 func TestDestinationAllowedD9(t *testing.T) {
 	for host, want := range map[string]bool{
-		"eu1.relay.enhancedirl.com": true, "EU1.Relay.EnhancedIRL.com": true, "relay.dev.enhancedirl.com": true,
-		"enhancedirl.com": false, "evil-enhancedirl.com": false, "enhancedirl.com.evil.com": false,
-		"evil.com": false, "203.0.113.5": false, "": false, "xenhancedirl.com": false,
+		"eu1.relay.enhancedirl.com": true, "us1.relay.enhancedirl.com": true, "as1.relay.enhancedirl.com": true,
+		"EU1.Relay.EnhancedIRL.com": true, "relay.dev.enhancedirl.com": true, "sa1.relay.enhancedirl.com": true,
+		"eu-2.relay.enhancedirl.com": true, "eu1.relay.dev.enhancedirl.com": true,
+		// Other names under the domain are not relays: the API, the app, the docs, the landing, the old name
+		"api.enhancedirl.com": false, "app.enhancedirl.com": false, "api.dev.enhancedirl.com": false,
+		"docs.enhancedirl.com": false, "links.enhancedirl.com": false, "relay-eu.enhancedirl.com": false,
+		"relay.enhancedirl.com": false, "dev.enhancedirl.com": false,
+		// One zone label, and a valid one
+		"a.eu1.relay.enhancedirl.com": false, ".relay.enhancedirl.com": false, "-eu.relay.enhancedirl.com": false,
+		"eu-.relay.enhancedirl.com": false, "eu_1.relay.enhancedirl.com": false, "eu1.relay.enhancedirl.com.": false,
+		strings.Repeat("a", 64) + ".relay.enhancedirl.com": false, strings.Repeat("a", 63) + ".relay.enhancedirl.com": true,
+		"x.y.relay.dev.enhancedirl.com": false,
+		"enhancedirl.com":               false, "evil-enhancedirl.com": false, "enhancedirl.com.evil.com": false,
+		"eu1.relay.enhancedirl.com.evil.com": false, "evil.com": false, "203.0.113.5": false, "": false,
+		"xenhancedirl.com": false, "eu1relay.enhancedirl.com": false, "::1": false,
 	} {
 		if got := DestinationAllowed(host); got != want {
 			t.Errorf("DestinationAllowed(%q) = %v", host, got)
 		}
 	}
-	for _, url := range []string{"srt://evil.example.com:5000", "srt://203.0.113.5:5000", "srt://:9000", "srtla://enhancedirl.com.evil.com:5002"} {
+	for _, url := range []string{"srt://evil.example.com:5000", "srt://203.0.113.5:5000", "srt://:9000", "srtla://enhancedirl.com.evil.com:5002",
+		"srt://api.enhancedirl.com:5000", "srtla://docs.enhancedirl.com:5002"} {
 		w, fe := ParseWireConfig(wireJSON(t, func(m map[string]any) {
 			m["destination"] = map[string]any{"url": url, "streamId": "publish:" + testKey, "latencyMs": 500}
 		}))

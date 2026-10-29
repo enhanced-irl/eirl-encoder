@@ -198,3 +198,73 @@ func TestRenderCloudAndAccount(t *testing.T) {
 		}},
 	})
 }
+
+// The rescue on the screen (MANAGER.md §6): the setup code behind its eye (asked of the app only when opened, never
+// drawn with it closed, forgotten when it closes or the page goes) and a new web password without the current one.
+func TestAccountRescue(t *testing.T) {
+	// Drawn: never the code with the eye closed, even if the app still holds it
+	d, _ := drawHarness(t)
+	da := pageApp(d, "account", func(a *AppSnapshot) { a.SetupCode = "K7QM2XVD" })
+	var drawn []string
+	drawnText = func(s string) { drawn = append(drawn, s) }
+	defer func() { drawnText = nil }()
+	d.u.Dirty = true
+	d.u.Tick()
+	if j := strings.Join(drawn, "|"); strings.Contains(j, "K7QM") || !strings.Contains(j, Spanish.Account.SetupCode) {
+		t.Fatalf("eye closed: %q", drawn)
+	}
+	d.u.pageTouch(codeEye, "", false)
+	drawn = nil
+	d.u.Dirty = true
+	d.u.Tick()
+	if !strings.Contains(strings.Join(drawn, "|"), "K7QM-2XVD") || len(da.did) != 0 {
+		t.Fatalf("eye open: %q %+v", drawn, da.did)
+	}
+
+	h, app := pagesHarness(t, "account")
+	h.press(codeEye, 0.1)
+	if a := app.lastDid(); a.What != "setup_code" || !h.u.revealed(codeEye) {
+		t.Fatalf("%+v", a)
+	}
+	app.snap.SetupCode = "K7QM2XVD"
+	dropped := app.dropped
+	h.press(codeEye, 0.1)
+	if h.u.revealed(codeEye) || app.dropped != dropped+1 {
+		t.Fatal("closing the eye does not forget the code")
+	}
+	h.press(codeEye, 0.1) // open again: the app still has it, nothing asked
+	n := len(app.did)
+	h.u.leavePage("account")
+	if h.u.revealed(codeEye) || app.dropped != dropped+2 || len(app.did) != n {
+		t.Fatal("leaving the page does not close the eye")
+	}
+	// Forgot the web password: the new one twice, sent as a reset (not the setup's, not PUT /password)
+	h.press("s_acct_reset", 0.1)
+	for range 2 {
+		for _, c := range "rescatadaa" {
+			h.tapKey(string(c), 0.1)
+		}
+		h.tapKey("OK", 0.1)
+	}
+	a := app.lastDid()
+	sec := app.secrets[len(app.secrets)-1]
+	if a.What != "password_reset" || sec["password"] != "rescatadaa" || len(app.pw) != 0 || h.u.acct.next != nil || h.u.acct.reset {
+		t.Fatalf("%+v %+v %v", a, sec, app.pw)
+	}
+	app.snap.Last = &AppResult{What: "password_reset", OK: true, At: h.now().Add(time.Millisecond)}
+	h.advance(10 * time.Millisecond)
+	if note, warn := h.u.accountNote(&app.snap); warn || note != Spanish.Account.PasswordChanged {
+		t.Fatalf("%q %v", note, warn)
+	}
+	// Then the web password's row is the usual one (current first), not a reset
+	h.press("s_acct_pw", 0.1)
+	if h.u.kb == nil || h.u.kb.spec.title != Spanish.Account.Current || h.u.acct.reset {
+		t.Fatalf("%+v", h.u.kb)
+	}
+	h.tapKey("k_cancel", 0.1)
+	// No password yet: neither the code nor the reset rows answer
+	app.snap.Setup.NeedsPassword = true
+	if keys := pageDefs["account"].keys(h.u, &app.snap); len(keys) != 2 {
+		t.Fatalf("%v", keys)
+	}
+}

@@ -300,3 +300,39 @@ func TestRevealAfterDrop(t *testing.T) {
 		t.Fatal("a reveal from before the new key brought the old one back")
 	}
 }
+
+// The rescue (MANAGER.md §6): a new web password without the current one (its secret straight from the bytes), and
+// the setup code for its eye: kept only if it is a code, and dropped with the page (DropSecrets).
+func TestRescueActions(t *testing.T) {
+	a, d := newDevice(t)
+	a.route("POST /password/reset", 204, nil)
+	a.route("GET /setup/code", 200, map[string]any{"code": "K7QM2XVD"})
+	if r := run(t, d, ui.AppAction{What: "password_reset", Secrets: map[string][]byte{"password": []byte("nueva-0123")}}); !r.OK {
+		t.Fatalf("%+v", r)
+	}
+	if got := a.last(); !reflect.DeepEqual(got, seenReq{"POST", "/api/v1/password/reset", map[string]any{"password": "nueva-0123"}}) {
+		t.Errorf("%+v", got)
+	}
+	run(t, d, ui.AppAction{What: "setup_code"})
+	if c := d.AppSnapshot().SetupCode; c != "K7QM2XVD" {
+		t.Fatalf("%q", c)
+	}
+	d.DropSecrets()
+	if c := d.AppSnapshot().SetupCode; c != "" {
+		t.Fatalf("kept after DropSecrets: %q", c)
+	}
+	// In flight when the page goes: not kept
+	d.Do(ui.AppAction{What: "setup_code"})
+	q, _, _, _ := d.take()
+	d.DropSecrets()
+	d.runAction(*q)
+	if c := d.AppSnapshot().SetupCode; c != "" {
+		t.Fatalf("a reveal from before the drop: %q", c)
+	}
+	// Anything that is not a code is ignored
+	a.route("GET /setup/code", 200, map[string]any{"code": "<script>"})
+	run(t, d, ui.AppAction{What: "setup_code"})
+	if c := d.AppSnapshot().SetupCode; c != "" {
+		t.Fatalf("%q", c)
+	}
+}

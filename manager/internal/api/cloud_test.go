@@ -61,19 +61,57 @@ func TestCloudEndpoints(t *testing.T) {
 	if w := e.do("POST", "/api/v1/cloud/pair", `{}`, tok, "Origin", "http://evil.example"); w.Code != 403 {
 		t.Errorf("CSRF on pair: %d", w.Code)
 	}
-	w := e.do("POST", "/api/v1/cloud/pair", `{}`, tok)
+	// Starting a link from the web needs the current web password, not only the session (MANAGER.md §6)
+	if w := e.do("POST", "/api/v1/cloud/pair", `{}`, tok); w.Code != 400 || !strings.Contains(w.Body.String(), `"password"`) {
+		t.Errorf("pair without the password: %d %s", w.Code, w.Body)
+	}
+	if w := e.do("POST", "/api/v1/cloud/pair", `{"password":"wrong-password"}`, tok); w.Code != 403 ||
+		!strings.Contains(w.Body.String(), `"error":"bad_password"`) || fc.view.State != "unlinked" {
+		t.Errorf("pair with a wrong password: %d %s", w.Code, w.Body)
+	}
+	w := e.do("POST", "/api/v1/cloud/pair", `{"password":"correcto-123"}`, tok)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"code":"ABCD-2346"`) || !strings.Contains(w.Body.String(), `"linkUrl":"https://app.example/encoders/link?pairing=ABCD-2346"`) {
 		t.Errorf("pair: %d %s", w.Code, w.Body)
 	}
+	// Renewing the code in progress does not ask for it again; cancelling it neither
+	if w := e.do("POST", "/api/v1/cloud/pair", `{}`, tok); w.Code != 200 {
+		t.Errorf("renew: %d %s", w.Code, w.Body)
+	}
+	if w := e.do("DELETE", "/api/v1/cloud", `{}`, tok); w.Code != 200 || fc.unlinks != 1 {
+		t.Errorf("cancel a code: %d %s", w.Code, w.Body)
+	}
 	for err, code := range map[error]int{cloud.ErrAlreadyLinked: 409, cloud.ErrRateLimited: 429, cloud.ErrUnreachable: 502, cloud.ErrNoIdentity: 500, errors.New("x"): 502} {
 		fc.pairErr = err
-		if w := e.do("POST", "/api/v1/cloud/pair", `{}`, tok); w.Code != code {
+		if w := e.do("POST", "/api/v1/cloud/pair", `{"password":"correcto-123"}`, tok); w.Code != code {
 			t.Errorf("pair with %v: %d, want %d", err, w.Code, code)
 		}
 	}
-	w = e.do("DELETE", "/api/v1/cloud", `{}`, tok)
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"cloudNotified":false`) || fc.unlinks != 1 {
+	// Linked: a new link is 409 without asking for the password; unlinking asks for it
+	fc.pairErr = cloud.ErrAlreadyLinked
+	fc.view = cloud.View{State: "linked", AccountLabel: "p•••@example.com"}
+	if w := e.do("POST", "/api/v1/cloud/pair", `{}`, tok); w.Code != 409 {
+		t.Errorf("pair while linked: %d %s", w.Code, w.Body)
+	}
+	if w := e.do("DELETE", "/api/v1/cloud", "", tok); w.Code != 400 || fc.unlinks != 1 {
+		t.Errorf("unlink without a body: %d %s", w.Code, w.Body)
+	}
+	if w := e.do("DELETE", "/api/v1/cloud", `{"password":"wrong-password"}`, tok); w.Code != 403 || fc.unlinks != 1 {
+		t.Errorf("unlink with a wrong password: %d %s", w.Code, w.Body)
+	}
+	if w := e.do("DELETE", "/api/v1/cloud", `{"password":"correcto-123","x":1}`, tok); w.Code != 400 || fc.unlinks != 1 {
+		t.Errorf("unlink with an unknown field: %d %s", w.Code, w.Body)
+	}
+	w = e.do("DELETE", "/api/v1/cloud", `{"password":"correcto-123"}`, tok)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"cloudNotified":false`) || fc.unlinks != 2 {
 		t.Errorf("DELETE: %d %s", w.Code, w.Body)
+	}
+	// Wrong passwords are limited (5 a minute per IP, PUT /password's budget)
+	fc.view = cloud.View{State: "linked"}
+	for i := 0; i < 5; i++ {
+		e.do("DELETE", "/api/v1/cloud", `{"password":"wrong-password"}`, tok)
+	}
+	if w := e.do("DELETE", "/api/v1/cloud", `{"password":"correcto-123"}`, tok); w.Code != 429 || fc.unlinks != 2 {
+		t.Errorf("unlink after 5 wrong passwords: %d %s", w.Code, w.Body)
 	}
 }
 

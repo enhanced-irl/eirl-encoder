@@ -1,5 +1,5 @@
 > **Status:** IN PROGRESS — v1 complete and deployed (phases 0-4, Oct 8); phase 5 (WebRTC preview with audio) deployed on Oct 8; in `main` (MR !1); pending: testing it on a real phone and the items in §12
-> **Updated:** 2026-10-28 (local recording's API: settings, REC, the USB disk, §3 "Local recording"; [`RECORDING.md`](RECORDING.md) §6)
+> **Updated:** 2026-10-29 (the rescue credential and the re-authentication for linking, §3 "Session" and §6; `admin.hash` 0600, §5; D9 narrowed to the relays, §10)
 >
 > SRTLA and adaptive bitrate (branch `feat/srtla`, not deployed): design in [`SRTLA.md`](SRTLA.md); here, what changes in the API.
 >
@@ -152,10 +152,11 @@ from the device itself (CSRF) and `Content-Type: application/json`.
 
 | Method and route | Body | Response |
 |---|---|---|
-| `POST /login` | `{"password": "…"}` | `204` + cookie `eirl_sess` (HttpOnly, SameSite=Strict, 30 sliding days). `401` if it fails, `429` if the limit is exceeded (5 attempts/min per IP, with an increasing wait) |
+| `POST /login` | `{"password": "…"}` | `204` + cookie `eirl_sess` (HttpOnly, SameSite=Strict, 30 sliding days). `401` if it fails, `429` if the limit is exceeded (5 attempts/min per IP; 20/min in total, which a client that signed in in the last 30 days does not count against: §6) |
 | `POST /logout` | — | `204` |
 | `GET /session` | — | `200 {"authenticated": true}` · `401` |
 | `PUT /password` | `{"current": "…", "new": "…"}` (≥ 10 characters) | `204`. Invalidates the other sessions (from the screen, over the local socket: all of them). `403 bad_password` if the current one is wrong, `400 validation` if the new one does not fit, `429` after 5 wrong current passwords in a minute per IP (Oct 14) |
+| `POST /password/reset` | `{"code": "…", "password": "…"}` (≥ 10) | The rescue credential (Oct 29, §6): a new password **without the current one**, with the setup code. No session needed. `204` + a new session cookie; **every** other session is closed and the event is logged (never the code or the password). `400 validation` (`fields.password` first, so a short password costs no attempt; `fields.code` if missing), `403 bad_code`, `429` (the setup code's own budget: 5/min per IP, 20/min in total except for a known client, shared with `POST /setup/password`), `503 setup_code_unavailable`, `503 setup_required` without a password. Over the local socket (the screen): without `code` |
 
 ### Status
 
@@ -395,8 +396,8 @@ uplinks and modems logic stays SRTLA-only.
 | `POST /live` | Preview signalling: `{"sdp": "<offer>"}` → `200 {"sdp": "<answer>"}` (a single request, no trickle: the app is ICE lite). One preview per web session: a new offer from the same session replaces the previous one. `429` if there are already `-live-max` (3) from other sessions (counting the ones being negotiated, which drop after 15 s if they do not connect), `400` if the offer is not valid, `503` if the app started with `-live-max 0`. Body ≤ 64 KB |
 | `GET /info` | `{"version", "web", "hostname", "l4t", "uptime", "deviceId"}` (`web` = fingerprint of the embedded interface: the page reloads by itself if it changes on reconnecting; `deviceId` = hash of `/etc/machine-id`; it is the linking's `hardwareId`) |
 | `GET /cloud` | Link with EnhancedIRL: `{"state": "unlinked"\|"pairing"\|"linked", "code"?, "expiresAt"?, "linkUrl"?, "accountLabel"?, "online"?, "halted"?, "lastError"?}` (§10). `503 cloud_disabled` if the app started with `-cloud-api=` |
-| `POST /cloud/pair` | `{}` → starts linking or renews the code: `200` + the same as `GET /cloud`. `409 already_linked`, `429 rate_limited`, `502 cloud_unreachable`/`cloud_error` |
-| `DELETE /cloud` | Unlinks (or cancels a code in progress): deletes the link even if the cloud does not answer and notifies it with `DELETE /encoders/self`. `200` + the view + `"cloudNotified": bool` |
+| `POST /cloud/pair` | `{"password": "…"}` → starts linking or renews the code: `200` + the same as `GET /cloud`. From the web, **starting** a link needs the current web password (Oct 29, §6): without it `400 validation` (`fields.password`), wrong `403 bad_password`, `429` after 5 wrong ones a minute (PUT /password's budget). Renewing a code in progress (`{}`) does not, nor does a linked device (`409 already_linked`, without asking). `429 rate_limited`, `502 cloud_unreachable`/`cloud_error` |
+| `DELETE /cloud` | Unlinks (or cancels a code in progress): deletes the link even if the cloud does not answer and notifies it with `DELETE /encoders/self`. `200` + the view + `"cloudNotified": bool`. From the web, unlinking a **linked** device needs `{"password": "…"}` (the same answers as above); cancelling a code needs no body. The screen (local socket) never gives the password |
 
 ### Local recording (Oct 28, [`RECORDING.md`](RECORDING.md) §6)
 
@@ -500,8 +501,10 @@ is, [`SETUP.md`](SETUP.md) §3). **No session or CSRF**: the
   | `GET /modems`, `PUT /modems/{id}`, `POST /modems/{id}/{pin,reset,subnet}` | Same as in the web ([`MODEMS.md`](MODEMS.md) §7). The PIN typed on the screen comes here directly, never through the engine's socket nor its state |
   | `POST /service/restart` | "Apply" (Oct 14); `start` and `stop`, `403`. It restarts the engine, the caller: the screen never sees the `202` (nor the answer of a `PUT` with `"apply": true` that restarts), and the app does not cut the restart when the socket closes |
   | `PUT /password` | Same as in the web (Oct 14), with no session to keep: **every web session is closed**. The screen's wrong attempts are counted as one caller (5 per minute, then `429`); `503 setup_required` without a password |
+  | `POST /password/reset` | `{"password"}` **without** the setup code (Oct 29, §6): Settings › Device › Name & password › "Forgot the web password?". The screen is physical access, the counterweight to the cloud's `set_local_password`; every web session is closed |
+  | `GET /setup/code` | **Only on the socket** (the web answers `404`): `200 {"code"}`, the setup code after the setup too, for the eye of the same page. `no-store`; `503 setup_code_unavailable` without one |
   | `GET/PUT /device`, `GET /device/timezones`, `GET /setup`, `POST /setup/{password,step,complete,restart}`, `GET/PUT /sources/slots`, `GET /update`, `POST /update/{check,install,reboot}` | The device settings, the wizard (the setup code only here), the slots and the updates ([`SETUP.md`](SETUP.md) §8) |
-  | `GET /cloud`, `POST /cloud/pair`, `DELETE /cloud` | The link, the pairing code (`?qr=rows` → `linkQrRows`) and unlinking (Oct 14). With a destination the cloud set, unlinking restarts the engine, and the cloud is still notified when the socket closes |
+  | `GET /cloud`, `POST /cloud/pair`, `DELETE /cloud` | The link, the pairing code (`?qr=rows` → `linkQrRows`) and unlinking (Oct 14), without the web password the web must give (Oct 29). With a destination the cloud set, unlinking restarts the engine, and the cloud is still notified when the socket closes |
   | `GET/PUT /bluetooth`, `POST /bluetooth/{scan,visible}`, `POST /bluetooth/devices/{address}/{action}`, `PUT /bluetooth/devices/{address}` | Same as in the web (Oct 15, [`BLUETOOTH.md`](BLUETOOTH.md)): no keys in them, and opening the visible window from the screen is physical access |
   | `GET/PUT /recording`, `PUT /record`, `GET /storage`, `POST /storage/{eject,format}` | Same as in the web (Oct 28, [`RECORDING.md`](RECORDING.md) §6.2): the local recording's settings, REC and the disk. No paths or secrets in them; the storage helper refuses eject and format while recording |
 
@@ -625,7 +628,7 @@ the file it writes is read as data with a key whitelist (see below).
 | Need | How |
 |---|---|
 | Start, stop and restart `eirl-engine` (and reboot or power off the board) | `/etc/sudoers.d/eirl-encoder`, **exact commands without wildcards** (validated with `visudo -cf` before installing it):<br>`eirl-encoder ALL=(root) NOPASSWD: /bin/systemctl start eirl-engine.service, /bin/systemctl stop eirl-engine.service, /bin/systemctl restart eirl-engine.service, /bin/systemctl reboot, /bin/systemctl poweroff`<br>The app calls `sudo -n` with those literal arguments. `/bin/systemctl reboot` (with no more arguments: not even `--force`) is EnhancedIRL's `reboot` command with the device linked (§10) and the Reboot of the screen's Power menu; `/bin/systemctl poweroff`, its Power off (MIXER.md §14: the engine requests it in `screen.power` and the app does it once per request, if it is < 15 s old). A compromised app could reboot or power off the board, which is the same as what it can already do by stopping the stream, and it gains nothing more. Since Oct 8 it is the **only** passwordless thing on the board: the temporary `<user> … NOPASSWD: ALL` was removed (copy in `/etc/sudoers.bak-20261008`) |
-| Writing the configuration | **Its own file, not `/etc/default/eirl-engine`** (see below): `/etc/eirl-encoder/` (`root:eirl-encoder 3770`: setgid, and sticky so the group, which the engine has, cannot unlink or rename the app's files; the app only reads its files there if they are regular files it or root owns, never through a link: `internal/safefile`, so a name the engine created first is ignored) with `engine.env` and `admin.hash` (`0640`, group `eirl-encoder` through the setgid), `cloud.json` (`0600`: it carries the cloud token; the streaming service, which comes in through the group, does not read it) and `identity` (`0600`, the device's secret for the cloud, §10) |
+| Writing the configuration | **Its own file, not `/etc/default/eirl-engine`** (see below): `/etc/eirl-encoder/` (`root:eirl-encoder 3770`: setgid, and sticky so the group, which the engine has, cannot unlink or rename the app's files; `install.sh` sets it with `install -d -m 3770` on every install, the OTA's included, so a device from before it gets it at its next update; the app only reads its files there if they are regular files it or root owns, never through a link: `internal/safefile`, so a name the engine created first is ignored) with `engine.env` (`0640`, group `eirl-encoder` through the setgid: the engine reads it), `admin.hash` (**`0600`** since Oct 29: the engine has no business with the bcrypt hash, and could copy it for an offline guess through the group; `install.sh` tightens an existing one as the app's user on every install, the OTA's included, and the app itself does when it reads one of its own that is still `0640`; `eirl-encoderd passwd` refuses to run as root, whose `0600` file the app could not read), `cloud.json` (`0600`: it carries the cloud token; the streaming service, which comes in through the group, does not read it) and `identity` (`0600`, the device's secret for the cloud, §10) |
 | `eirl-engine` using that file | Drop-in `/etc/systemd/system/eirl-engine.service.d/eirl-encoder.conf`: `Environment=EIRL_CONF=…`, `SupplementaryGroups=eirl-encoder eirl-usbhub` (only the service gets those groups: the first, to read it; the second, to cut the power of a hung capture card's port, MIXER.md §16; the app does not have it) and `NoNewPrivileges=yes` (the engine runs as the engine's user, which on the test board has passwordless sudo for deploying: without this, a bug in the engine would give root; F5 security review). It is **not** an `EnvironmentFile`: the script reads it as **data** and only accepts `SRT_URL SRT_MODE SRT_LATENCY SRT_STREAMID SRT_PASSPHRASE VBITRATE ABITRATE OUTPUT ABR VBITRATE_MIN EDID_PREFERRED`. Next to it, `uplinks-disabled` (disabled uplinks), which the script rereads every 2 s, also as data with a whitelist. As an environment, whoever could write it would slip in `BASH_ENV`, `LD_PRELOAD`, `GST_PLUGIN_PATH` or paths (`RECORD`) and execute code as the engine's user (review finding; tested that they are now ignored) |
 | Service state | `systemctl show` needs no privileges |
 | `eirl-engine`'s journal | Group `systemd-journal` |
@@ -718,10 +721,10 @@ every 2 s. Saving a valid configuration with `apply` starts it again.
 > **With the device linked to EnhancedIRL (§10)**, the cloud can do the same as the local web **plus two
 > powers the local web does not have without the password**: `reboot` and `set_local_password` (changes the
 > local password without knowing the current one, for whoever forgot it). A compromised EnhancedIRL account
-> could therefore lock the owner out of the local portal. Counterweight **pending for phase 3**: the
-> setup code (`/etc/eirl-encoder/setup-code`) will ALWAYS get into the local portal as a
-> rescue credential (contract `ENCODER_CLOUD.md` §10). None of this allows executing code or taking
-> the stream out of EnhancedIRL's relays (D9).
+> could therefore try to lock the owner out of the local portal. None of this allows executing code or taking
+> the stream out of EnhancedIRL's relays (D9). The counterweights (Oct 29, security review of Oct 13,
+> `ENCODER_CLOUD.md` §10.1), each below: the **rescue credential**, the **re-authentication** for linking and
+> unlinking, and **global limits that cannot lock the owner out**.
 
 - **LAN only**: listens on `:80` and rejects (`403`) any source IP that is not RFC 1918,
   link-local, ULA, loopback **or from the subnets of the device's own interfaces** (on a network with IPv6 the
@@ -740,8 +743,37 @@ every 2 s. Saving a valid configuration with `apply` starts it again.
   (`sudo -u eirl-encoder eirl-encoderd passwd`, read from stdin). With no password set, the API
   answers `503` to everything: there is never an open device.
 - **Login attempts**: 5 per minute per IP (IPv6: per /64) and 20 per minute in total, recorded
-  **before** bcrypt (concurrent ones count too) and one bcrypt at a time. The global limit lets
-  someone on the LAN block the login for a minute: accepted.
+  **before** bcrypt (concurrent ones count too) and one bcrypt at a time. The total keeps several
+  addresses from adding up their guesses, but alone it would let someone on the LAN with four
+  addresses block everybody's login, the owner's too. So it **does not apply to a known client**:
+  an IP (or /64) that signed in successfully, or used the setup code, in the last 30 days (the
+  session's life; in memory, at most 32, the oldest forgotten first; a restart forgets them, and
+  resets the counts too). A known client still has its own 5 a minute, and its attempts still count
+  in the total. Taking over the owner's address on the LAN while the owner is there makes the
+  network itself fight back (address conflict), and gives the attacker 5 guesses a minute at a
+  bcrypt password of 10 or more characters.
+- **Rescue credential (counterweight to `set_local_password`)**: the **setup code**
+  (`/etc/eirl-encoder/setup-code`, [`SETUP.md`](SETUP.md) §6) proves physical access: the touch screen
+  shows it on demand (Settings › Device › Name & password, behind its eye: `GET /setup/code`, only over
+  the local socket) and the label carries it. With it, the web's "Forgot the password?" (`POST
+  /password/reset`) sets a new password without the current one, **closes every session** (the
+  attacker's too) and opens one for whoever used it; the event is logged (IP, never the code or the
+  password). The code is normalised as a person types it (case, spaces, a dash), compared in
+  constant time, and has **its own budget** (5/min per IP, 20/min in total, with the same known-client
+  exception), shared with the wizard's first password (the same secret: two budgets would double the
+  guesses) and separate from the login's: burning the login's never blocks the rescue. 31^8 ≈ 8.5·10^11
+  codes at ≤ 20 a minute is ~40,000 years for half of them. And the **screen** itself sets a new web
+  password without the current one or the code (Name & password › "Forgot the web password?", the same
+  route over the socket), which no limit on the LAN can touch: whoever holds the screen holds the
+  board, and could read the code anyway. A compromised account can change the password as often as it
+  likes; it cannot keep the owner, with the device in front of them, out.
+- **Re-authentication for linking and unlinking**: what hands the device to an account or takes it from
+  one asks the web for the **current web password** in the request, not only a session: starting a link
+  (`POST /cloud/pair` from the unlinked state) and unlinking (`DELETE /cloud` while linked). A session
+  left open on a shared computer, or a stolen cookie, does not give the device (and its stream) to another
+  account. Renewing a code in progress and cancelling it do not ask (whoever started it already gave it,
+  and `GET /cloud` shows the code anyway). The wrong ones share `PUT /password`'s budget (5/min per IP, the
+  total not for a known client). The screen never asks: physical access.
 - **Session**: random 32-byte token in memory, cookie `HttpOnly; SameSite=Strict`. A
   restart of the app closes the sessions (acceptable).
 - **CSRF**: `SameSite=Strict` + a check of `Origin`/`Sec-Fetch-Site` on every mutation.
@@ -900,8 +932,11 @@ The contract (routes, messages, close codes, configuration) is `devops/docs/acti
   its own limit of 10 messages/s for `status`/`event`/`thumbnail` (the critical ones always go through).
   `watch` expires after 60 s without renewal.
 - **`config.set`**: strict whitelist (unknown or missing fields → error), the SAME rules
-  as the local API (`config.Settings.Validate`) and **D9**: a host that does not end in `.enhancedirl.com` (nor an
-  IP, nor a listener) → `errors.destination = "destination_not_allowed"`. `errors` carries per-field CODES
+  as the local API (`config.Settings.Validate`) and **D9**: only EnhancedIRL's ingest relays (Oct 29; before, any
+  name under `.enhancedirl.com`): `<zone>.relay.enhancedirl.com` (production: `eu1`, `us1`, `as1` in the backend's
+  relays table) and `relay.dev.enhancedirl.com` (development), with exactly one zone label (`[a-z0-9-]`, ≤ 63, no
+  hyphen at either end) for a future zone of either (`<zone>.relay.dev.enhancedirl.com`). Anything else (the API,
+  the app, the docs, an IP, a listener) → `errors.destination = "destination_not_allowed"`. `errors` carries per-field CODES
   from the contract (`video.bitrateKbps: "invalid"`…); saved but unable to apply (failed
   restart) → `config: "apply_failed"` and it does not count as applied. The URL arrives without a query (the key only
   in `streamId`); if it brought a different `?streamid=`, error. It writes the `.env` and the disabled

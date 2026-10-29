@@ -504,8 +504,11 @@ if [ ! -e "$APPENV" ]; then
     echo "destination migrated to $APPENV (copy of $DEF in $DEF.bak-$stamp)"
   fi
 fi
-# Files of earlier versions (0600): the engine reads them through the group
-as_app chmod 0640 "$APPENV" "$CONF/admin.hash" 2>/dev/null || true
+# Files of earlier versions: engine.env 0640 (the engine reads it through the group); admin.hash 0600, the app's
+# alone (earlier versions left it 0640, readable by the engine through the group: MANAGER.md §5). As the app's
+# user and only on its own regular file, never through a link (step 2)
+as_app chmod 0640 "$APPENV" 2>/dev/null || true
+as_app sh -c '[ -f "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] && chmod 0600 "$1"' sh "$CONF/admin.hash" 2>/dev/null || true
 
 # 7a. The engine's board settings (its EnvironmentFile; root:root 0644, never in a directory the app can
 #     write: MANAGER.md §5). Only when missing, after step 7 has seen there was nothing to migrate; it is

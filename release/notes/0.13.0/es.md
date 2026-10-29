@@ -1,0 +1,3 @@
+- Nuevo: si olvidas la contraseña de la web, pon una nueva con el código de configuración. En la web, «¿Has olvidado la contraseña?» al iniciar sesión; el código lo ves en la pantalla, en Ajustes › Aparato › Nombre y contraseña, tras el ojo. Desde la pantalla también puedes poner una nueva sin el código. Al cambiarla se cierran todas las sesiones de la web.
+- Más seguro: la web pide su contraseña para vincular el codificador a EnhancedIRL y para desvincularlo, y los intentos fallidos de otra persona en tu red ya no te dejan fuera si ya habías entrado antes.
+- Más seguro: el fichero con la contraseña de la web solo lo lee la app del codificador, y desde una cuenta de EnhancedIRL solo se pueden poner como destino sus relays.

@@ -1,4 +1,4 @@
-> **Status:** IN PROGRESS (R1-R3 in code, R1 and R2 tested on the board on Oct 24 and 28 (§8.1-§8.3); R3 in the simulator; R4-R6 to do)
+> **Status:** RELEASED in 0.12.0 (Oct 28): R1-R4 and R6's release; the cloud's view (D8) and a power cut by the cable still to do
 > **Updated:** 2026-10-28
 
 # Local recording to a USB disk
@@ -353,10 +353,10 @@ with a disk that can be plugged and pulled.
 | R0 | Measurements on the board | done (§3) |
 | R1 | The storage helper, udev, units, packages | code and tests done (Oct 24); first board test Oct 24 (§8.1) |
 | R2 | The engine: recorder, writer, socket, state, busy | code and tests done (Oct 24); first board test Oct 24 (§8.1) |
-| R3 | The app and the web: keys, API, card, translations | code and tests done (Oct 28, §6), tried in the simulator; not yet on the board; the cloud's part (D8) to do |
-| R4 | The screen: header indicator, REC button, Settings › Recording | code and tests done (Oct 28, §6.7), seen in captures; not yet on the board |
+| R3 | The app and the web: keys, API, card, translations | done (Oct 28, §6), tried in the simulator and on the board; released in 0.12.0 |
+| R4 | The screen: header indicator, REC button, Settings › Recording | done (Oct 28, §6.7), seen in captures and on the board; released in 0.12.0 |
 | R5 | Robustness on the board | nearly done (Oct 24 and 28, §8.1-§8.3): a cable power cut and the owner's editors left |
-| R6 | Release, and the cloud | — |
+| R6 | Release, and the cloud | released in 0.12.0 on Oct 28: a security review of the helper first (§4.4), then the update tried on the test board from 0.11.1 (test builds, the system layer with the five packages, ~1 min, no restart), and the test board updated itself from GitHub. The cloud (D8) still to do |
 
 ## 8. To test on the board (R5)
 

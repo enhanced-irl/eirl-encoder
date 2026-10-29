@@ -15,8 +15,8 @@ import (
 
 // The setup code (SETUP.md §2.1): 8 characters of CodeAlphabet in /etc/eirl-encoder/setup-code
 // (0640), generated at the first start. The touch-screen wizard shows it (later, the product label
-// too); the web needs it to set the first admin password. It is the pending "rescue credential" of
-// MANAGER.md §6, but tonight only the first-password use exists.
+// too); the web needs it to set the first admin password. It is also the rescue credential of MANAGER.md §6:
+// with a password set, it sets a new one from the web (POST /password/reset), and the screen shows it on demand.
 
 const (
 	// CodeAlphabet: no 0/O, 1/I/L: it is read off a screen or a label

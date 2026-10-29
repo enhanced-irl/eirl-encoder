@@ -86,6 +86,9 @@ type AppAction struct {
 //	sources_scan  GET /sources → AppSnapshot.Sources
 //	cloud_unlink  DELETE /cloud (also cancels a pairing)
 //	password      PUT /password  Secrets: current, new
+//	password_reset POST /password/reset  Secrets: password (a new web password without the current one: the screen is
+//	              physical access, MANAGER.md §6; every web session is closed)
+//	setup_code    GET /setup/code → AppSnapshot.SetupCode (until DropSecrets): the setup code after the setup, for its eye
 //	cam_add       POST /cameras  Body: name
 //	cam_rename    PATCH /cameras/{ID}  Body: name
 //	cam_rotate    PATCH /cameras/{ID}  (rotateKey)
@@ -109,9 +112,10 @@ var AppActions = []string{"dest_save", "dest_reveal", "dest_create", "dest_updat
 	"dest_secrets", "restart", "uplink", "input_save", "sources_scan",
 	"cloud_unlink", "password", "cam_add", "cam_rename", "cam_rotate", "cam_remove", "cam_creds", "ap_enabled",
 	"ap_channel", "ap_rotate", "lan_enabled", "modem_save", "modem_pin", "modem_reset", "modem_subnet",
-	"bt_power", "bt_scan", "bt_visible", "bt_device", "bt_use", "rec_settings", "rec_eject", "rec_format"}
+	"bt_power", "bt_scan", "bt_visible", "bt_device", "bt_use", "rec_settings", "rec_eject", "rec_format",
+	"password_reset", "setup_code"}
 
-// SecretsDropper is an App that can forget the secrets it read for the screen (DestSecrets, CamCreds): the page
+// SecretsDropper is an App that can forget the secrets it read for the screen (DestSecrets, CamCreds, SetupCode): the page
 // that showed them calls it when it goes.
 type SecretsDropper interface {
 	DropSecrets()
@@ -153,6 +157,8 @@ type AppSnapshot struct {
 	// The secrets an eye asked for (nil: not asked, or dropped): the stream key and passphrase, the cameras' URLs
 	DestSecrets *DestSecrets
 	CamCreds    []CamConnect
+	// SetupCode: the setup code the Name & password page's eye asked for ("" none: not asked, or dropped)
+	SetupCode string
 	// The board's Bluetooth (BLUETOOTH.md §3.4): BluetoothAPI No is an app without it
 	Bluetooth    *BTState
 	BluetoothAPI Tri

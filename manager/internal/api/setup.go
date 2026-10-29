@@ -101,7 +101,7 @@ func (s *Server) postSetupPassword(w http.ResponseWriter, r *http.Request) {
 			fieldError(w, r, "code", "setup.code_required")
 			return
 		}
-		if !s.codeLimit.take(ip, time.Now()) {
+		if !s.codeLimit.take(ip, time.Now(), s.Auth.Known(ip, time.Now())) {
 			fail(w, r, 429, "rate_limited", "auth.rate_limited")
 			return
 		}
@@ -219,8 +219,11 @@ func (s *Server) postSetupRestart(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, s.setupView(r))
 }
 
-// attemptLimiter: attempts at the setup code, with the login's rule (auth): 5 per minute per IP (IPv6:
-// per /64) and 20 per minute in total, counted BEFORE comparing.
+// attemptLimiter: attempts at a secret (the setup code; the current password of PUT /password and of the
+// re-authentication), with the login's rule (auth): 5 per minute per IP (IPv6: per /64) and 20 per minute in
+// total, counted BEFORE comparing. Each secret has its own limiter, so burning one budget (the login's
+// included) never blocks another, and the total does not apply to a known client (auth.Known: it signed in
+// or used the setup code recently): someone on the LAN cannot lock the owner out by spending it (MANAGER.md §6).
 type attemptLimiter struct {
 	mu sync.Mutex
 	at map[string][]time.Time
@@ -232,8 +235,9 @@ const (
 	codeWindow         = time.Minute
 )
 
-// take records an attempt of key; false if it is over the limit (then it is not recorded).
-func (l *attemptLimiter) take(key string, now time.Time) bool {
+// take records an attempt of key; false if it is over the limit (then it is not recorded). known: key is a
+// known client, only its own limit applies (its attempts still count in the total).
+func (l *attemptLimiter) take(key string, now time.Time, known bool) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.at == nil {
@@ -253,7 +257,7 @@ func (l *attemptLimiter) take(key string, now time.Time) bool {
 		}
 		return len(kept)
 	}
-	if recent(key) >= codeAttempts || recent("*") >= codeAttemptsGlobal {
+	if recent(key) >= codeAttempts || (!known && recent("*") >= codeAttemptsGlobal) {
 		return false
 	}
 	l.at[key] = append(l.at[key], now)

@@ -57,8 +57,9 @@ var localRoutes = []string{
 	"POST /api/v1/service/restart",
 	// Network cameras: add, rename or new key, remove. Their answers carry the camera's URLs with its key, as on the web
 	"POST /api/v1/cameras", "PATCH /api/v1/cameras/{id}", "DELETE /api/v1/cameras/{id}",
-	// The admin password, with the current one (no session to keep: every web session is closed)
-	"PUT /api/v1/password",
+	// The admin password, with the current one (no session to keep: every web session is closed), and without it:
+	// the screen is physical access, the counterweight to the cloud's set_local_password (MANAGER.md §6)
+	"PUT /api/v1/password", "POST /api/v1/password/reset",
 	// Cellular modems (MODEMS.md §7): the list (only the last digits of IMEI and ICCID), their configuration, the SIM's
 	// PIN (typed on the screen, straight to the modem or NetworkManager; never in a GET or a log), a reset and a HiLink's
 	// subnet
@@ -87,6 +88,7 @@ func (s *Server) LocalHandler() http.Handler {
 	mux.HandleFunc("GET /api/v1/network/credentials", s.getLocalCredentials)
 	mux.HandleFunc("GET /api/v1/destination/secrets", s.getDestinationSecrets)
 	mux.HandleFunc("GET /api/v1/destinations/{id}/secrets", s.getDestinationSecretsByID)
+	mux.HandleFunc("GET /api/v1/setup/code", s.getSetupCode) // the setup code, after the setup too (its eye)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, 403, "local_forbidden", "access.local_forbidden")
 	})

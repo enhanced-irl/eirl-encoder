@@ -8,7 +8,10 @@ import (
 // The Name & password page (Device → Name & password, MIXER.md §21): the encoder's name (PUT /device, as in the
 // wizard) and the web's password (PUT /password: the current one, then the new one, each on the secret keyboard with
 // its eye; changing it closes every web session). With no password yet (the setup's), only the new one
-// (POST /setup/password, as in the wizard).
+// (POST /setup/password, as in the wizard). With one, the rescue (MANAGER.md §6), the counterweight to the cloud's
+// set_local_password: the setup code behind its eye (GET /setup/code: the web's «Forgot the password?» asks for it)
+// and «Forgot the web password?», a new one without the current one (POST /password/reset: the screen is physical
+// access).
 
 // accountState keeps the current password and the new one between their keyboards (the new one is typed twice,
 // like in the wizard: a mistyped one would leave nobody knowing it, with every web session closed): wiped when they
@@ -16,13 +19,17 @@ import (
 type accountState struct {
 	cur, next []byte
 	sentAt    time.Time
+	reset     bool // the new password is a reset (POST /password/reset), not the setup's first one
 }
 
 func (a *accountState) wipe() {
 	clear(a.cur)
 	clear(a.next)
-	a.cur, a.next = nil, nil
+	a.cur, a.next, a.reset = nil, nil, false
 }
+
+// codeEye is the setup code's eye.
+const codeEye = "s_acct_code_eye"
 
 func init() {
 	registerPage("account", &pageDef{
@@ -30,16 +37,24 @@ func init() {
 			rows, _ := l.FormRows(5)
 			l.Buttons["s_acct_name"] = rows[0]
 			l.Buttons["s_acct_pw"] = rows[1]
+			l.Buttons["s_acct_code"] = l.eyeKey(rows[2], codeEye)
+			l.Buttons["s_acct_reset"] = rows[3]
 		},
 		draw: (*UI).drawAccountPage,
 		keys: func(u *UI, app *AppSnapshot) []string {
 			if app.DeviceAPI != Yes || app.Device == nil {
 				return nil
 			}
-			return []string{"s_acct_name", "s_acct_pw"}
+			if needsWebPassword(app) {
+				return []string{"s_acct_name", "s_acct_pw"}
+			}
+			return []string{"s_acct_name", "s_acct_pw", codeEye, "s_acct_reset"}
 		},
 		touch: (*UI).accountTouch,
-		leave: func(u *UI) { u.acct.wipe() },
+		leave: func(u *UI) {
+			u.acct.wipe()
+			u.hideSetupCode()
+		},
 	})
 }
 
@@ -64,8 +79,24 @@ func (u *UI) drawAccountPage(d *dc, app *AppSnapshot) {
 		pwVal, pwSub = tx.NotSet, at.PasswordNone
 	}
 	u.field(d, "s_acct_pw", at.Password, pwVal, fieldOpt{chevron: true, secret: true, set: set, sub: pwSub})
+	last := "s_acct_pw"
+	if set {
+		// The setup code: eight dots, or the code (XXXX-XXXX, as on the label) with its eye open
+		shown, code := u.revealed(codeEye), ""
+		if shown {
+			code = "…" // the app has not answered yet
+			if c := app.SetupCode; len(c) == 8 {
+				code = c[:4] + "-" + c[4:]
+			}
+		}
+		u.field(d, "s_acct_code", at.SetupCode, code, fieldOpt{secret: true, shown: shown, set: true, sub: at.SetupCodeSub})
+		u.eye(d, codeEye, shown)
+		u.field(d, "s_acct_reset", at.Forgot, at.ForgotValue, fieldOpt{chevron: true, sub: at.ForgotSub,
+			dim: app.Pending == "password_reset"})
+		last = "s_acct_reset"
+	}
 	pg := u.Lay.SettingsPage
-	y := float64(u.Lay.Buttons["s_acct_pw"].Y+u.Lay.Buttons["s_acct_pw"].H) + 30*s
+	y := float64(u.Lay.Buttons[last].Y+u.Lay.Buttons[last].H) + 30*s
 	for _, line := range d.wrap(at.Help, 15*s, Sans, float64(pg.W)-8*s) {
 		d.text(float64(pg.X)+4*s, y, line, 15*s, textOpt{col: cQuiet, width: float64(pg.W) - 8*s})
 		y += 21 * s
@@ -79,11 +110,12 @@ func (u *UI) accountNote(app *AppSnapshot) (string, bool) {
 	if t, warn := u.pageNoteText(); t != "" {
 		return t, warn
 	}
-	if t := u.resultNote(app, "name", "password", "setup_password"); t != "" {
+	if t := u.resultNote(app, "name", "password", "setup_password", "password_reset", "setup_code"); t != "" {
 		return t, true
 	}
 	l := app.Last
-	if l != nil && l.OK && (l.What == "password" || l.What == "setup_password") && l.At.After(u.acct.sentAt) &&
+	if l != nil && l.OK && (l.What == "password" || l.What == "setup_password" || l.What == "password_reset") &&
+		l.At.After(u.acct.sentAt) &&
 		u.now().Sub(l.At) < 8*time.Second {
 		return u.Tx.Account.PasswordChanged, false
 	}
@@ -109,6 +141,20 @@ func (u *UI) accountTouch(what string) bool {
 				u.appBusy(u.app().Do(AppAction{What: "name", Value: t}))
 				return ""
 			}}, app.Device.Name)
+	case codeEye:
+		// Opened: asked of the app (GET /setup/code); closed: forgotten (it is a credential: not kept on view)
+		if !u.toggleReveal(what) {
+			u.dropSecrets()
+		} else if app.SetupCode == "" && app.Pending != "setup_code" {
+			u.appBusy(u.app().Do(AppAction{What: "setup_code"}))
+		}
+	case "s_acct_reset":
+		if app.Pending == "password_reset" {
+			return true
+		}
+		u.acct.wipe()
+		u.acct.reset = true
+		u.openNewPassword(nil)
 	case "s_acct_pw":
 		u.acct.wipe()
 		if needsWebPassword(&app) {
@@ -160,13 +206,24 @@ func (u *UI) openRepeatPassword(cur []byte) {
 			}
 			u.acct.sentAt = u.now().Add(-time.Millisecond)
 			var ok bool
-			if cur == nil {
+			switch {
+			case cur == nil && u.acct.reset:
+				ok = u.app().Do(AppAction{What: "password_reset", Secrets: map[string][]byte{"password": next}})
+			case cur == nil:
 				ok = u.app().SetupPassword(next)
-			} else {
+			default:
 				ok = u.app().Do(AppAction{What: "password", Secrets: map[string][]byte{"current": cur, "new": next}})
 			}
 			u.acct.wipe() // the app's client has its own copies until they are sent
 			u.appBusy(ok)
 			return ""
 		}, cancel: func(u *UI) { u.acct.wipe() }}, "")
+}
+
+// hideSetupCode closes the setup code's eye and forgets the code the app gave.
+func (u *UI) hideSetupCode() {
+	if u.reveal[codeEye] {
+		delete(u.reveal, codeEye)
+		u.dropSecrets()
+	}
 }

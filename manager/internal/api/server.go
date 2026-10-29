@@ -125,8 +125,9 @@ type Server struct {
 	lan   lanNets
 	// mux: the route table (Handler); the local socket forwards its whitelist to it
 	mux *http.ServeMux
-	// setupMu serialises the first password; codeLimit: attempts at the setup code (like the login);
-	// passwordLimit: attempts at the current password of PUT /password (the web's IP, or the screen)
+	// setupMu serialises the first password and the reset; codeLimit: attempts at the setup code (the wizard's
+	// first password and the reset share it, like the login's but its own); passwordLimit: attempts at the
+	// current password of PUT /password and of the re-authentication (the web's IP, or the screen)
 	setupMu       sync.Mutex
 	codeLimit     attemptLimiter
 	passwordLimit attemptLimiter
@@ -155,6 +156,7 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, 200, map[string]bool{"authenticated": true})
 	})
 	mux.HandleFunc("PUT /api/v1/password", s.changePassword)
+	mux.HandleFunc("POST /api/v1/password/reset", s.resetPassword)
 	mux.HandleFunc("GET /api/v1/status", s.status)
 	mux.HandleFunc("GET /api/v1/events", s.events)
 	mux.HandleFunc("GET /api/v1/logs", s.logs)
@@ -371,6 +373,8 @@ var openWithoutPassword = map[string]bool{
 // openWithPassword: what works without a session once the password exists.
 var openWithPassword = map[string]bool{
 	"POST /api/v1/login": true, "GET /api/v1/setup": true,
+	// the rescue credential: a new password with the setup code (MANAGER.md §6)
+	"POST /api/v1/password/reset": true,
 	// answers 409 password_exists: the web learns that it has to sign in
 	"POST /api/v1/setup/password": true,
 }

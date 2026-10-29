@@ -1,0 +1,3 @@
+- New: if you forget the web password, set a new one with the setup code. On the web, "Forgot the password?" when signing in; the code is on the screen, in Settings › Device › Name & password, behind the eye. From the screen you can also set a new one without the code. Changing it closes every web session.
+- Safer: the web asks for its password to link the encoder to EnhancedIRL and to unlink it, and someone else's failed attempts on your network no longer lock you out if you had signed in before.
+- Safer: the file with the web password is readable only by the encoder's app, and an EnhancedIRL account can only set its relays as the destination.

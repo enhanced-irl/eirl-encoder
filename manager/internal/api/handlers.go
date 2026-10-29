@@ -99,7 +99,8 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 		}
 		key = limitKey(remoteIP(r))
 	}
-	if !s.passwordLimit.take(key, time.Now()) {
+	// The screen and a known client are not held back by the total (MANAGER.md §6)
+	if !s.passwordLimit.take(key, time.Now(), isLocal(r) || s.Auth.Known(key, time.Now())) {
 		fail(w, r, 429, "rate_limited", "auth.rate_limited")
 		return
 	}

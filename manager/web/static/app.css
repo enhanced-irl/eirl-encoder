@@ -78,6 +78,9 @@ summary:hover { color: var(--gray-50); }
 .auth-card .brand { font-size: 1.3rem; margin-bottom: 10px; }
 .auth-card label { font-size: .82rem; color: var(--gray-400); }
 .auth-card .btn { margin-top: 6px; }
+.auth-card .btn.ghost { margin-top: 0; }
+.auth-card .auth-title { font-size: 1.05rem; font-weight: 600; margin: 0; }
+.auth-card .hint { margin: 0; }
 pre { background: var(--gray-950); border: 1px solid var(--gray-800); padding: 12px; border-radius: var(--radius-sm);
   overflow-x: auto; font: .8rem/1.5 var(--mono); color: var(--gray-300); margin: 0; }
 
@@ -496,6 +499,8 @@ input[type=range]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 4px rgba(7
 
 /* Cuenta EnhancedIRL (vinculación) */
 .cloud-text { margin: 0 0 8px; font-size: .9rem; }
+.cloud-reauth { margin-bottom: 4px; }
+.cloud-reauth label { margin-top: 4px; }
 .cloud-code { margin: 14px 0 8px; padding: 14px 8px; text-align: center; color: var(--gray-50); letter-spacing: .14em;
   font: 700 2rem/1.2 var(--mono); border-radius: var(--radius-sm); background: var(--gray-950); border: 1px dashed var(--gray-700); }
 .cloud-center { text-align: center; margin: 4px 0; }

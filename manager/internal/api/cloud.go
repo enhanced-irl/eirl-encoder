@@ -54,15 +54,23 @@ func (s *Server) getCloud(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, s.cloudView(r, s.Cloud.View()))
 }
 
-// pairCloud starts linking or renews the code.
+// pairCloud starts linking or renews the code. From the web, starting a new link needs the current web password
+// ({"password"}, reauth): a session alone does not hand the device to an account. Renewing a code in progress does
+// not (whoever started it gave it, and GET /cloud already shows the code), nor does a linked device (409).
 func (s *Server) pairCloud(w http.ResponseWriter, r *http.Request) {
 	if s.Cloud == nil {
 		fail(w, r, 503, "cloud_disabled", "cloud.disabled")
 		return
 	}
-	var body struct{}
-	if err := decode(r, &body); err != nil {
-		fail(w, r, 400, "bad_request", "common.bad_body")
+	var pw string
+	if !passwordBody(w, r, &pw) {
+		return
+	}
+	switch st := s.Cloud.View().State; {
+	case st == "linked": // answered here: between a check and Pair the link could go, and Pair would start a new one
+		fail(w, r, 409, "already_linked", "cloud.already_linked")
+		return
+	case st != "pairing" && !s.reauth(w, r, pw):
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
@@ -88,10 +96,18 @@ func (s *Server) pairCloud(w http.ResponseWriter, r *http.Request) {
 }
 
 // unlinkCloud unlinks: removes the state even if the cloud does not answer (cloudNotified says whether
-// it heard: if not, it should be removed in the app too).
+// it heard: if not, it should be removed in the app too). Unlinking from the web needs the current web password
+// ({"password"}, reauth); cancelling a code in progress does not.
 func (s *Server) unlinkCloud(w http.ResponseWriter, r *http.Request) {
 	if s.Cloud == nil {
 		fail(w, r, 503, "cloud_disabled", "cloud.disabled")
+		return
+	}
+	var pw string
+	if !passwordBody(w, r, &pw) {
+		return
+	}
+	if s.Cloud.View().State == "linked" && !s.reauth(w, r, pw) {
 		return
 	}
 	// Not cut if the caller hangs up: with a destination the cloud set, unlinking restarts the engine (Unlinked), and
@@ -111,10 +127,9 @@ func (s *Server) unlinkCloud(w http.ResponseWriter, r *http.Request) {
 // API (config.Store with its validation, the unit with its sudo commands, auth, and the same "apply"
 // rule, applySaved). The cloud can do what the local web can PLUS two powers the local web does not
 // have without a password (ENCODER_CLOUD.md §10): `reboot` and `set_local_password` (change the local
-// password without knowing the current one). Counterweight planned: the setup code will ALWAYS work in
-// the local portal as a rescue credential, so that a compromised account cannot lock out the owner who
-// has the device in front of them (MANAGER.md §6; tonight the code only sets the FIRST password,
-// SETUP.md §4). Messages to the cloud are in the device language.
+// password without knowing the current one). Counterweight: the setup code ALWAYS sets a new web password
+// (POST /password/reset), and the screen can without it, so that a compromised account cannot lock out the
+// owner who has the device in front of them (MANAGER.md §6). Messages to the cloud are in the device language.
 type CloudDevice struct {
 	Srv   *Server
 	Ident cloud.DeviceInfo // Capabilities without thumbnail: Info adds it if the thumbnail is active

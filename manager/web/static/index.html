@@ -31,7 +31,24 @@
     <input id="login-pw" type="password" autocomplete="current-password" required autofocus>
     <p id="login-err" class="err" hidden></p>
     <button class="btn primary" type="submit" data-i18n="login.submit"></button>
+    <button id="login-forgot" class="btn ghost" type="button" data-i18n="login.forgot"></button>
     <div class="auth-lang"><select name="lang" class="lang-pick" data-i18n-attr="aria-label:common.language"></select></div>
+  </form>
+  <!-- The rescue credential (MANAGER.md §6): a new password with the setup code the encoder's screen shows -->
+  <form id="reset-form" class="card auth-card" hidden>
+    <div class="brand"><img src="favicon.svg" alt="" width="36" height="36"> <span data-i18n="common.encoder"></span></div>
+    <h2 class="auth-title" data-i18n="reset.title"></h2>
+    <p class="hint" data-i18n="reset.intro"></p>
+    <input type="text" name="username" autocomplete="username" value="admin" hidden>
+    <label for="reset-code" data-i18n="setup.code"></label>
+    <input id="reset-code" name="code" type="text" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" maxlength="11" inputmode="text" class="setup-code">
+    <label for="reset-pw" data-i18n="reset.pw"></label>
+    <input id="reset-pw" type="password" autocomplete="new-password" minlength="10">
+    <label for="reset-pw2" data-i18n="setup.pw2"></label>
+    <input id="reset-pw2" type="password" autocomplete="new-password" minlength="10">
+    <p id="reset-err" class="err" hidden></p>
+    <button class="btn primary" type="submit" data-i18n="reset.submit"></button>
+    <button id="reset-back" class="btn ghost" type="button" data-i18n="reset.back"></button>
   </form>
 </main>
 
@@ -751,6 +768,11 @@ sudo systemctl restart eirl-encoderd</pre>
         <div id="cloud-unlinked" hidden>
           <p class="cloud-text" data-i18n="cloud.intro"></p>
           <p id="cloud-error" class="err" hidden></p>
+          <div class="form cloud-reauth">
+            <label for="cloud-pw-link" data-i18n="cloud.pw"></label>
+            <input id="cloud-pw-link" type="password" autocomplete="current-password">
+            <p class="hint" data-i18n="cloud.pwHint"></p>
+          </div>
           <div class="form-actions"><button id="cloud-pair" class="btn primary" type="button" data-i18n="cloud.pair"></button></div>
         </div>
         <div id="cloud-pairing" hidden>
@@ -769,6 +791,11 @@ sudo systemctl restart eirl-encoderd</pre>
           <p id="cloud-online" class="sub"></p>
           <p id="cloud-warn" class="err" hidden></p>
           <p class="hint" data-i18n="cloud.linkedHint"></p>
+          <div class="form cloud-reauth">
+            <label for="cloud-pw-unlink" data-i18n="cloud.pw"></label>
+            <input id="cloud-pw-unlink" type="password" autocomplete="current-password">
+            <p class="hint" data-i18n="cloud.pwHint"></p>
+          </div>
           <div class="form-actions"><button id="cloud-unlink" class="btn danger" type="button" data-i18n="cloud.unlink"></button></div>
         </div>
       </section>

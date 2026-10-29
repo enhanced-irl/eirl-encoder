@@ -1,5 +1,7 @@
 // Package auth: one administrator password (bcrypt in /etc/eirl-encoder/admin.hash), in-memory
-// sessions and a per-IP attempt limit. Restarting the app closes all sessions.
+// sessions and the login's attempt limits (MANAGER.md §6): per IP, and a global one that a client which
+// signed in recently does not count against (so nobody on the LAN can lock the owner out by burning it).
+// Restarting the app closes all sessions and forgets the known clients.
 package auth
 
 import (
@@ -10,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -27,6 +30,10 @@ const (
 	maxGlobal      = 20                  // across all of them, per minute
 	attemptWindow  = time.Minute
 	totalKey       = "*" // global counter in the same map (not an IP)
+	// KnownTTL: a client (IP, or /64) that signed in successfully this recently is "known": the global
+	// limit does not apply to it (its own per-IP limit still does). As long as a session lasts.
+	KnownTTL = SessionTTL
+	maxKnown = 32 // known clients kept (the oldest goes first)
 )
 
 // The texts are for logs and the passwd command; the API shows its own translated messages (api.passwordError).
@@ -48,19 +55,36 @@ type Auth struct {
 	hash     []byte
 	sessions map[string]time.Time // token → expiry
 	attempts map[string][]time.Time
-	bcryptMu sync.Mutex // one bcrypt at a time: no bursts of attempts, no Nano CPU at full load
+	known    map[string]time.Time // client key → its last successful sign-in (MarkKnown)
+	bcryptMu sync.Mutex           // one bcrypt at a time: no bursts of attempts, no Nano CPU at full load
 }
 
 func New(hashPath string) *Auth {
-	a := &Auth{HashPath: hashPath, sessions: map[string]time.Time{}, attempts: map[string][]time.Time{}}
+	a := &Auth{HashPath: hashPath, sessions: map[string]time.Time{}, attempts: map[string][]time.Time{},
+		known: map[string]time.Time{}}
 	b, err := safefile.ReadOwned(hashPath, 4<<10) // not the app's (nor root's) file: as if there were none
 	switch {
 	case err == nil:
 		a.hash = []byte(strings.TrimSpace(string(b)))
+		tightenHash(hashPath)
 	case !errors.Is(err, os.ErrNotExist):
 		a.LoadErr = err
 	}
 	return a
+}
+
+// tightenHash: an admin.hash of an earlier version (0640, readable by the directory's group) becomes HashMode,
+// if it is the app's own regular file (the sticky directory keeps anyone else from swapping it in between). A
+// device updated over the air also gets it from install.sh; this covers one whose install did not run.
+func tightenHash(path string) {
+	fi, err := os.Lstat(path)
+	if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm() == HashMode {
+		return
+	}
+	if st, ok := fi.Sys().(*syscall.Stat_t); !ok || int(st.Uid) != os.Geteuid() {
+		return
+	}
+	os.Chmod(path, HashMode)
 }
 
 func (a *Auth) Configured() bool {
@@ -80,10 +104,14 @@ func HashPassword(pw string) ([]byte, error) {
 	return bcrypt.GenerateFromPassword([]byte(pw), bcryptCost)
 }
 
-// WriteHash: 0640 so the app can read it through the group (eirl-encoder, from the directory's
-// setgid) even when `passwd` was run by root.
+// HashMode: admin.hash is the app's alone. The engine is in the directory's group (to read engine.env) and
+// has no business with the hash: 0600 keeps it from copying it for an offline guess.
+const HashMode os.FileMode = 0o600
+
+// WriteHash writes the hash with HashMode. Run as the app's user (`sudo -u eirl-encoder eirl-encoderd
+// passwd`): a file root wrote would be root's 0600 and the app could not read it.
 func WriteHash(path string, hash []byte) error {
-	return config.WriteAtomic(path, append(hash, '\n'), 0o640)
+	return config.WriteAtomic(path, append(hash, '\n'), HashMode)
 }
 
 // Login checks the password and opens a session. key groups the attempts (IP, or /64 for IPv6).
@@ -94,7 +122,7 @@ func (a *Auth) Login(key, pw string, now time.Time) (string, error) {
 		a.mu.Unlock()
 		return "", ErrNoPassword
 	}
-	if a.recent(key, now) >= maxAttempts || a.recent(totalKey, now) >= maxGlobal {
+	if a.recent(key, now) >= maxAttempts || (!a.knownLocked(key, now) && a.recent(totalKey, now) >= maxGlobal) {
 		a.mu.Unlock()
 		return "", ErrRateLimited
 	}
@@ -112,7 +140,73 @@ func (a *Auth) Login(key, pw string, now time.Time) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	delete(a.attempts, key) // a success clears that IP's attempts (not the total)
+	a.markKnownLocked(key, now)
 	return a.newSession(now), nil
+}
+
+// MarkKnown records that key proved itself now (a sign-in, the setup code): for KnownTTL the global limits
+// (the login's here, the setup code's in the API) do not apply to it.
+func (a *Auth) MarkKnown(key string, now time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.markKnownLocked(key, now)
+}
+
+func (a *Auth) markKnownLocked(key string, now time.Time) {
+	if key == "" {
+		return
+	}
+	a.known[key] = now
+	for len(a.known) > maxKnown {
+		oldest, at := "", now
+		for k, t := range a.known {
+			if oldest == "" || t.Before(at) {
+				oldest, at = k, t
+			}
+		}
+		delete(a.known, oldest)
+	}
+}
+
+// Known: key signed in successfully (or used the setup code) within KnownTTL.
+func (a *Auth) Known(key string, now time.Time) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.knownLocked(key, now)
+}
+
+func (a *Auth) knownLocked(key string, now time.Time) bool {
+	t, ok := a.known[key]
+	if ok && now.Sub(t) >= KnownTTL {
+		delete(a.known, key)
+		return false
+	}
+	return ok && key != ""
+}
+
+// CheckPassword compares pw with the saved password (one bcrypt at a time), without a session or a limit:
+// the caller limits the attempts (the API's re-authentication for unlinking and linking).
+func (a *Auth) CheckPassword(pw string) error {
+	a.mu.Lock()
+	hash := a.hash
+	a.mu.Unlock()
+	if len(hash) == 0 {
+		return ErrNoPassword
+	}
+	a.bcryptMu.Lock()
+	err := bcrypt.CompareHashAndPassword(hash, []byte(pw))
+	a.bcryptMu.Unlock()
+	if err != nil {
+		return ErrBadPassword
+	}
+	return nil
+}
+
+// OpenSession opens a session without a password (the caller has already proved itself: the setup code).
+func (a *Auth) OpenSession(now time.Time) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.newSession(now)
 }
 
 func (a *Auth) recent(key string, now time.Time) int {

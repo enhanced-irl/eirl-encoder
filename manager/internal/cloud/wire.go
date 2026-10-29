@@ -12,26 +12,49 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/uplinks"
 )
 
-// AllowedDestinationSuffixes (D9): when linked to the cloud, the device only streams to hosts ending
-// in one of these suffixes. The list lives on the device: neither a compromised account nor a
-// compromised backend can send the stream (with the key) to another server.
-var AllowedDestinationSuffixes = []string{".enhancedirl.com"}
+// D9: when linked to the cloud, the device only streams to EnhancedIRL's ingest relays. The rule lives on
+// the device: neither a compromised account nor a compromised backend can send the stream (with the key) to
+// another server, not even to another name under enhancedirl.com. The relays the backend hands out (its
+// relays table, the host of each zone) are <zone>.relay.enhancedirl.com in production (eu1, us1, as1) and
+// relay.dev.enhancedirl.com in development; a new zone is one more DNS label in front of either, nothing else.
+var relayZones = []string{".relay.enhancedirl.com", ".relay.dev.enhancedirl.com"}
+
+// relayExact: relays that are a whole name, without a zone label (the development one).
+var relayExact = []string{"relay.dev.enhancedirl.com"}
 
 // ErrDestinationNotAllowed: the exact value the contract requires in config.applied.errors.destination.
 const ErrDestinationNotAllowed = "destination_not_allowed"
 
-// DestinationAllowed: a DNS host (not an IP) ending in an allowed suffix.
+// DestinationAllowed: a DNS host (not an IP) that is one of EnhancedIRL's relays: relayExact, or exactly one
+// zone label (letters, digits and inner hyphens, at most 63) in front of a relayZones suffix. A trailing dot
+// is not accepted (the URL parser keeps it).
 func DestinationAllowed(host string) bool {
 	h := strings.ToLower(host)
 	if h == "" || net.ParseIP(h) != nil {
 		return false
 	}
-	for _, suf := range AllowedDestinationSuffixes {
-		if strings.HasSuffix(h, suf) && len(h) > len(suf) {
+	if slices.Contains(relayExact, h) {
+		return true
+	}
+	for _, suf := range relayZones {
+		if zone, ok := strings.CutSuffix(h, suf); ok && zoneLabel(zone) {
 			return true
 		}
 	}
 	return false
+}
+
+// zoneLabel: one DNS label of a relay zone (eu1, us1, as1…): 1-63 of [a-z0-9-], not starting or ending in "-".
+func zoneLabel(l string) bool {
+	if l == "" || len(l) > 63 || l[0] == '-' || l[len(l)-1] == '-' {
+		return false
+	}
+	for i := 0; i < len(l); i++ {
+		if c := l[i]; !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 // Access point (D2): rescue (default) | always. Phase 3 uses it; here it is only validated and stored.

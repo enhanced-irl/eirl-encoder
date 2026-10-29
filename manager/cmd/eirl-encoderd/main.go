@@ -451,6 +451,11 @@ func passwd(args []string) int {
 	fs := flag.NewFlagSet("passwd", flag.ExitOnError)
 	path := fs.String("hash", "/etc/eirl-encoder/admin.hash", "password file")
 	fs.Parse(args)
+	if os.Geteuid() == 0 {
+		// The hash is 0600 (auth.HashMode): written by root, the app could not read it and would answer 503
+		fmt.Fprintln(os.Stderr, "run it as the app's user: sudo -u eirl-encoder eirl-encoderd passwd")
+		return 1
+	}
 	fmt.Fprintf(os.Stderr, "New password (min. %d characters) on stdin: ", auth.MinPasswordLen)
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil && line == "" {

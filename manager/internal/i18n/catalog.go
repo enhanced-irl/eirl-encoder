@@ -40,6 +40,8 @@ var catalog = map[string]map[string]string{
 	"auth.bad_password": {ES: "contraseña incorrecta", EN: "wrong password", FR: "mot de passe incorrect"},
 	"auth.bad_current": {ES: "la contraseña actual no es correcta", EN: "the current password is not correct",
 		FR: "le mot de passe actuel n’est pas correct"},
+	"auth.password_required": {ES: "escribe la contraseña de la web del codificador para confirmarlo",
+		EN: "type the encoder's web password to confirm it", FR: "saisissez le mot de passe de la page web de l’encodeur pour le confirmer"},
 	"auth.too_short": {ES: "la contraseña debe tener al menos %d caracteres", EN: "the password must be at least %d characters long",
 		FR: "le mot de passe doit comporter au moins %d caractères"},
 	"auth.too_long": {ES: "la contraseña no puede pasar de %d bytes", EN: "the password cannot be longer than %d bytes",

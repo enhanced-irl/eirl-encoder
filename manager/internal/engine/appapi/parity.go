@@ -39,6 +39,8 @@ func init() {
 		"restart":      {"POST", "/service/restart"}, "uplink": {"PUT", "/uplinks/{id}"},
 		"input_save": {"PUT", "/input"}, "sources_scan": {"GET", "/sources"},
 		"cloud_unlink": {"DELETE", "/cloud"}, "password": {"PUT", "/password"},
+		// The rescue (MANAGER.md §6): a new web password without the current one, and the setup code for its eye
+		"password_reset": {"POST", "/password/reset"}, "setup_code": {"GET", "/setup/code"},
 		"cam_add": {"POST", "/cameras"}, "cam_rename": {"PATCH", "/cameras/{id}"},
 		"cam_rotate": {"PATCH", "/cameras/{id}"}, "cam_remove": {"DELETE", "/cameras/{id}"},
 		"cam_creds":  {"GET", "/network/credentials?cameras=1"},
@@ -204,6 +206,10 @@ func (d *DeviceState) runParity(q queued, route [2]string) {
 		if current {
 			d.snap.CamCreds = camCreds(v)
 		}
+	case "setup_code":
+		if c, _ := obj(v)["code"].(string); current && reSetupCode.MatchString(c) {
+			d.snap.SetupCode = c
+		}
 	case "cam_add", "cam_rotate", "cam_remove": // the cameras' URLs changed: a reveal in flight is the old ones
 		d.snap.CamCreds = nil
 		d.secretGen++
@@ -239,11 +245,11 @@ func (d *DeviceState) finish(res *ui.AppResult) {
 	}
 }
 
-// DropSecrets forgets what an eye revealed (the stream key and passphrase, the cameras' URLs): the page that showed
+// DropSecrets forgets what an eye revealed (the stream key and passphrase, the cameras' URLs, the setup code): the page that showed
 // them is gone. Go cannot zero a string; they are let go and never written anywhere.
 func (d *DeviceState) DropSecrets() {
 	d.mu.Lock()
-	d.snap.DestSecrets, d.snap.CamCreds = nil, nil
+	d.snap.DestSecrets, d.snap.CamCreds, d.snap.SetupCode = nil, nil, ""
 	d.secretGen++ // a reveal queued or in flight is not kept when it answers
 	d.mu.Unlock()
 }

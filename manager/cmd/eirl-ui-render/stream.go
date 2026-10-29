@@ -14,7 +14,8 @@ import (
 //	settings-uplinks-stats (the Rust SRTLA sender's figures per link, SRTLA.md §9.4) ·
 //	settings-uplinks-modems · settings-uplinks-modem-page · settings-uplinks-modem-pin · settings-uplinks-modem-unlock · settings-pause ·
 //	settings-cloud · settings-cloud-pairing · settings-cloud-linked · settings-cloud-unlink · settings-account ·
-//	settings-account-kb ·
+//	settings-account-kb · settings-account-code (the setup code behind its eye) · settings-account-reset (a new web
+//	password without the current one: its keyboard) · settings-account-reset-done ·
 //	settings-dests-list · settings-dests-templates · settings-dests-confirm · settings-dests-rtmp ·
 //	settings-dests-srt · settings-dests-rist · settings-dests-video · settings-dests-managed · settings-dests-edited ·
 //	settings-dests-new · settings-dests-delete (the saved destinations, OUTPUTS.md §11)
@@ -40,6 +41,10 @@ func streamState(variant, lang string, now time.Time, snap *ui.AppSnapshot) {
 	switch {
 	case variant == "settings-dest-reveal":
 		snap.DestSecrets = &ui.DestSecrets{StreamID: "publish:a1b2c3d4e5f6EjemploNoEsLaReal"}
+	case variant == "settings-account-code":
+		snap.SetupCode = "K7QM2XVD"
+	case variant == "settings-account-reset-done":
+		snap.Last = &ui.AppResult{What: "password_reset", OK: true, At: now.Add(time.Second)}
 	case variant == "settings-dest-managed":
 		snap.Dest.ManagedBy = "eirl"
 	case variant == "settings-dest-pending":
@@ -153,6 +158,10 @@ func streamPreview(p ui.Preview, variant string) {
 		p.Confirming("cloud_unlink")
 	case "settings-account-kb":
 		p.Touch("s_acct_pw")
+	case "settings-account-code":
+		p.Reveal("s_acct_code_eye")
+	case "settings-account-reset":
+		p.Touch("s_acct_reset")
 	case "settings-uplinks-modem-page":
 		p.OpenModem("m-0c7e44a19f02")
 	case "settings-uplinks-modem-pin":
