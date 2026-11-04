@@ -1,0 +1,3 @@
+- Nuevo: el botón de encendido ya no apaga el codificador al instante. Una pulsación abre en la pantalla el menú con Reiniciar y Apagar; para apagar, mantén el botón 3 s. Mientras emites o grabas no se apaga: la pantalla te pide que pares antes. Tras actualizar, reinicia el codificador para que tenga efecto.
+- Nuevo: la luz de encendido indica lo que hace el codificador: fija en reposo, parpadeo lento en directo, rápido mientras conecta y un destello cada 3 s grabando.
+- Nuevo: EnhancedIRL aparece la primera en la lista de destinos, con un enlace en la lista vacía y en el asistente.

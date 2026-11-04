@@ -604,12 +604,34 @@ func TestValidateAllowLists(t *testing.T) {
 			l.Files[2].Path = "/etc/systemd/system/x.service.d/override.conf"
 			l.Files[2].Src = "files" + l.Files[2].Path
 		},
+		"logind's own configuration": func(l *Layer) {
+			l.Files[2].Path = "/etc/systemd/logind.conf"
+			l.Files[2].Src = "files" + l.Files[2].Path
+		},
+		"a logind drop-in not ours": func(l *Layer) {
+			l.Files[2].Path = "/etc/systemd/logind.conf.d/override.conf"
+			l.Files[2].Src = "files" + l.Files[2].Path
+		},
 	}
 	for name, spoil := range bad {
 		_, l := newLayer(t, "0.10.0", "a")
 		spoil(l)
 		if err := l.Validate(); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestAllowedLogindDropIn(t *testing.T) {
+	// The power button's (MIXER.md §14.1): ours, by name, and nothing else of logind
+	for p, want := range map[string]bool{
+		"/etc/systemd/logind.conf.d/90-eirl-powerkey.conf": true,
+		"/etc/systemd/logind.conf.d/90-eirl-":              false,
+		"/etc/systemd/logind.conf.d/50-other.conf":         false,
+		"/etc/systemd/logind.conf":                         false,
+	} {
+		if AllowedFile(p, testKernel) != want {
+			t.Errorf("%s: %v", p, !want)
 		}
 	}
 }

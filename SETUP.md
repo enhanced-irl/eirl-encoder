@@ -1,4 +1,4 @@
-> **Status:** IN PROGRESS · **Updated:** 2026-10-29 (the setup code as the rescue credential, §6)
+> **Status:** IN PROGRESS · **Updated:** 2026-10-29 (the setup code as the rescue credential, §6; the wizard's link to EnhancedIRL, §4)
 >
 > Device settings, first-boot wizard, source slots and the languages of the API messages, app side
 > (`eirl-encoderd`). The screen and the web build on this API; the engine side of the slots is in
@@ -106,6 +106,11 @@ join), with the option to change it (since Oct 14). The app generates it at its 
 of the hardwareId, `network.json`), so it is there before anything is set up; changing it is `PUT /network/ap
 {"ssid"}`, the route Settings uses, with its validation and its on-air rule (WIFI.md §14). It adds nothing to this
 API: the step ids, the routes below and how a step ends are unchanged, and renaming does not mark the step.
+
+The `cloud` step, while the encoder is not linked, also has one line for whoever has no EnhancedIRL account yet,
+to the encoder's page on its site (`https://enhancedirl.com[/es|/fr]/encoder?utm_source=encoder&utm_medium=wizard&utm_campaign=eirl-encoder`):
+a small QR beside it on the screen, a link in the web. Nothing to touch and nothing that comes back: the step is
+skipped exactly as before, and the linking flow is unchanged. The addresses live in one place (OUTPUTS.md §11).
 
 - **Touch screen** (local socket): any order, the one above. No session and no setup code (the socket is the
   physical screen); it shows the setup code (from `GET /setup`) so the web can be used too.

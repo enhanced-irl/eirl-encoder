@@ -1,5 +1,5 @@
 > **Status:** IN PROGRESS — P1-P5 released in v0.5.0 (Oct 15) and tested on the board (a test SD card, §12). Pending: platforms with real keys, a Cloud OBS reading H.265, the SRT listener's firewall, the cloud's side (P6)
-> **Updated:** 2026-10-19
+> **Updated:** 2026-10-28
 
 # Output protocols and encoding settings
 
@@ -253,6 +253,7 @@ the ABR works), `iframeinterval`, `idrinterval`, `preset-level`, `maxperf-enable
 | Template | Protocols | Server | Codecs | Max video |
 |---|---|---|---|---|
 | `eirl` | srtla, srt | from the cloud | h265, h264 (default h265) | — |
+| `enhancedirl` | srtla, srt (default srtla) | — (the stream key's publish URL; the user pastes it) | h264, h265 (default h264) | 10000 |
 | `twitch` | rtmp, rtmps | `rtmp://live.twitch.tv/app` | h264 | 6000 |
 | `youtube` | rtmps, rtmp | `rtmps://a.rtmps.youtube.com:443/live2` | h264, h265 | 20000 |
 | `kick` | rtmps | (per account; the user pastes it) | h264 | 8000 |
@@ -261,6 +262,15 @@ the ABR works), `iframeinterval`, `idrinterval`, `preset-level`, `maxperf-enable
 
 A template that lists codecs refuses the others (`config.codec_unsupported`), and its maximum bounds the video
 bitrate (`config.kbps_range`). Defaults: ABR on, minimum 1000 kbps, bitrate min(6000, max).
+
+**Two EnhancedIRL templates.** `eirl` is the cloud's only: the one destination it creates and manages (id `eirl`,
+`managed`), never created or chosen by hand (`POST` answers 409 `managed`, a patch to it 400). `enhancedirl` is
+EnhancedIRL as one more platform, for every encoder, linked or not: an ordinary destination of the device (`d-…`,
+never managed) that is created, edited, activated and deleted like `custom`. It has no server of its own: the user
+pastes the publish URL that the EnhancedIRL dashboard's **Publish** button copies
+(`srtla://<server>:<port>?streamid=publish:<key>`), and the app keeps the stream ID apart as with `custom`. Its
+maximum, 10000 kbps, is the highest stream-key cap. The API lists it right after `eirl`, so the screen and the web
+(which leave `eirl` out) offer it first.
 
 ### 9.3 API (`/api/v1`, additive)
 
@@ -319,6 +329,17 @@ the web confirm first). `unknown_command` or `restart_required` → the restart 
 - **Settings › Stream › Destination** becomes a list: each row with name, protocol and server, the active one
   marked; a touch activates (a second touch while on air: the output restarts); «›» opens it. «Add» picks a
   template, then its fields. The cloud's destination is read-only (it can be activated).
+- **The template picker** starts with **EnhancedIRL** (`enhancedirl`), and its line says where its URL comes from
+  (the stream key's SRTLA URL, and the encoder's page on EnhancedIRL's site to get one) instead of its protocols.
+- **The empty list** (nothing saved) adds one line about EnhancedIRL as a receiver that bonds the links, with a
+  small QR on the screen (a link in the web) to the encoder's page on EnhancedIRL's site
+  (`https://enhancedirl.com[/es|/fr]/encoder?utm_source=encoder&utm_medium=destinations&utm_campaign=eirl-encoder`:
+  English has no language prefix). It goes away with the first destination. No telemetry and nothing that comes
+  back or blocks: a QR or a link the user may open.
+- **Documentation**: the web's footer (by the version) links to `https://docs.enhancedirl.com/go/<lang>/encoder-start`
+  and an `enhancedirl` destination's form to `…/go/<lang>/encoder-broadcast` (`<lang>`: the web's language); the
+  screen's **About** page writes `docs.enhancedirl.com`. The addresses live in one place: `EIRL_LINKS` in
+  `web/static/app.js` and `manager/internal/engine/screen/ui/links.go`.
 - **A destination's page**: protocol (only the template's), server, key or stream ID, passphrase (and RIST
   profile, user and password), latency, then **Video**: codec (only the template's), bitrate, minimum, ABR, size
   and frame rate; audio bitrate. RTMP/RTMPS with more than one link: a note that it does not bond.

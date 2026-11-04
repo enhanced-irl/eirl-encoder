@@ -95,14 +95,14 @@ func (u *UI) TakeDrawMax() time.Duration {
 	return d
 }
 
-func (u *UI) frame(now time.Time, hd *hold) bool {
+func (u *UI) frame(now time.Time, holding bool) bool {
 	r := &u.r
 	if !u.canDraw() {
 		return false
 	}
 	// Everything when something changed (a touch, down and up) or every second, and 10 times a second with a
-	// held button (its progress); otherwise only the meters over what is drawn (20 a second)
-	if u.Dirty || r.force || now.Sub(r.drawn) >= time.Second || (hd != nil && now.Sub(r.drawn) >= 100*time.Millisecond) {
+	// held button or the power button (its progress); otherwise only the meters over what is drawn (20 a second)
+	if u.Dirty || r.force || now.Sub(r.drawn) >= time.Second || (holding && now.Sub(r.drawn) >= 100*time.Millisecond) {
 		t0 := time.Now()
 		y0, y1 := u.drawBase(now)
 		r.drawMax = max(r.drawMax, time.Since(t0))

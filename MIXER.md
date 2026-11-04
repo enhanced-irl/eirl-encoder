@@ -1,7 +1,7 @@
 # Multi-camera: composition, multiview and touch screen
 
 > **Status:** IN PROGRESS (F0, F1 —single engine— and F2 —web ↔ screen— in main; F3 —no rehearsal mode— on the board; next F4, per-source audio)
-> **Updated:** 2026-10-28 (Oct 28: the local recording on the screen, §23; Oct 15: the HDMI output stays lit when the screen closes, §3 trap 27; USB cameras plugged and unplugged while running, "Sources and slots" in §4, and a camera's audio follows its video slot, §10; the output protocols and encoding settings in the state and `output_config`, §5, [`OUTPUTS.md`](OUTPUTS.md); translated to English; the Python engine retired, the Go engine is the only one: [`ENGINE_GO.md`](ENGINE_GO.md); last content change Oct 13: header and Settings, §18; Wi-Fi in Settings, §19; Oct 14: renaming "Create my Wi-Fi", §19; everything the web configures, on the screen, §21; fades one step per program frame and the screen's tiles in step with the program, §22)
+> **Updated:** 2026-11-04 (Nov 4: the board's power button, §14.1, and its LED, §14.2; Oct 28: the local recording on the screen, §23; Oct 15: the HDMI output stays lit when the screen closes, §3 trap 27; USB cameras plugged and unplugged while running, "Sources and slots" in §4, and a camera's audio follows its video slot, §10; the output protocols and encoding settings in the state and `output_config`, §5, [`OUTPUTS.md`](OUTPUTS.md); translated to English; the Python engine retired, the Go engine is the only one: [`ENGINE_GO.md`](ENGINE_GO.md); last content change Oct 13: header and Settings, §18; Wi-Fi in Settings, §19; Oct 14: renaming "Create my Wi-Fi", §19; everything the web configures, on the screen, §21; fades one step per program frame and the screen's tiles in step with the program, §22)
 
 **The mixer is the encoder.** `eirl-engine` captures all the sources it detects at the same time, and what
 comes out is always the composed **program** (cut, PiP, side by side, fades). That includes SRT/SRTLA
@@ -684,6 +684,66 @@ Power menu to restart and shut down, and the level meters of the sources and the
   (`/bin/systemctl reboot` and `poweroff`), does it once per `seq` and only if the request is less than
   15 s old. The screen says "Restarting…" or "Shutting down…" until the splash comes in.
 - Colours of the eirl theme in dark mode, larger font for 7" and touch targets of ≥ 44 px.
+
+### 14.1 The board's power button (Nov 4)
+
+The request: a button with an LED wired to J50's power button and LED pins worked, but a press with the board on
+powered it off at once, live or not. L4T's device tree gives the button to the kernel as the `gpio-keys` device's
+`KEY_POWER`, and logind (`HandlePowerKey=poweroff`, the default; systemd 237 has no long-press setting) powered off on
+the press. Decided with the owner: **a press opens the Power menu, and held 3 s it powers off, but only if the board is
+not streaming**.
+
+- **logind ignores the key**: `/etc/systemd/logind.conf.d/90-eirl-powerkey.conf` (`HandlePowerKey=ignore`), shipped
+  by the OTA's system layer (UPDATES.md §12). logind reads its configuration when it starts, so on a board that
+  updates it acts **after the next restart** (§12.5: "restart to finish the update"). Until then, a press both opens the
+  menu and powers off, as before. The layer only moves forward (§12.4): after a rollback to a release whose engine does
+  not read the button, the button does nothing with the board on (the PMIC's long press, below, remains).
+- **The engine reads the button** (`screen/powerkey.go`): the `gpio-keys` input device with `KEY_POWER`, by name, so a USB
+  keyboard's or remote's power key is not the board's. The engine's user is in `input`, as for the touch panel. Its
+  presses and releases go to the UI (`ui.OnPowerKey`); a release is never dropped. Not found (another board), it is
+  looked for again every 30 s (`power_key_missing` in the journal).
+- **The screen** (`ui/powerkey.go`):
+  - A press opens the Power menu (it closes Settings, wiping the keyboard as a lock does). Locked, the menu does not open
+    (none of its buttons would answer): a hint says "Hold the button for 3 s to power off". In the first-boot wizard or
+    without a screen nothing is shown, but the hold still counts.
+  - Held `PowerKeyHold` (3 s), it asks to power off through the same request as the menu (`screen.power`, §14), and
+    the menu's Power off fills up while it is held. Whether it may is decided at the 3 s, not at the press: going live
+    from the web in between stops it.
+  - **Streaming** (`output.mode = on`, also while connecting) **or recording**: it does not power off. The menu's
+    subtitle (or, locked, the hint) says "Stop streaming to power off" / "Stop recording to power off" for 6 s, from
+    the press. The menu's own buttons (held 2 s) are unchanged: touching Power off on purpose still works.
+  - A press with no release in 30 s is dropped. Journal: `power_key_pressed` (with `busy`), `power_key_refused`,
+    `power_key_poweroff`.
+- **What stays**: the PMIC cuts the power by itself on a long press (a hard cut, not a shutdown; NVIDIA's design guide
+  speaks of ~10 s, a forum of 6 s: not measured on this board). It is what is left when the engine is down, since then
+  nothing reads the button. Powering on with the button is the PMIC's and does not change.
+- `eirl-ui-render menukey menukeylive` draws the menu with the button held, idle and live.
+
+### 14.2 The power LED says what the board is doing (Nov 4)
+
+The request: "make the button's LED blink or fade while streaming". The LED wired to J50's LED pins and the carrier's
+green LED are **the same** kernel LED, `gpio-leds` `pwr` (`/sys/class/leds/pwr`, Tegra GPIO PI1, active high, on by
+default, kernel trigger `system-throttle`, which blinks it when the board throttles for lack of current): blinking it from
+software blinked both (checked with the owner, Nov 4). **Blinking, yes; a fade, no**: the pin is a plain GPIO, without
+PWM (a software PWM would cost CPU and stutter with the engine busy), and the header's hardware PWM pins (32 and 33) are
+taken. The kernel has no `timer` or `heartbeat` trigger: it is blinked from user space.
+
+| The board | The LED |
+|---|---|
+| Not streaming, not recording | Steady (the kernel's trigger) |
+| Streaming (`output.mode = on`, `state = on`) | Slow: 1 s on, 1 s off |
+| The output on but not streaming (connecting, an error it retries) | Fast: 0.25 s on, 0.25 s off |
+| Recording without streaming | A short flash every 3 s (0.2 s on) |
+
+- The screen's runtime drives it (`screen/led.go`, its own goroutine), from each published state (`Screen.SetStatus`):
+  the latest pattern wins and the same one again does not restart the blinking. Streaming wins over recording. A board
+  without a screen (`withScreen` false) has no screen runtime, and its LED stays steady.
+- **Permissions**: the files are root's. `eirl-engine.service` gives the engine's group write access to `brightness` and
+  `trigger` when the engine starts (`ExecStartPre=+`), and puts the LED back when it stops, even killed
+  (`ExecStopPost=+`: the kernel's trigger, then lit, because re-arming the trigger does not light it). The engine also
+  puts it back when its screen stops. A dead engine never leaves the LED dark on a board that is on.
+- Without permission (an engine on an older unit), the first write fails, `led_unavailable` goes to the journal and the
+  LED stays as the kernel has it.
 
 ## 15. Audio mixing and its view on the screen (Oct 12)
 

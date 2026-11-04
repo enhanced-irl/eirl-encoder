@@ -340,7 +340,8 @@ View (secrets never in clear; `key` masked `live…wXyZ`):
 ```
 
 `templates[]`: `{"id", "protocols": [default first], "url": the default protocol's server, "urls": {protocol: server},
-"codecs": [default first], "maxVideoKbps", "keyRequired"}` — `eirl` (srtla, srt; h265, h264), `twitch` (rtmp, rtmps;
+"codecs": [default first], "maxVideoKbps", "keyRequired"}` — `eirl` (the cloud's only: srtla, srt; h265, h264),
+`enhancedirl` (EnhancedIRL for any device, no server of its own: srtla, srt; h264, h265; 10000), `twitch` (rtmp, rtmps;
 h264; 6000), `youtube` (rtmps, rtmp; h264, h265; 20000), `kick` (rtmps, server per account; h264; 8000), `facebook`
 (rtmps; h264; 6000), `custom` (every protocol; h264, h265; 20000). A new destination takes its template's server, first
 codec, ABR on, minimum 1000 and min(6000, max) kbps.

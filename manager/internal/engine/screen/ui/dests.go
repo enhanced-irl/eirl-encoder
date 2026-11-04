@@ -28,9 +28,10 @@ const MaxDests = 16
 // RistBufferMin is the least RIST buffer the app takes (OUTPUTS.md §3; its maximum is LatencyMax).
 const RistBufferMin = 50
 
-// templateNames are the templates by their names; custom's is translated (Dests.Custom).
-var templateNames = map[string]string{"eirl": "EnhancedIRL", "twitch": "Twitch", "youtube": "YouTube", "kick": "Kick",
-	"facebook": "Facebook"}
+// templateNames are the templates by their names; custom's is translated (Dests.Custom). enhancedirl is EnhancedIRL
+// for any device (the user pastes the stream key's URL); eirl, the cloud's own (OUTPUTS.md §9.2).
+var templateNames = map[string]string{"eirl": "EnhancedIRL", "enhancedirl": "EnhancedIRL", "twitch": "Twitch",
+	"youtube": "YouTube", "kick": "Kick", "facebook": "Facebook"}
 
 // The characters the app takes in a key, a RIST passphrase or password and a RIST user (OUTPUTS.md §3).
 var (
@@ -505,13 +506,7 @@ func (u *UI) drawDestList(d *dc, app *AppSnapshot) {
 	list := app.Dests.Destinations
 	pages := destPages(app)
 	if len(list) == 0 {
-		pg := lay.SettingsPage
-		_, bottom := lay.FormRows(1)
-		cy := float64(pg.Y) + float64(bottom.Y-pg.Y)/2
-		d.text(float64(pg.X)+float64(pg.W)/2, cy-6*s, dt.ListEmpty, 19*s, textOpt{col: cInk, bold: true, align: center,
-			width: float64(pg.W) - 24*s})
-		d.text(float64(pg.X)+float64(pg.W)/2, cy+22*s, dt.ListEmptySub, 15*s, textOpt{col: cQuiet, align: center,
-			width: float64(pg.W) - 24*s})
+		u.drawDestListEmpty(d)
 	}
 	for i, dst := range u.destShown(app) {
 		key, ok := "s_dl_"+strconv.Itoa(i), "s_dlo_"+strconv.Itoa(i)
@@ -579,6 +574,37 @@ func (u *UI) drawDestList(d *dc, app *AppSnapshot) {
 	d.button("s_dl_add", btn{label: "+ " + dt.Add, dim: !canAdd(app) || len(list) >= MaxDests})
 	note, warn := u.destListNote(app, pages)
 	u.bottomNoteIn(d, note, warn, left, float64(lay.Buttons["s_dl_add"].X))
+}
+
+// drawDestListEmpty is the list with nothing saved: how to add one and, under it, one line and a small QR to
+// EnhancedIRL's page for a receiver that bonds the links (no more than that: it goes with the first destination).
+func (u *UI) drawDestListEmpty(d *dc) {
+	lay, dt, s := u.Lay, u.Tx.Dests, d.s
+	pg := lay.SettingsPage
+	_, bottom := lay.FormRows(1)
+	cx, w := float64(pg.X)+float64(pg.W)/2, float64(pg.W)-24*s
+	rows := linkQR(EncoderPageURL(u.Tx.Code, "destinations"))
+	side := 0
+	if len(rows) > 0 {
+		n := len(rows) + 8
+		if side = min(int(190*s), (bottom.Y-pg.Y)/2) / n * n; side < 2*n { // whole modules: what drawQR draws
+			side = 0
+		}
+	}
+	// The block (title, sub, the line and the QR under it) centred in the room above the bottom row
+	h := 46 * s
+	if side > 0 {
+		h = 82*s + float64(side)
+	}
+	y := float64(pg.Y) + max(8*s, (float64(bottom.Y-pg.Y)-h)/2)
+	d.text(cx, y+14*s, dt.ListEmpty, 19*s, textOpt{col: cInk, bold: true, align: center, width: w})
+	d.text(cx, y+40*s, dt.ListEmptySub, 15*s, textOpt{col: cQuiet, align: center, width: w})
+	if side == 0 {
+		return
+	}
+	d.text(cx, y+70*s, sprintf(dt.ListEmptyEIRLF, EncoderPageShown(u.Tx.Code)), 14*s, textOpt{col: cQuiet, align: center,
+		width: w})
+	u.drawQR(d.c, rows, int(cx)-side/2, int(y+82*s), side)
 }
 
 // destListNote is the list's bottom line: a confirmation, a notice, a refusal, the pages, else how it works.
@@ -671,7 +697,10 @@ func (u *UI) openTemplatePicker(app *AppSnapshot) {
 			protos = append(protos, ProtocolNames[p])
 		}
 		sub := strings.Join(protos, u.Tx.Sep)
-		if t.URL != "" {
+		switch {
+		case t.ID == "enhancedirl": // no server of its own: where the URL comes from
+			sub = sprintf(u.Tx.Dests.TemplateEIRLF, EncoderPageShown(u.Tx.Code))
+		case t.URL != "":
 			sub += u.Tx.Sep + u.Tx.Dests.TemplateSub
 		}
 		opts = append(opts, pickOpt{ID: t.ID, Title: u.templateName(t.ID), Sub: sub})

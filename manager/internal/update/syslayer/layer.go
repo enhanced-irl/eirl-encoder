@@ -126,6 +126,8 @@ var allowedPrefixes = []string{
 	"/lib/modules/<kernel>/updates/eirl-",
 	"/lib/firmware/",
 	"/etc/systemd/journald.conf.d/90-eirl-",
+	// The board's power button is the screen's, not logind's (MIXER.md §14.1)
+	"/etc/systemd/logind.conf.d/90-eirl-",
 	"/etc/NetworkManager/conf.d/",
 	"/usr/lib/eirl-image/",
 }

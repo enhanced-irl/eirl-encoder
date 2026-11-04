@@ -21,6 +21,7 @@ func destsApp() *DestList {
 	return &DestList{Active: tw.ID, ManagedBy: "local", Destinations: []DestInfo{eirl, tw, rist},
 		Templates: []DestTemplate{
 			{ID: "eirl", Protocols: []string{"srtla", "srt"}, Codecs: []string{"h265", "h264"}},
+			{ID: "enhancedirl", Protocols: []string{"srtla", "srt"}, Codecs: []string{"h264", "h265"}, MaxVideoKbps: 10000},
 			{ID: "twitch", Protocols: []string{"rtmp", "rtmps"}, URL: "rtmp://live.twitch.tv/app", Codecs: []string{"h264"},
 				MaxVideoKbps: 6000, KeyRequired: true},
 			{ID: "youtube", Protocols: []string{"rtmps", "rtmp"}, URL: "rtmps://a.rtmps.youtube.com:443/live2",
@@ -108,10 +109,10 @@ func TestDestsAddAndCreate(t *testing.T) {
 	for _, o := range h.u.chooser.opts {
 		ids = append(ids, o.ID)
 	}
-	if strings.Join(ids, ",") != "twitch,youtube,custom" {
+	if strings.Join(ids, ",") != "enhancedirl,twitch,youtube,custom" {
 		t.Fatalf("templates %v (the cloud's is not creatable)", ids)
 	}
-	h.u.pickerTouch("s_pick_1", "youtube", true)
+	h.u.pickerTouch("s_pick_2", "youtube", true)
 	ed := h.u.dl.ed
 	if ed == nil || ed.id != "" || ed.tmpl != "youtube" {
 		t.Fatalf("%+v", ed)
@@ -216,6 +217,49 @@ func TestDestsUpdateAndApply(t *testing.T) {
 	h.press("s_de_apply", 0.1)
 	if a := app.lastDid(); a.What != "dest_update" || a.Body["apply"] != true || a.Body["audioBitrateKbps"] != 160 {
 		t.Fatalf("%+v", a)
+	}
+}
+
+// The local EnhancedIRL template (OUTPUTS.md §11): first in the picker, with where its URL comes from under it;
+// its page starts over SRTLA with no server (the user pastes the stream key's URL) and H.264, and it saves as any
+// other one.
+func TestDestsEnhancedIRLTemplate(t *testing.T) {
+	h, app := destsHarness(t)
+	h.press("s_dl_add", 0.1)
+	if h.u.chooser == nil || len(h.u.chooser.opts) == 0 {
+		t.Fatal("no template picker")
+	}
+	o := h.u.chooser.opts[0]
+	if o.ID != "enhancedirl" || o.Title != "EnhancedIRL" || !strings.Contains(o.Sub, "enhancedirl.com/es/encoder") ||
+		!strings.HasPrefix(o.Sub, "Pega la URL SRTLA") {
+		t.Fatalf("%+v", o)
+	}
+	h.u.pickerTouch("s_pick_0", "enhancedirl", true)
+	n, _ := h.u.deNow(&app.snap)
+	if n.Template != "enhancedirl" || n.Managed || n.Protocol != "srtla" || n.URL != "" || n.Name != "EnhancedIRL" ||
+		n.VideoCodec != "h264" || n.VideoKbps != 6000 || n.LatencyMs != 2000 {
+		t.Fatalf("%+v", n)
+	}
+	if keys := h.u.settingsKeys(&NetSnapshot{}); !contains(keys, "s_de_url") || !contains(keys, "s_de_sid") ||
+		contains(keys, "s_de_key") || !contains(keys, "s_de_save1") {
+		t.Fatalf("%v", keys)
+	}
+	h.u.deSet(&app.snap, "url", "srtla://eu1.relay.example:5001")
+	h.press("s_de_save1", 0.1)
+	a := app.lastDid()
+	if a.What != "dest_create" || a.Body["template"] != "enhancedirl" || a.Body["protocol"] != "srtla" ||
+		a.Body["url"] != "srtla://eu1.relay.example:5001" || a.Body["name"] != "EnhancedIRL" {
+		t.Fatalf("%+v", a.Body)
+	}
+	// Its video: up to the template's 10000 kbps
+	h.u.dl.ed = nil
+	h.u.openNewDest(&app.snap, "enhancedirl")
+	h.press("s_de_sec_video", 0.1)
+	for range 60 {
+		h.press("s_de_vid_p", 0.1)
+	}
+	if n, _ := h.u.deNow(&app.snap); n.VideoKbps != 10000 {
+		t.Fatalf("over the template's maximum: %+v", n)
 	}
 }
 
@@ -467,6 +511,10 @@ func TestRenderDests(t *testing.T) {
 		{"dests-new", dests(func(h *harness) {
 			app := h.u.app().AppSnapshot()
 			h.u.openNewDest(&app, "custom")
+		})},
+		{"dests-new-eirl", dests(func(h *harness) {
+			app := h.u.app().AppSnapshot()
+			h.u.openNewDest(&app, "enhancedirl")
 		})},
 		{"dests-new-rist", dests(func(h *harness) {
 			app := h.u.app().AppSnapshot()

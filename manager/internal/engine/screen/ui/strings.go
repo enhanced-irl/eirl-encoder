@@ -56,6 +56,9 @@ type Strings struct {
 	MenuTitle, MenuHelp      string
 	Reboot, PowerOff, Cancel string
 	Rebooting, PoweringOff   string
+	// The board's power button (powerkey.go): why it does not power off; locked, how long to hold it (%d s)
+	PowerKeyLive, PowerKeyRecording string
+	PowerKeyHoldF                   string
 	// Audio view
 	OneSource, Mix, FollowVideo string
 	ProgramStrip                string
@@ -219,6 +222,7 @@ type Strings struct {
 	WizCloudExpiresF, WizCloudLinkedF        string // %s time; %s account
 	WizCloudLinked, WizCloudOff              string
 	WizCloudWaiting, WizCloudURL             string
+	WizCloudPromoF                           string // %s the encoder's page on EnhancedIRL's site (people without an account)
 	WizDoneText, WizNeedsPassword            string
 	// Details: why a source, an audio input or the headphones are not live, by the engine's stable code
 	// (ENGINE_GO.md §13, the closed list of internal/engine/detail). Arguments go in as {name}; {names} in
@@ -228,6 +232,7 @@ type Strings struct {
 	AboutRelease, AboutApp, AboutEngine, AboutCommit string
 	AboutName, AboutHost, AboutIPs, AboutWeb         string
 	AboutUnknown                                     string
+	AboutDocs                                        string // the documentation's row (its host: DocsHost)
 	SetupAgain, SetupAgainConfirm, SetupContinue     string
 	// --- MIXER.md §21: everything the web configures, on the screen ---
 	GroupTitle map[string]string // the Settings list's entries, by group (SettingsGroups)

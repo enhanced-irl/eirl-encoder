@@ -18,7 +18,8 @@ import (
 //	password without the current one: its keyboard) · settings-account-reset-done ·
 //	settings-dests-list · settings-dests-templates · settings-dests-confirm · settings-dests-rtmp ·
 //	settings-dests-srt · settings-dests-rist · settings-dests-video · settings-dests-managed · settings-dests-edited ·
-//	settings-dests-new · settings-dests-delete (the saved destinations, OUTPUTS.md §11)
+//	settings-dests-new · settings-dests-delete · settings-dests-empty (nothing saved) · settings-dests-eirl (a new
+//	EnhancedIRL one, from the local template) (the saved destinations, OUTPUTS.md §11)
 func streamState(variant, lang string, now time.Time, snap *ui.AppSnapshot) {
 	snap.Dest, snap.DestAPI = &ui.DestInfo{ManagedBy: "local", URL: "srtla://eu1.relay.enhancedirl.com:5000",
 		Mode: "caller", LatencyMs: 2000, StreamIDSet: true, StreamIDMasked: "publish:a1b2…", PassphraseSet: false,
@@ -105,13 +106,18 @@ func fakeDests(variant string) *ui.DestList {
 	rist.LatencyMs, rist.RistProfile, rist.Username, rist.PassphraseSet, rist.PasswordSet = 1000, "main", "estudio", set, set
 	rist.VideoCodec, rist.VideoKbps, rist.OutputSize, rist.OutputFps = "h265", 8000, "1280x720", "half"
 	list := []ui.DestInfo{eirl, twitch, rist}
+	active := twitch.ID
+	if variant == "settings-dests-empty" {
+		list, active = nil, ""
+	}
 	if variant == "settings-dests-srt" {
 		srt := d("d-0b9e55d1", "Relay propio", "custom", "srt", "srt://198.51.100.7:9000")
 		srt.StreamIDSet, srt.PassphraseSet, srt.LatencyMs = set, set, 1500
 		list = append(list, srt)
 	}
-	return &ui.DestList{Active: twitch.ID, ManagedBy: "local", Destinations: list, Templates: []ui.DestTemplate{
+	return &ui.DestList{Active: active, ManagedBy: "local", Destinations: list, Templates: []ui.DestTemplate{
 		{ID: "eirl", Protocols: []string{"srtla", "srt"}, Codecs: []string{"h265", "h264"}},
+		{ID: "enhancedirl", Protocols: []string{"srtla", "srt"}, Codecs: []string{"h264", "h265"}, MaxVideoKbps: 10000},
 		{ID: "twitch", Protocols: []string{"rtmp", "rtmps"}, URL: "rtmp://live.twitch.tv/app", Codecs: []string{"h264"},
 			MaxVideoKbps: 6000, KeyRequired: true},
 		{ID: "youtube", Protocols: []string{"rtmps", "rtmp"}, URL: "rtmps://a.rtmps.youtube.com:443/live2",
@@ -146,6 +152,8 @@ func streamPreview(p ui.Preview, variant string) {
 		p.Touch("s_de_abr")
 	case "settings-dests-new":
 		p.NewDest("youtube")
+	case "settings-dests-eirl":
+		p.NewDest("enhancedirl")
 	case "settings-dests-delete":
 		p.OpenDest("d-7c21e0a4", "conn")
 		p.Confirming("de_delete")

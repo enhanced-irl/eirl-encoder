@@ -28,6 +28,7 @@ func destsBody() map[string]any {
 			destView("eirl", "EnhancedIRL", "eirl", "srtla", "srtla://eu1.relay.enhancedirl.com:5001", false),
 			destView("d-3f9a1c2b", "Twitch", "twitch", "rtmp", "rtmp://live.twitch.tv/app", true),
 			bad, weird,
+			destView("d-5e6f7a8b", "EnhancedIRL", "enhancedirl", "srtla", "srtla://eu1.relay.example:5001", false),
 			destView("d-3f9a1c2b", "Twitch again", "twitch", "rtmp", "rtmp://x/app", false), // a repeated id
 		},
 		"templates": []any{
@@ -35,6 +36,8 @@ func destsBody() map[string]any {
 				"codecs": []any{"h264", "vp9"}, "maxVideoKbps": 6000, "keyRequired": true},
 			map[string]any{"id": "custom", "protocols": []any{"srt", "srtla", "rtmp", "rtmps", "rist", "udp"},
 				"codecs": []any{"h264", "h265"}, "maxVideoKbps": 20000, "keyRequired": false},
+			map[string]any{"id": "enhancedirl", "protocols": []any{"srtla", "srt"}, "url": "", "codecs": []any{"h264", "h265"},
+				"maxVideoKbps": 10000, "keyRequired": false},
 			map[string]any{"id": "myspace", "protocols": []any{"rtmp"}},
 			map[string]any{"id": "kick", "protocols": []any{}}}}
 }
@@ -45,7 +48,7 @@ func TestDestsRead(t *testing.T) {
 	d.PollDest()
 	s := d.AppSnapshot()
 	l := s.Dests
-	if s.DestsAPI != ui.Yes || l == nil || l.Active != "d-3f9a1c2b" || len(l.Destinations) != 3 {
+	if s.DestsAPI != ui.Yes || l == nil || l.Active != "d-3f9a1c2b" || len(l.Destinations) != 4 {
 		t.Fatalf("%+v %+v", s.DestsAPI, l)
 	}
 	if len(a.allSeen()) != 1 {
@@ -65,10 +68,18 @@ func TestDestsRead(t *testing.T) {
 		w.OutputFps != "" || w.Username != "" {
 		t.Fatalf("%+v", w)
 	}
-	if len(l.Templates) != 2 || !reflect.DeepEqual(l.Templates[0], ui.DestTemplate{ID: "twitch",
+	if len(l.Templates) != 3 || !reflect.DeepEqual(l.Templates[0], ui.DestTemplate{ID: "twitch",
 		Protocols: []string{"rtmp", "rtmps"}, URL: "rtmp://live.twitch.tv/app", Codecs: []string{"h264"}, MaxVideoKbps: 6000,
 		KeyRequired: true}) {
 		t.Fatalf("%+v", l.Templates)
+	}
+	// The local EnhancedIRL template and a destination of it: the device's, not managed
+	if !reflect.DeepEqual(l.Template("enhancedirl"), &ui.DestTemplate{ID: "enhancedirl", Protocols: []string{"srtla", "srt"},
+		Codecs: []string{"h264", "h265"}, MaxVideoKbps: 10000}) {
+		t.Fatalf("%+v", l.Template("enhancedirl"))
+	}
+	if e := l.ByID("d-5e6f7a8b"); e == nil || e.Managed || e.Template != "enhancedirl" || e.Protocol != "srtla" {
+		t.Fatalf("%+v", e)
 	}
 	// At most 16; an active one that is not in the list is none
 	many := []any{}
@@ -136,7 +147,7 @@ func TestDestsActions(t *testing.T) {
 		t.Errorf("body %s", raw)
 	}
 	s := d.AppSnapshot()
-	if !s.Last.OK || s.Last.ID != "d-11223344" || s.Dests.ByID("d-11223344") == nil || len(s.Dests.Destinations) != 4 {
+	if !s.Last.OK || s.Last.ID != "d-11223344" || s.Dests.ByID("d-11223344") == nil || len(s.Dests.Destinations) != 5 {
 		t.Fatalf("%+v %+v", s.Last, s.Dests)
 	}
 	// Update (a secret cleared is null), activate (the list comes back), the secrets of one, delete

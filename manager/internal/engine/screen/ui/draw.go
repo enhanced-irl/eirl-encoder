@@ -503,6 +503,9 @@ func (u *UI) draw(c *Canvas, now time.Time) {
 		if hd != nil && hd.key == key {
 			return held, true
 		}
+		if key == "poweroff" { // the board's power button held: the menu's Power off fills up
+			return u.powerKeyProgress(now)
+		}
 		return 0, false
 	}
 	// Lock: open padlock; locked, closed and amber (held to unlock)
@@ -565,7 +568,13 @@ func (u *UI) draw(c *Canvas, now time.Time) {
 		c.StrokeRR(q, 1.5, cLine)
 		cx := float64(mr.X) + float64(mr.W)/2
 		d.text(cx, float64(mr.Y)+32*s, tx.MenuTitle, 20*s, textOpt{col: cInk, bold: true, align: center})
-		d.text(cx, float64(mr.Y)+54*s, tx.MenuHelp, 14*s, textOpt{col: cQuiet, align: center})
+		help, warn := u.menuHelp(now)
+		hcol := cQuiet
+		if warn {
+			hcol = cWarn
+		}
+		d.text(cx, float64(mr.Y)+54*s, help, 14*s, textOpt{col: hcol, bold: warn, align: center,
+			width: float64(mr.W) - 24*s})
 		rb := btn{label: tx.Reboot, active: true, col: colp(cWarn)}
 		rb.progress, rb.hasProg = holding("reboot")
 		d.button("m_reboot", rb)

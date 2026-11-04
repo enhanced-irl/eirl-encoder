@@ -11,7 +11,8 @@
 // -frames paints pictures where the video goes instead of grey (the README's screenshots): program.png in the
 // program and tile-1.png … tile-4.png in the tiles, each scaled to its box; a missing one stays grey.
 //
-// Variants: idle · live · connecting · error · pip · audio · audiomix · menu · locked · off · wifi · wifilive ·
+// Variants: idle · live · connecting · error · pip · audio · audiomix · menu · menukey (the board's power button
+// held: Power off fills up) · menukeylive (held while streaming: why it does not power off) · locked · off · wifi · wifilive ·
 // settings · settingsoff · settingscable · settingsnone · settingsbusy · settingsonair · settingsold · settingsload ·
 // settingsapoff · settingsapbusy · settingswrong · settingsnoinet · settingsnets · settingsnets2 · settingsnetsbusy ·
 // settingsnetswrong · settingsnetsforget · settingskb · settingskbupper · settingskbsym · settingskbsym2 ·
@@ -167,7 +168,7 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir, frames string
 	has := func(mod string) bool { return slices.Contains(mods, mod) }
 	prog := st["program"].(map[string]any)
 	sources, _ := st["sources"].([]any)
-	if variant == "live" || variant == "pip" || variant == "wifilive" {
+	if variant == "live" || variant == "pip" || variant == "wifilive" || variant == "menukeylive" {
 		st["output"] = m("mode", "on", "state", "on", "kbps", 5800, "sentKbps", 5800, "rttMs", 57)
 	}
 	if variant == "connecting" {
@@ -517,6 +518,9 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir, frames string
 	if variant == "menu" {
 		p.OpenMenu()
 		p.Holding("poweroff", 900*time.Millisecond)
+	}
+	if variant == "menukey" || variant == "menukeylive" { // the board's power button held (MIXER.md §14.1)
+		p.PowerKey(1500 * time.Millisecond)
 	}
 	if variant == "off" {
 		p.Powering("poweroff")

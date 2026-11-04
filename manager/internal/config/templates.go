@@ -17,19 +17,28 @@ type Template struct {
 	KeyRequired bool `json:"keyRequired"`
 }
 
-// Template ids. eirl is the cloud's only (Destinations: id eirl, managed).
+// Template ids. eirl is the cloud's only (Destinations: id eirl, managed). enhancedirl is EnhancedIRL as any other
+// platform: a destination of the device, with no server of its own (the user pastes the stream key's publish URL,
+// whose stream ID is kept apart as with custom), for every encoder, linked or not.
 const (
-	TemplateEIRL   = "eirl"
-	TemplateCustom = "custom"
+	TemplateEIRL        = "eirl"
+	TemplateEnhancedIRL = "enhancedirl"
+	TemplateCustom      = "custom"
 )
 
 // MaxVideoKbps: the bound of every video bitrate (the engine's).
 const MaxVideoKbps = 20000
 
-// Templates in the order the API lists them.
+// enhancedIRLMaxKbps: the most video an EnhancedIRL stream key takes (its highest plan's cap).
+const enhancedIRLMaxKbps = 10000
+
+// Templates in the order the API lists them (the screen and the web offer them in it, without eirl: enhancedirl
+// first).
 var Templates = []Template{
 	{ID: TemplateEIRL, Protocols: []string{ProtoSRTLA, ProtoSRT}, Codecs: []string{"h265", "h264"},
 		MaxVideoKbps: MaxVideoKbps},
+	{ID: TemplateEnhancedIRL, Protocols: []string{ProtoSRTLA, ProtoSRT}, Codecs: []string{"h264", "h265"},
+		MaxVideoKbps: enhancedIRLMaxKbps},
 	{ID: "twitch", Protocols: []string{ProtoRTMP, ProtoRTMPS}, URL: "rtmp://live.twitch.tv/app",
 		URLs:   map[string]string{ProtoRTMP: "rtmp://live.twitch.tv/app", ProtoRTMPS: "rtmps://live.twitch.tv:443/app"},
 		Codecs: []string{"h264"}, MaxVideoKbps: 6000, KeyRequired: true},
@@ -63,8 +72,8 @@ func templateIDs() []string {
 }
 
 // templateNames: the default name of a new destination (brands are not translated; custom takes its protocol's).
-var templateNames = map[string]string{TemplateEIRL: "EnhancedIRL", "twitch": "Twitch", "youtube": "YouTube",
-	"kick": "Kick", "facebook": "Facebook"}
+var templateNames = map[string]string{TemplateEIRL: "EnhancedIRL", TemplateEnhancedIRL: "EnhancedIRL",
+	"twitch": "Twitch", "youtube": "YouTube", "kick": "Kick", "facebook": "Facebook"}
 
 // protocolNames: how a protocol is written for people (the name of a custom destination).
 var protocolNames = map[string]string{ProtoSRT: "SRT", ProtoSRTLA: "SRTLA", ProtoRTMP: "RTMP", ProtoRTMPS: "RTMPS",

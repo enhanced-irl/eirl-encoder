@@ -7,6 +7,7 @@
 /etc/dbus-1/system.d/eirl-encoder-bluetooth.conf               bluetooth -    # install.sh reloads D-Bus after the layer
 /etc/systemd/journald.conf.d/90-eirl-nosyslog.conf             system    systemd-journald.service
 /etc/systemd/journald.conf.d/90-eirl-persistent.conf           system    systemd-journald.service
+/etc/systemd/logind.conf.d/90-eirl-powerkey.conf               system    systemd-logind.service
 /etc/systemd/system/eirl-firmware.service                      system    -
 /etc/systemd/system/eirl-firstboot.service                     system    -
 /etc/systemd/system/usbmuxd.service.d/90-eirl.conf             uplinks   usbmuxd.service

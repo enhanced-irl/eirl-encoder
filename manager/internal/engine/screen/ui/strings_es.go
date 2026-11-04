@@ -46,6 +46,7 @@ var Spanish = &Strings{
 	MenuTitle: "Codificador", MenuHelp: "Mantén pulsado 2 s para confirmar",
 	Reboot: "Reiniciar", PowerOff: "Apagar", Cancel: "Cancelar",
 	Rebooting: "Reiniciando…", PoweringOff: "Apagando…",
+	PowerKeyLive: "Deja de emitir para apagar", PowerKeyRecording: "Deja de grabar para apagar", PowerKeyHoldF: "Mantén el botón %d s para apagar",
 	OneSource: "Una fuente", Mix: "Mezcla", FollowVideo: "Sigue al vídeo",
 	ProgramStrip: "Programa", ProgramMix: "mezcla", ProgramSingle: "una fuente",
 	Headphones: "Auriculares", PhonesOff: "apagados", PhonesMute: "silencio", PhonesDbF: "%d dB",
@@ -185,6 +186,7 @@ var Spanish = &Strings{
 	AboutIPs:           "Direcciones IP",
 	AboutWeb:           "Web del codificador",
 	AboutUnknown:       "—",
+	AboutDocs:          "Documentación",
 	SetupAgain:         "Repetir la configuración inicial",
 	SetupAgainConfirm:  "Toca otra vez: empieza la configuración",
 	SetupContinue:      "Seguir con la configuración inicial",
@@ -253,6 +255,7 @@ var Spanish = &Strings{
 	WizCloudOff:      "La vinculación no está disponible en este codificador",
 	WizCloudWaiting:  "Esperando a que lo confirmes…",
 	WizCloudURL:      "app.enhancedirl.com",
+	WizCloudPromoF:   "¿Aún no tienes cuenta? Mira lo que añade EnhancedIRL: %s",
 	WizDoneText:      "El codificador está listo. Todo esto se puede cambiar luego en Ajustes.",
 	WizNeedsPassword: "Falta la contraseña de la web",
 	Details: map[string]string{

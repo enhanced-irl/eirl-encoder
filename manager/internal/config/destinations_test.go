@@ -112,6 +112,9 @@ func TestTemplateLimits(t *testing.T) {
 		{"kick", "rtmps", func(d *Destination) { d.URL = "rtmps://x.live-video.net:443/app"; d.VideoKbps = 8001 }, "videoBitrateKbps"},
 		{"facebook", "rtmp", func(d *Destination) { d.URL = "rtmp://h/rtmp/" }, "protocol"},
 		{"eirl", "rtmp", func(d *Destination) { d.URL = "rtmp://h/app" }, "protocol"},
+		{"enhancedirl", "rtmps", func(d *Destination) { d.URL = "rtmps://h:443/app" }, "protocol"},
+		{"enhancedirl", "srtla", func(d *Destination) { d.URL = "srtla://h:5001"; d.VideoKbps = 10001 }, "videoBitrateKbps"},
+		{"enhancedirl", "srtla", func(d *Destination) {}, "url"}, // no server of its own: the user pastes it
 	} {
 		tp, _ := TemplateByID(c.tmpl)
 		d := NewDestination(tp, c.proto)
@@ -129,7 +132,7 @@ func TestTemplateLimits(t *testing.T) {
 	for id, want := range map[string]struct {
 		codec string
 		kbps  int
-	}{"eirl": {"h265", 6000}, "twitch": {"h264", 6000}, "youtube": {"h264", 6000}, "kick": {"h264", 6000},
+	}{"eirl": {"h265", 6000}, "enhancedirl": {"h264", 6000}, "twitch": {"h264", 6000}, "youtube": {"h264", 6000}, "kick": {"h264", 6000},
 		"facebook": {"h264", 6000}, "custom": {"h264", 6000}} {
 		tp, _ := TemplateByID(id)
 		d := NewDestination(tp, tp.Protocols[0])
@@ -363,6 +366,23 @@ func TestIDs(t *testing.T) {
 	d.Managed = true
 	if (Destinations{V: 1, Destinations: []Destination{d}}).Validate() == nil {
 		t.Error("a local managed destination")
+	}
+	// The local EnhancedIRL template is never managed, nor the cloud's id
+	tp, _ := TemplateByID(TemplateEnhancedIRL)
+	e := NewDestination(tp, ProtoSRTLA)
+	e.ID, e.URL, e.StreamID = "d-0000abcd", "srtla://relay.example:5001", "publish:"+key
+	if e.Managed || e.Name != "EnhancedIRL" || e.LatencyMs != DefaultLatencyMs {
+		t.Errorf("enhancedirl defaults: %+v", e)
+	}
+	if err := (Destinations{V: 1, Destinations: []Destination{e}}).Validate(); err != nil {
+		t.Errorf("a local EnhancedIRL destination: %v", err)
+	}
+	for _, mut := range []func(*Destination){func(d *Destination) { d.Managed = true }, func(d *Destination) { d.ID = CloudID }} {
+		bad := e
+		mut(&bad)
+		if (Destinations{V: 1, Destinations: []Destination{bad}}).Validate() == nil {
+			t.Errorf("enhancedirl as the cloud's: %+v", bad)
+		}
 	}
 }
 

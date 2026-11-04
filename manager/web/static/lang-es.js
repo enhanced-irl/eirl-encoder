@@ -57,6 +57,7 @@ window.I18N.es = {
   'zone.status': 'Estado',
   'zone.config': 'Configuración',
   'zone.system': 'Sistema',
+  'info.docs': 'Documentación',
 
   // --- Program, preview and Go live ---
   'live.videoAria': 'Vista previa en directo de la entrada',
@@ -383,6 +384,7 @@ window.I18N.es = {
   'dest.managedValue': 'por tu cuenta de EnhancedIRL',
   'dests.add': 'Añadir',
   'dests.empty': 'Aún no hay ningún destino guardado. Añade uno para emitir.',
+  'dests.emptyEirl': '¿Necesitas un receptor para el bonding?',
   'dests.active': 'Activo',
   'dests.use': 'Usar',
   'dests.managed': 'Gestionado por EnhancedIRL: se cambia desde tu cuenta',
@@ -390,6 +392,8 @@ window.I18N.es = {
   'dests.listening': 'esperando a un reproductor en el puerto {port}',
   'dests.pickTitle': '¿Adónde quieres emitir?',
   'dests.tplCustom': 'Personalizado',
+  'dests.tplEirlSub': 'Pega la URL SRTLA de tu clave de retransmisión · consíguela en {site}',
+  'dests.eirlHelp': 'Guía: emitir a EnhancedIRL',
   'dests.newTitle': 'Nuevo destino · {name}',
   'dests.editTitle': 'Editar · {name}',
   'dests.name': 'Nombre',
@@ -986,6 +990,7 @@ window.I18N.es = {
   'setup.cloud.title': 'Vincular con EnhancedIRL',
   'setup.cloud.intro': 'Para configurarlo y verlo desde la app de EnhancedIRL. Es opcional: puedes hacerlo después en «Configuración».',
   'setup.cloudUnavailable': 'La vinculación no está disponible en este codificador.',
+  'setup.cloudPromo': '¿Aún no tienes cuenta? Mira lo que añade EnhancedIRL:',
   'setup.linkedTo': 'vinculado a {who}',
   'setup.done.title': 'Todo listo',
   'setup.done.intro': 'El codificador ya está configurado. Todo esto se puede cambiar cuando quieras desde el panel.',

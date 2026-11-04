@@ -39,7 +39,7 @@ func TestDestinationsCRUD(t *testing.T) {
 	// The migration: the destination in /etc/default becomes a custom one, active
 	l := list(t, e, tok)
 	if len(l.Destinations) != 1 || l.Active == nil || l.Destinations[0].Template != "custom" || l.Destinations[0].Name != "SRT" ||
-		!l.Destinations[0].Active || l.ManagedBy != "local" || len(l.Templates) != 6 {
+		!l.Destinations[0].Active || l.ManagedBy != "local" || len(l.Templates) != 7 {
 		t.Fatalf("migrated list: %+v", l)
 	}
 	migrated := *l.Active
@@ -154,6 +154,73 @@ func TestDestinationsLimitAndManaged(t *testing.T) {
 	}
 	if w := e.do("POST", "/api/v1/destinations/eirl/activate", `{"apply":false}`, tok); w.Code != 200 || !strings.Contains(w.Body.String(), `"managedBy":"eirl"`) {
 		t.Errorf("activate eirl: %d %s", w.Code, w.Body)
+	}
+}
+
+// The local EnhancedIRL template (OUTPUTS.md §9.2): any device creates it from the stream key's publish URL, the
+// stream ID kept apart, and it is an ordinary destination (edited, activated, deleted) that is never the cloud's.
+func TestDestinationsEnhancedIRLTemplate(t *testing.T) {
+	e := setup(t, true)
+	tok := e.login(t)
+	l := list(t, e, tok)
+	if len(l.Templates) < 2 || l.Templates[0].ID != "eirl" || l.Templates[1].ID != "enhancedirl" {
+		t.Fatalf("templates: %+v", l.Templates)
+	}
+	if tp := l.Templates[1]; strings.Join(tp.Protocols, ",") != "srtla,srt" || strings.Join(tp.Codecs, ",") != "h264,h265" ||
+		tp.MaxVideoKbps != 10000 || tp.URL != "" || len(tp.URLs) != 0 {
+		t.Errorf("enhancedirl template: %+v", tp)
+	}
+	const sid = "publish:a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+	w := e.do("POST", "/api/v1/destinations", `{"template":"enhancedirl","protocol":"srtla","url":"srtla://eu1.relay.example:5001?streamid=`+sid+`"}`, tok)
+	var v config.DestinationView
+	json.Unmarshal(w.Body.Bytes(), &v)
+	if w.Code != 201 || v.Template != "enhancedirl" || v.Managed || v.Name != "EnhancedIRL" || v.Protocol != "srtla" ||
+		v.URL != "srtla://eu1.relay.example:5001" || !v.StreamID.Set || strings.Contains(w.Body.String(), "a1b2c3d4e5f6a7b8c9d0") ||
+		v.VideoCodec != "h264" || v.VideoKbps != 6000 || v.LatencyMs != 2000 || !v.ABR {
+		t.Fatalf("POST enhancedirl: %d %s", w.Code, w.Body)
+	}
+	for body, field := range map[string]string{
+		`{"videoBitrateKbps":10001}`:               "10000", // its maximum
+		`{"protocol":"rtmp","url":"rtmp://h/app"}`: "protocol",
+	} {
+		if w := e.do("PUT", "/api/v1/destinations/"+v.ID, body, tok); w.Code != 400 || !strings.Contains(w.Body.String(), field) {
+			t.Errorf("PUT %s: %d %s", body, w.Code, w.Body)
+		}
+	}
+	// Over SRT, with H.265 and its maximum; the stream ID given again (a new server asks for it)
+	w = e.do("PUT", "/api/v1/destinations/"+v.ID, `{"protocol":"srt","url":"srt://eu1.relay.example:5000?streamid=`+sid+`","videoCodec":"h265","videoBitrateKbps":10000}`, tok)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"protocol":"srt"`) || !strings.Contains(w.Body.String(), `"template":"enhancedirl"`) {
+		t.Fatalf("PUT to SRT: %d %s", w.Code, w.Body)
+	}
+	// Active: engine.env streams to it, and it stays the device's (managedBy local)
+	w = e.do("POST", "/api/v1/destinations/"+v.ID+"/activate", `{"apply":true}`, tok)
+	var la listBody
+	json.Unmarshal(w.Body.Bytes(), &la)
+	if w.Code != 200 || la.Active == nil || *la.Active != v.ID || la.ManagedBy != "local" {
+		t.Fatalf("activate: %d %s", w.Code, w.Body)
+	}
+	env, _ := config.ReadEnv(e.srv.Config.AppPath)
+	if env["OUTPUT_PROTOCOL"] != "srt" || env["SRT_URL"] != "srt://eu1.relay.example:5000" || env["SRT_STREAMID"] != sid ||
+		env["OUTPUT_VCODEC"] != "h265" || env["VBITRATE"] != "10000" || env["EIRL_MANAGED_BY"] != "local" {
+		t.Errorf("engine.env: %v", env)
+	}
+	// Back to another one, then deleted like any other
+	other := ""
+	for _, d := range la.Destinations {
+		if d.ID != v.ID {
+			other = d.ID
+		}
+	}
+	if w := e.do("POST", "/api/v1/destinations/"+other+"/activate", `{"apply":false}`, tok); w.Code != 200 {
+		t.Fatalf("activate the other: %d %s", w.Code, w.Body)
+	}
+	if w := e.do("DELETE", "/api/v1/destinations/"+v.ID, "{}", tok); w.Code != 204 {
+		t.Errorf("DELETE: %d %s", w.Code, w.Body)
+	}
+	// A custom one can become an EnhancedIRL one (never the cloud's)
+	if w := e.do("PUT", "/api/v1/destinations/"+other, `{"template":"enhancedirl"}`, tok); w.Code != 200 ||
+		!strings.Contains(w.Body.String(), `"template":"enhancedirl"`) || strings.Contains(w.Body.String(), `"managed":true`) {
+		t.Errorf("custom → enhancedirl: %d %s", w.Code, w.Body)
 	}
 }
 

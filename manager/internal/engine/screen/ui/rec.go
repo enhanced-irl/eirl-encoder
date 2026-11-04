@@ -27,6 +27,9 @@ func recOn(r *RecordStatus) bool {
 	return r != nil && (r.Mode == "on" || r.State == "starting" || r.State == "on")
 }
 
+// Recording is recOn for the screen's runtime (the board's power LED, MIXER.md §14.2).
+func Recording(r *RecordStatus) bool { return recOn(r) }
+
 // RecButton is what the REC button is now.
 type RecButton struct {
 	Shown bool   // the recording is not off (or still records: it can be stopped)

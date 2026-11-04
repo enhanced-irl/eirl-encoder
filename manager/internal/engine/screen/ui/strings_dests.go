@@ -7,12 +7,14 @@ type DestStrings struct {
 	// The list
 	Add, AddTitle, AddFullF           string // AddFullF: %d destinations at most
 	ListEmpty, ListEmptySub           string
+	ListEmptyEIRLF                    string // %s the encoder's page on EnhancedIRL's site (a receiver for bonding)
 	ListHint                          string
 	ActiveTag, ManagedTag             string
 	Activating, ActivateConfirm       string
 	Created                           string
 	Custom                            string // the Custom template's name (the others are proper names)
 	TemplateSub                       string // the picker's line under a template with a server of its own
+	TemplateEIRLF                     string // the picker's line under EnhancedIRL; %s the encoder's page on its site
 	Gone                              string // the open destination is not in the app's list any more
 	Delete, DeleteConfirm, NewUnsaved string
 	// The page's two sections
@@ -47,6 +49,7 @@ var (
 		AddFullF:        "Caben %d destinos como mucho: borra uno antes",
 		ListEmpty:       "No hay destinos guardados",
 		ListEmptySub:    "Toca «Añadir» para crear uno",
+		ListEmptyEIRLF:  "¿Necesitas un receptor para el bonding? %s",
 		ListHint:        "Toca un destino para emitir a él · › para verlo o cambiarlo",
 		ActiveTag:       "En uso",
 		ManagedTag:      "de tu cuenta",
@@ -55,6 +58,7 @@ var (
 		Created:         "Guardado: tócalo en la lista para emitir a él",
 		Custom:          "Personalizado",
 		TemplateSub:     "Su servidor ya viene puesto",
+		TemplateEIRLF:   "Pega la URL SRTLA de tu clave de retransmisión · consíguela en %s",
 		Gone:            "Este destino ya no existe",
 		Delete:          "Borrar",
 		DeleteConfirm:   "Se borra este destino: toca otra vez",
@@ -97,6 +101,7 @@ var (
 		AddFullF:        "There is room for %d destinations at most: delete one first",
 		ListEmpty:       "No saved destinations",
 		ListEmptySub:    "Touch “Add” to create one",
+		ListEmptyEIRLF:  "Need a receiver for bonding? %s",
 		ListHint:        "Touch a destination to stream to it · › to see or change it",
 		ActiveTag:       "In use",
 		ManagedTag:      "from your account",
@@ -105,6 +110,7 @@ var (
 		Created:         "Saved: touch it in the list to stream to it",
 		Custom:          "Custom",
 		TemplateSub:     "Its server is already set",
+		TemplateEIRLF:   "Paste your stream key's SRTLA URL · get one at %s",
 		Gone:            "This destination no longer exists",
 		Delete:          "Delete",
 		DeleteConfirm:   "This destination will be deleted: touch again",
@@ -147,6 +153,7 @@ var (
 		AddFullF:        "%d destinations au plus : supprimez-en une avant",
 		ListEmpty:       "Aucune destination enregistrée",
 		ListEmptySub:    "Touchez « Ajouter » pour en créer une",
+		ListEmptyEIRLF:  "Besoin d'un récepteur pour l'agrégation ? %s",
 		ListHint:        "Touchez une destination pour y diffuser · › pour la voir ou la modifier",
 		ActiveTag:       "Utilisée",
 		ManagedTag:      "de votre compte",
@@ -155,6 +162,7 @@ var (
 		Created:         "Enregistrée : touchez-la dans la liste pour y diffuser",
 		Custom:          "Personnalisée",
 		TemplateSub:     "Son serveur est déjà renseigné",
+		TemplateEIRLF:   "Collez l'URL SRTLA de votre clé de diffusion · obtenez-en une sur %s",
 		Gone:            "Cette destination n'existe plus",
 		Delete:          "Supprimer",
 		DeleteConfirm:   "Cette destination sera supprimée : touchez à nouveau",

@@ -136,6 +136,8 @@ sudo systemctl restart eirl-encoderd</pre>
       <div class="setup-panel" data-step="cloud" hidden>
         <div id="sp-cloud-slot"></div>
         <p id="sp-cloud-none" class="hint" hidden data-i18n="setup.cloudUnavailable"></p>
+        <!-- For whoever has no account yet: what EnhancedIRL adds (a plain link; the step is skipped as always) -->
+        <p id="sp-cloud-promo" class="hint" hidden><span data-i18n="setup.cloudPromo"></span> <a id="sp-cloud-promo-link" href="#" target="_blank" rel="noopener"></a></p>
       </div>
 
       <div class="setup-panel" data-step="done" hidden>
@@ -399,6 +401,7 @@ sudo systemctl restart eirl-encoderd</pre>
         <div id="dests" hidden>
           <ul id="dests-list" class="uplinks dests"></ul>
           <p id="dests-empty" class="hint" hidden data-i18n="dests.empty"></p>
+          <p id="dests-empty-eirl" class="hint" hidden><span data-i18n="dests.emptyEirl"></span> <a id="dests-eirl-link" href="#" target="_blank" rel="noopener"></a></p>
           <div id="dests-ask" class="dests-ask" role="alertdialog" hidden>
             <p></p>
             <div class="form-actions"><button class="btn small ghost" type="button" data-ask="no" data-i18n="common.cancel"></button><button class="btn small primary" type="button" data-ask="yes"></button></div>
@@ -424,6 +427,7 @@ sudo systemctl restart eirl-encoderd</pre>
             <label id="dd-url-label" for="dd-url"></label>
             <input id="dd-url" name="url" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false">
             <p class="hint"><span id="dd-url-hint"></span> <button id="dd-url-unlock" class="linkbtn" type="button" hidden data-i18n="dests.urlChange"></button></p>
+            <p id="dd-eirl-help" class="hint" hidden><a id="dd-eirl-docs" href="#" target="_blank" rel="noopener" data-i18n="dests.eirlHelp"></a></p>
             <p class="err" data-for="url" hidden></p>
 
             <div class="dd-g" data-protos="srt">
@@ -900,7 +904,7 @@ sudo systemctl restart eirl-encoderd</pre>
         </form>
       </details>
 
-      <footer id="info" class="foot"></footer>
+      <footer class="foot"><span id="info"></span><a id="docs-link" class="foot-docs" href="#" target="_blank" rel="noopener" data-i18n="info.docs"></a></footer>
     </section>
 
   </div>

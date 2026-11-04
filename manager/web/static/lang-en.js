@@ -57,6 +57,7 @@ window.I18N.en = {
   'zone.status': 'Status',
   'zone.config': 'Configuration',
   'zone.system': 'System',
+  'info.docs': 'Documentation',
 
   // --- Program, preview and Go live ---
   'live.videoAria': 'Live preview of the input',
@@ -383,6 +384,7 @@ window.I18N.en = {
   'dest.managedValue': 'by your EnhancedIRL account',
   'dests.add': 'Add',
   'dests.empty': 'No destination saved yet. Add one to go live.',
+  'dests.emptyEirl': 'Need a receiver for bonding?',
   'dests.active': 'Active',
   'dests.use': 'Use',
   'dests.managed': 'Managed by EnhancedIRL: it is changed from your account',
@@ -390,6 +392,8 @@ window.I18N.en = {
   'dests.listening': 'waiting for a player on port {port}',
   'dests.pickTitle': 'Where do you want to stream?',
   'dests.tplCustom': 'Custom',
+  'dests.tplEirlSub': 'Paste your stream key’s SRTLA URL · get one at {site}',
+  'dests.eirlHelp': 'Guide: streaming to EnhancedIRL',
   'dests.newTitle': 'New destination · {name}',
   'dests.editTitle': 'Edit · {name}',
   'dests.name': 'Name',
@@ -986,6 +990,7 @@ window.I18N.en = {
   'setup.cloud.title': 'Link to EnhancedIRL',
   'setup.cloud.intro': 'To set it up and watch it from the EnhancedIRL app. It is optional: you can do it later in “Configuration”.',
   'setup.cloudUnavailable': 'Linking is not available on this encoder.',
+  'setup.cloudPromo': 'No account yet? See what EnhancedIRL adds:',
   'setup.linkedTo': 'linked to {who}',
   'setup.done.title': 'All set',
   'setup.done.intro': 'The encoder is set up. All of this can be changed at any time from the dashboard.',

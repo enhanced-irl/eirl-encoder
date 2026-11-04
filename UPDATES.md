@@ -1,4 +1,4 @@
-> **Status:** RELEASED (the OTA since v0.1.0, Oct 14; the system layer, §12, since 0.11.0, Oct 22) · **Updated:** 2026-10-23
+> **Status:** RELEASED (the OTA since v0.1.0, Oct 14; the system layer, §12, since 0.11.0, Oct 22) · **Updated:** 2026-11-04
 
 # Over-the-air updates
 
@@ -530,7 +530,7 @@ our software: app, engine, helpers (files.txt)        OTA (§1-§11)
 | `system/packages.lock` | Their closure over the base, exactly: name, version, arch, sha256, size, installed size, source package and version, path in Ubuntu's archive. `build/system.sh --update-lock` resolves it in an Ubuntu 18.04 arm64 container whose dpkg database is the base (each package's record from Ubuntu's signed archive) |
 | `system/built.txt` | What comes from `build/out`: our modules and firmware (`build/build.sh`), BlueALSA's ALSA plugins and their configuration (`build/bluealsa.sh`). Where each goes, which file it is, its area and its flags (`reboot`, `usedBy=`) |
 | `system/modules.lock` | The sha256 of every module `build/build.sh` builds. Its builds are reproducible (the 8 modules of the test board, built on Oct 16, and those built on Oct 21 are the same bytes), so a changed module is a reviewed change, never an accident |
-| `system/overlay.txt` + `system/files/` | System files: the first-boot units and scripts of the image, the journal's and NetworkManager's drop-ins, usbmuxd's (MODEMS.md §12.2), and the system's name (`@RELEASE@` becomes the release) |
+| `system/overlay.txt` + `system/files/` | System files: the first-boot units and scripts of the image, the journal's and NetworkManager's drop-ins, usbmuxd's (MODEMS.md §12.2), logind's (the power button, MIXER.md §14.1), and the system's name (`@RELEASE@` becomes the release) |
 | `system/units.txt` | The units' state: what is masked, disabled or enabled (never `ssh`, nor the app's units) |
 | `system/groups.txt` | System groups (`debug`) |
 
@@ -659,6 +659,7 @@ packages (the same ones that run when the image is built, exercised by §12.10 a
 
 - **Files**: only `/lib/modules/4.9.337-tegra/extra/tc358743.ko`, `/lib/modules/4.9.337-tegra/updates/eirl-*/`,
   `/lib/firmware/`, `/etc/systemd/system/<unit>.d/90-eirl*.conf`, `/etc/systemd/journald.conf.d/90-eirl-*`,
+  `/etc/systemd/logind.conf.d/90-eirl-*` (the power button, MIXER.md §14.1),
   `/etc/NetworkManager/conf.d/`, `/usr/lib/eirl-image/`, the image's two first-boot units and the system's name files.
   Never `/boot`, `/etc/eirl-encoder`, sudoers, `/home`, dpkg's database or the app's files.
 - **Packages**: never `nvidia-l4t-*`, `jetson-*`, a kernel or a bootloader; `apt` refuses to change one on hold.

@@ -1,0 +1,3 @@
+- Nouveau : le bouton d'alimentation n'éteint plus l'encodeur immédiatement. Un appui ouvre sur l'écran le menu avec Redémarrer et Éteindre ; pour éteindre, maintenez le bouton 3 s. Pendant une diffusion ou un enregistrement, il n'éteint pas : l'écran vous demande d'arrêter d'abord. Après la mise à jour, redémarrez l'encodeur pour l'activer.
+- Nouveau : le voyant d'alimentation indique ce que fait l'encodeur : fixe au repos, clignotement lent en direct, rapide pendant la connexion, et un éclair toutes les 3 s pendant l'enregistrement.
+- Nouveau : EnhancedIRL apparaît en premier dans la liste des destinations, avec un lien dans la liste vide et dans l'assistant de configuration.

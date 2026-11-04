@@ -4,6 +4,21 @@
 'use strict';
 
 const $ = (id) => document.getElementById(id);
+
+// EnhancedIRL's site and documentation: the only place the web writes their addresses (the screen's are in
+// internal/engine/screen/ui/links.go). Plain links for the user to open: nothing is fetched or counted from here.
+// The site serves English without a language prefix; the documentation's /go/<lang>/<key> keys never move.
+const EIRL_LINKS = { site: 'https://enhancedirl.com', docs: 'https://docs.enhancedirl.com' };
+const eirlPagePath = () => (getLang() === 'en' ? '' : '/' + getLang()) + '/encoder';
+// The encoder's page, tagged with where it was shown (medium: destinations, wizard), and as people read it
+const eirlPageURL = (medium) => `${EIRL_LINKS.site}${eirlPagePath()}?utm_source=encoder&utm_medium=${encodeURIComponent(medium)}&utm_campaign=eirl-encoder`;
+const eirlPageShown = () => EIRL_LINKS.site.replace(/^https:\/\//, '') + eirlPagePath();
+const docsURL = (key) => `${EIRL_LINKS.docs}/go/${getLang()}/${key}`;
+// An <a> to the encoder's page (its text: the address), in the current language
+function eirlLink(a, medium) {
+  a.href = eirlPageURL(medium);
+  a.textContent = eirlPageShown();
+}
 // The other cards (settings.js, setup.js) hook into the app's life: start (dashboard shown), live (the live
 // connection opens: also when the tab is shown again), stop (it closes), status (every status) and mixer (a
 // new mixer state, or null)
@@ -188,6 +203,7 @@ function startApp() {
   loadDestination();
   loadSources();
   loadLogs();
+  $('docs-link').href = docsURL('encoder-start');
   api('GET', '/info').then((i) => {
     if (staleWeb(i)) return;
     $('info').textContent = `eirl-encoderd ${i.version} · ${i.hostname}` + (i.l4t ? ` · L4T ${(i.l4t.match(/R\d+.*?REVISION: [\d.]+/) || [''])[0].replace(' (release), REVISION: ', '.')}` : '');
@@ -2042,7 +2058,7 @@ const protoLabel = (p) => PROTO_LABELS[p] || String(p || '').toUpperCase();
 const CODEC_LABELS = { h264: 'H.264', h265: 'H.265' };
 const codecLabel = (c) => CODEC_LABELS[c] || '';
 // The platforms' names are brands, the same in every language; «Custom» is translated
-const TPL_NAMES = { eirl: 'EnhancedIRL', twitch: 'Twitch', youtube: 'YouTube', kick: 'Kick', facebook: 'Facebook' };
+const TPL_NAMES = { eirl: 'EnhancedIRL', enhancedirl: 'EnhancedIRL', twitch: 'Twitch', youtube: 'YouTube', kick: 'Kick', facebook: 'Facebook' };
 const tplName = (id) => (id === 'custom' ? t('dests.tplCustom') : TPL_NAMES[id] || id);
 const DESTS_MAX = 16;
 // A new destination's latency by protocol (the app's defaults: SRT 200 ms, SRTLA 2000, the RIST buffer 1000)
@@ -2094,6 +2110,9 @@ function renderDests(r, force) {
   $('dests-add').hidden = busy || list.length >= DESTS_MAX;
   $('dests-list').hidden = !$('dd-form').hidden;
   $('dests-empty').hidden = list.length > 0 || !$('dd-form').hidden;
+  // Nothing saved yet: one line to EnhancedIRL as a receiver that bonds the links (gone once there is one)
+  $('dests-empty-eirl').hidden = $('dests-empty').hidden;
+  eirlLink($('dests-eirl-link'), 'destinations');
   if (same) return;
   $('dests-list').replaceChildren(...list.map(destRow));
 }
@@ -2198,21 +2217,23 @@ async function activateDest(d, b, asked) {
   }
 }
 
-// «Add»: first the template (its protocols, server, codecs and maximum), then its form. The cloud's own destination
-// is not added by hand while there is one
+// «Add»: first the template (its protocols, server, codecs and maximum), then its form. The cloud's own one (eirl)
+// is never added by hand (only the cloud creates it: the app answers 409); EnhancedIRL for everyone is enhancedirl,
+// first in the app's list
 function openPicker() {
   const r = state.dl;
   if (!r) return;
-  const managed = (r.destinations || []).some((d) => d.managed);
-  const tpls = (r.templates || []).filter((x) => !(managed && x.id === 'eirl'));
+  const tpls = (r.templates || []).filter((x) => x.id !== 'eirl');
   $('dests-tpls').replaceChildren(...tpls.map((x) => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'btn';
+    b.className = x.id === 'enhancedirl' ? 'btn wide' : 'btn';
     const n = document.createElement('span');
     n.textContent = tplName(x.id);
     const s = document.createElement('small');
-    s.textContent = (x.protocols || []).map(protoLabel).join(' · ');
+    // EnhancedIRL has no server of its own: where its URL comes from
+    s.textContent = x.id === 'enhancedirl' ? t('dests.tplEirlSub', { site: eirlPageShown() })
+      : (x.protocols || []).map(protoLabel).join(' · ');
     b.append(n, s);
     b.addEventListener('click', () => openDestForm(null, x.id));
     return b;
@@ -2359,6 +2380,9 @@ function destLayout() {
   $('dd-codec-hint').textContent = only ? t('dests.codecOnly', { name, codec: codecLabel(dd.codecs[0]) }) : '';
   $('dd-max-hint').hidden = dd.max >= 20000;
   $('dd-max-hint').textContent = t('dests.maxKbps', { name, max: dd.max });
+  // EnhancedIRL: the guide to stream to it, in the documentation
+  $('dd-eirl-help').hidden = dd.tpl.id !== 'enhancedirl';
+  $('dd-eirl-docs').href = docsURL('encoder-broadcast');
   $('dd-vmin-row').hidden = !$('dd-adaptive').checked;
   // Buttons: the active one saves and applies; another one saves and becomes the active one. The cloud's and the
   // active one are not deleted
@@ -3483,6 +3507,7 @@ onLangChange(() => {
   if (!$('dests-pick').hidden) openPicker();
   destLayout();
   if (state.cloud) renderCloud(state.cloud);
+  $('docs-link').href = docsURL('encoder-start');
   if (state.catalog) { if (!state.inputDirty) fillInputForm(); else { renderModeOptions(); renderSourceInfo(); } }
   if ($('wifi-nets').open && !$('wifi-nets-body').querySelector('form')) loadNets();
   if ($('cams-wifi').open) showWifi();

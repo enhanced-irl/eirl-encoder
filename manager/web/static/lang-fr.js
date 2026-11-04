@@ -58,6 +58,7 @@ window.I18N.fr = {
   'zone.status': 'État',
   'zone.config': 'Configuration',
   'zone.system': 'Système',
+  'info.docs': 'Documentation',
 
   // --- Program, preview and Go live ---
   'live.videoAria': 'Aperçu en direct de l’entrée',
@@ -384,6 +385,7 @@ window.I18N.fr = {
   'dest.managedValue': 'par votre compte EnhancedIRL',
   'dests.add': 'Ajouter',
   'dests.empty': 'Aucune destination enregistrée. Ajoutez-en une pour passer en direct.',
+  'dests.emptyEirl': 'Besoin d’un récepteur pour l’agrégation ?',
   'dests.active': 'Active',
   'dests.use': 'Utiliser',
   'dests.managed': 'Gérée par EnhancedIRL : elle se modifie depuis votre compte',
@@ -391,6 +393,8 @@ window.I18N.fr = {
   'dests.listening': 'en attente d’un lecteur sur le port {port}',
   'dests.pickTitle': 'Où voulez-vous diffuser ?',
   'dests.tplCustom': 'Personnalisée',
+  'dests.tplEirlSub': 'Collez l’URL SRTLA de votre clé de diffusion · obtenez-en une sur {site}',
+  'dests.eirlHelp': 'Guide : diffuser vers EnhancedIRL',
   'dests.newTitle': 'Nouvelle destination · {name}',
   'dests.editTitle': 'Modifier · {name}',
   'dests.name': 'Nom',
@@ -987,6 +991,7 @@ window.I18N.fr = {
   'setup.cloud.title': 'Associer à EnhancedIRL',
   'setup.cloud.intro': 'Pour le configurer et le suivre depuis l’app EnhancedIRL. C’est facultatif : vous pouvez le faire plus tard dans « Configuration ».',
   'setup.cloudUnavailable': 'L’association n’est pas disponible sur cet encodeur.',
+  'setup.cloudPromo': 'Pas encore de compte ? Découvrez ce qu’apporte EnhancedIRL :',
   'setup.linkedTo': 'associé à {who}',
   'setup.done.title': 'Tout est prêt',
   'setup.done.intro': 'L’encodeur est configuré. Tout cela peut être changé à tout moment depuis le tableau de bord.',

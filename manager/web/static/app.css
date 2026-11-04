@@ -559,6 +559,9 @@ select {
 
 .foot { padding: 2px 4px; font: .74rem/1.5 var(--mono); color: var(--gray-500); overflow-wrap: anywhere; }
 .foot:empty { display: none; }
+.foot-docs { margin-left: .8em; color: var(--brand-300); }
+.hint a { color: var(--brand-300); overflow-wrap: anywhere; }
+#info:empty + .foot-docs { margin-left: 0; }
 
 /* --- Móvil y pantallas táctiles: objetivos de toque de 44 px como mínimo ------------------------ */
 
@@ -744,6 +747,7 @@ select.invalid { border-color: var(--error); box-shadow: 0 0 0 3px var(--error-a
 .dests-tpls { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-top: 10px; }
 .dests-tpls .btn { flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; text-align: left; }
 .dests-tpls .btn small { font-size: .72rem; font-weight: 500; color: var(--gray-400); }
+.dests-tpls .btn.wide { grid-column: 1 / -1; } /* EnhancedIRL: first, with its line about where the URL comes from */
 #dd-head { margin-bottom: 2px; color: var(--gray-300); }
 .dd-g { display: flex; flex-direction: column; gap: 6px; }
 .dd-sec { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--gray-800); }

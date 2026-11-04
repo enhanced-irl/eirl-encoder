@@ -70,9 +70,10 @@ draws them again.*
   | RIST | Simple or main profile, optionally encrypted, bonded across the links |
   | UDP / RTP | MPEG-TS to the local network, unicast or multicast |
 
-- **Saved destinations**: several destinations (templates for Twitch, YouTube, Kick and Facebook, or your
-  own; a linked encoder also gets its EnhancedIRL account's), one active; switching destination while
-  live brings the stream back within a second, without restarting the encoder.
+- **Saved destinations**: several destinations (templates for EnhancedIRL, where you paste a stream key's
+  SRTLA URL, Twitch, YouTube, Kick and Facebook, or your own; a linked encoder also gets its EnhancedIRL
+  account's), one active; switching destination while live brings the stream back within a second, without
+  restarting the encoder.
 - **Connections**: Ethernet, Wi-Fi client, USB 4G/5G modems (HiLink and ModemManager: PIN, APN, roaming,
   network type) and phones; a health dot per link (good, weak, no internet), and a link with no internet
   stops carrying the stream until it recovers.
@@ -225,9 +226,9 @@ operating, the measurements, the bugs found and the history of the test board) i
 |---|---|---|
 | HDMI capture (TC358743) | ✅ 1080p30 and 1080p50 in real streams, HDMI audio, A/V in sync to the frame, ~1.06 s end-to-end latency. Open: the audio PLL that sometimes does not lock again, a DSLR that does not decode | [`DEVELOPMENT.md`](DEVELOPMENT.md) |
 | USB sources | ✅ Released: Cam Link 4K at 1080p60, UVC webcams; plugging and unplugging while running (0.6.0); image settings (0.4.0). Missing: per-source A/V sync and a long test | [`SOURCES.md`](SOURCES.md) |
-| Mixer, touch screen and audio | ✅ Released: 4 slots, layouts, fades, audio mixer, headphones; Settings on the screen with everything the web has | [`MIXER.md`](MIXER.md), [`HEADPHONES.md`](HEADPHONES.md) |
+| Mixer, touch screen and audio | ✅ Released: 4 slots, layouts, fades, audio mixer, headphones; Settings on the screen with everything the web has; from 0.14.0, the power button opens the Power menu (held 3 s it powers off, never while streaming or recording) and the power LED blinks while streaming or recording | [`MIXER.md`](MIXER.md) §14.1-14.2, [`HEADPHONES.md`](HEADPHONES.md) |
 | Network cameras | ✅ Released: RTMP/SRT over the encoder's Wi-Fi or by cable; for now, one network camera at a time | [`NETWORK_SOURCES.md`](NETWORK_SOURCES.md) |
-| Output protocols and codecs | ✅ Released in 0.5.0 (SRT, SRTLA, RTMP, RTMPS, RIST, UDP; H.264/H.265; saved destinations). First version: tests with real platform keys still to come | [`OUTPUTS.md`](OUTPUTS.md) |
+| Output protocols and codecs | ✅ Released in 0.5.0 (SRT, SRTLA, RTMP, RTMPS, RIST, UDP; H.264/H.265; saved destinations); from 0.14.0, a local EnhancedIRL destination first in the list, linked or not. First version: tests with real platform keys still to come | [`OUTPUTS.md`](OUTPUTS.md) |
 | SRTLA and adaptive bitrate | ✅ Released; tested over loopback and with a real link to EnhancedIRL. Tests with several real links are next | [`SRTLA.md`](SRTLA.md) |
 | 4G/5G modems and link health | 🟡 Released in 0.3.0 as a first version (HiLink modems), tested against fakes and the simulator; real-modem tests are next | [`MODEMS.md`](MODEMS.md) |
 | iPhone over USB | ✅ From 0.11.1, over the air for every board and in its SD card image: an iPhone sharing its data by cable is one more link (0.8.0 and 0.11.0 carried it without a link: §12.2) | [`MODEMS.md`](MODEMS.md) §12 |

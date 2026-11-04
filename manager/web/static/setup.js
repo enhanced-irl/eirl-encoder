@@ -4,7 +4,7 @@
 // so the password goes right after the language. Each step is marked with POST /setup/step; the touch
 // screen may run its own wizard at the same time, so GET /setup is polled and the web leaves as soon as
 // setup is done there. Loaded after app.js and settings.js (uses api, t, show, startApp, showLogin,
-// refreshStatus, renderCloud, fillZones, loadZones, deviceChanges, deviceErrors, hostMoved, cleanName).
+// refreshStatus, renderCloud, eirlLink, fillZones, loadZones, deviceChanges, deviceErrors, hostMoved, cleanName).
 'use strict';
 
 const wiz = { setup: null, order: [], cur: '', busy: false, authed: false, pollTimer: 0, stepTimer: 0, clockTimer: 0, borrowed: [] };
@@ -258,10 +258,17 @@ async function wizCloudTick() {
   try {
     renderCloud(await api('GET', '/cloud?qr=rows'));
     $('sp-cloud-none').hidden = true;
+    wizCloudPromo();
   } catch (e) {
-    if (e.status === 503) { $('cloud-card').hidden = true; $('sp-cloud-none').hidden = false; return; }
+    if (e.status === 503) { $('cloud-card').hidden = true; $('sp-cloud-none').hidden = false; $('sp-cloud-promo').hidden = true; return; }
   }
   wiz.stepTimer = setTimeout(wizCloudTick, 3000);
+}
+
+// Not linked yet: one line for whoever has no account, to what EnhancedIRL adds (nothing more: Skip as always)
+function wizCloudPromo() {
+  $('sp-cloud-promo').hidden = !state.cloud || state.cloud.state !== 'unlinked';
+  eirlLink($('sp-cloud-promo-link'), 'wizard');
 }
 
 // The network name the device will take: the same rule as the app (lowercase ASCII, digits and -)
@@ -473,4 +480,5 @@ onLangChange(() => {
   renderStepTexts();
   if (wiz.cur === 'name') renderNameHint();
   if (wiz.cur === 'done') renderSummary();
+  if (wiz.cur === 'cloud') wizCloudPromo();
 });

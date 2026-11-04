@@ -1,0 +1,3 @@
+- New: the power button no longer switches the encoder off at once. A press opens the screen's menu with Restart and Power off; to power off, hold the button for 3 s. While you stream or record it does not power off: the screen asks you to stop first. After updating, restart the encoder for it to take effect.
+- New: the power light shows what the encoder is doing: steady when idle, slow blinking when live, fast while connecting, and a flash every 3 s while recording.
+- New: EnhancedIRL comes first in the list of destinations, with a link in the empty list and in the setup wizard.

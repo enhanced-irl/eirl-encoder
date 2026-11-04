@@ -334,7 +334,7 @@ var (
 	destModes  = set("caller", "listener")
 	transports = set("srt", "srtla", "rtmp", "rtmps", "rist", "udp") // also the destinations' protocols
 	// The saved destinations (OUTPUTS.md §7, §9): closed lists, anything else is left out
-	destTemplates = set("eirl", "twitch", "youtube", "kick", "facebook", "custom")
+	destTemplates = set("eirl", "enhancedirl", "twitch", "youtube", "kick", "facebook", "custom")
 	destCodecs    = set("h264", "h265")
 	destSizes     = set("1280x720", "960x540") // "" is the program's
 	destFps       = set("full", "half")

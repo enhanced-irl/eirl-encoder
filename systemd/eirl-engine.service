@@ -36,8 +36,14 @@ Environment=LIBASOUND_THREAD_SAFE=0
 # The GStreamer registry (and fontconfig's cache) in /var/cache/eirl-engine, not in a home
 CacheDirectory=eirl-engine
 Environment=XDG_CACHE_HOME=/var/cache/eirl-engine
+# The board's power LED (the green LED and the power button's, /sys/class/leds/pwr; MIXER.md §14.2): the engine
+# blinks it while streaming or recording. Its files are root's: the engine's group may write them while it runs, and
+# when it stops, even killed, the LED goes back to the kernel (steady; it only blinks if the board throttles). "+" runs
+# them as root, "-": a board without that LED is not a failure
+ExecStartPre=+-/bin/sh -c 'd=/sys/class/leds/pwr; [ ! -d $$d ] || { chgrp eirl-engine $$d/brightness $$d/trigger && chmod 0664 $$d/brightness $$d/trigger; }'
 # eirl-engine-start runs the Go engine, eirl-engine-go, with its memory settings (ENGINE_GO.md §15.1)
 ExecStart=/usr/lib/eirl-encoder/engine/eirl-engine-start
+ExecStopPost=+-/bin/sh -c 'd=/sys/class/leds/pwr; [ ! -d $$d ] || { echo system-throttle > $$d/trigger; echo 255 > $$d/brightness; }'
 # /run/eirl-engine (tmpfs): state and SRT statistics for the app; 0755 so it can read them
 RuntimeDirectory=eirl-engine
 RuntimeDirectoryMode=0755

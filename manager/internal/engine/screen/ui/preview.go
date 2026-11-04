@@ -37,6 +37,14 @@ func (p Preview) Holding(key string, d time.Duration) {
 	p.u.hold = &hold{key: key, since: p.u.now().Add(-d)}
 }
 
+// PowerKey: the board's power button down for d, as the screen has it (the menu open; streaming, its notice).
+func (p Preview) PowerKey(d time.Duration) {
+	p.u.OnPowerKey(true)
+	if p.u.pkey != nil {
+		p.u.pkey.since = p.u.now().Add(-d)
+	}
+}
+
 // OpenSettings opens the panel like ui_render.py does (without telling Net).
 func (p Preview) OpenSettings() { p.u.settingsOpen = true }
 

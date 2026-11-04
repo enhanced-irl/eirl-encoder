@@ -90,6 +90,13 @@ type UI struct {
 	hint         string
 	hintUntil    time.Time
 	secretUntil  time.Time
+
+	// The board's power button while it is down (powerkey.go), and the Power menu's notice of why it does not
+	// power off (instead of the menu's help, until menuNoteUntil)
+	pkey          *powerKey
+	menuNote      string
+	menuNoteUntil time.Time
+
 	// groupPage is the last page seen of each Settings group (its tab): the list's entry goes back to it
 	groupPage map[string]string
 	// chooser is the generic picker open in the page area (settingsView "pick")
@@ -414,7 +421,7 @@ func (u *UI) OnTouch(ev string, fx, fy float64, held time.Duration) {
 	}
 	if u.menuOpen {
 		if h.Key == "m_cancel" || h.Kind == HitNone {
-			u.menuOpen = false
+			u.menuOpen, u.menuNote = false, ""
 		}
 		return
 	}
@@ -1220,6 +1227,7 @@ func (u *UI) Tick() bool {
 		hd.done = true
 		u.fromHold(hd.key, now)
 	}
+	u.powerKeyTick(now)
 	if u.powering != "" && now.Sub(u.poweringAt) > PowerWait {
 		// The app has not done it (down, no permission…): the screen cannot stay dead
 		want := u.powering
@@ -1236,7 +1244,7 @@ func (u *UI) Tick() bool {
 		u.say(sprintf(u.Tx.PowerFailedF, verb), 6*time.Second)
 	}
 	if u.menuOpen && u.locked() {
-		u.menuOpen = false // locked from the web with the menu open: it closes
+		u.menuOpen, u.menuNote = false, "" // locked from the web with the menu open: it closes
 		u.Dirty = true
 	}
 	if u.settingsOpen && (u.locked() || u.State != "on") {
@@ -1263,7 +1271,8 @@ func (u *UI) Tick() bool {
 			u.Dirty = true
 		}
 	}
-	return u.frame(now, hd)
+	_, keyHeld := u.powerKeyProgress(now)
+	return u.frame(now, hd != nil || keyHeld)
 }
 
 func maxTime(a, b time.Time) time.Time {

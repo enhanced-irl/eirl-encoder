@@ -46,6 +46,7 @@ var English = &Strings{
 	MenuTitle: "Encoder", MenuHelp: "Hold for 2 s to confirm",
 	Reboot: "Restart", PowerOff: "Power off", Cancel: "Cancel",
 	Rebooting: "Restarting…", PoweringOff: "Powering off…",
+	PowerKeyLive: "Stop streaming to power off", PowerKeyRecording: "Stop recording to power off", PowerKeyHoldF: "Hold the button for %d s to power off",
 	OneSource: "Single source", Mix: "Mix", FollowVideo: "Follows video",
 	ProgramStrip: "Program", ProgramMix: "mix", ProgramSingle: "single source",
 	Headphones: "Headphones", PhonesOff: "off", PhonesMute: "muted", PhonesDbF: "%d dB",
@@ -185,6 +186,7 @@ var English = &Strings{
 	AboutIPs:           "IP addresses",
 	AboutWeb:           "Encoder's web page",
 	AboutUnknown:       "—",
+	AboutDocs:          "Documentation",
 	SetupAgain:         "Run the setup again",
 	SetupAgainConfirm:  "Tap again: the setup starts",
 	SetupContinue:      "Continue the setup",
@@ -253,6 +255,7 @@ var English = &Strings{
 	WizCloudOff:      "Linking is not available on this encoder",
 	WizCloudWaiting:  "Waiting for you to confirm…",
 	WizCloudURL:      "app.enhancedirl.com",
+	WizCloudPromoF:   "No account yet? See what EnhancedIRL adds: %s",
 	WizDoneText:      "The encoder is ready. You can change all of this later in Settings.",
 	WizNeedsPassword: "The web page password is missing",
 	Details: map[string]string{

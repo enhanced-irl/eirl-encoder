@@ -525,11 +525,39 @@ func (u *UI) drawWizardCloud(d *dc, app *AppSnapshot) {
 	default:
 		u.wizText(d, float64(pg.Y)+24*s, tx.WizCloudText, 17, cInk)
 		d.button("w_pair", btn{label: tx.WizCloudGet, active: true, dim: app.Pending == "cloud_pair"})
+		u.drawWizardCloudPromo(d)
 		if note == "" {
 			note = cl.LastError
 		}
 	}
 	u.noteLine(d, note, true)
+}
+
+// drawWizardCloudPromo is, under «Get a code», for whoever has no account yet: a small QR to the encoder's page on
+// EnhancedIRL's site and one line beside it. Nothing to touch and nothing that waits: the step is skipped as always.
+func (u *UI) drawWizardCloudPromo(d *dc) {
+	s, pg := d.s, u.Lay.SettingsPage
+	rows := linkQR(EncoderPageURL(u.Tx.Code, "wizard"))
+	if len(rows) == 0 {
+		return
+	}
+	b := u.Lay.Buttons["w_pair"]
+	top := b.Y + b.H + int(32*s)
+	n := len(rows) + 8
+	side := min(int(190*s), pg.Y+pg.H-int(36*s)-top) / n * n // whole modules; the note's line stays free
+	if side < 2*n {
+		return
+	}
+	x := pg.X + int(4*s)
+	u.drawQR(d.c, rows, x, top, side)
+	tx0 := float64(x+side) + 24*s
+	tw := min(float64(pg.X+pg.W)-tx0-8*s, 380*s)
+	lines := d.wrap(sprintf(u.Tx.WizCloudPromoF, EncoderPageShown(u.Tx.Code)), 16*s, Sans, tw)
+	y := float64(top) + float64(side)/2 - float64(len(lines)-1)*11*s + 6*s // centred on the QR
+	for _, line := range lines {
+		d.text(tx0, y, line, 16*s, textOpt{col: cQuiet, width: tw})
+		y += 22 * s
+	}
 }
 
 func (u *UI) drawWizardDone(d *dc, app *AppSnapshot) {

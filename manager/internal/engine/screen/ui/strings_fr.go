@@ -47,6 +47,7 @@ var French = &Strings{
 	MenuTitle: "Encodeur", MenuHelp: "Maintenez 2 s pour confirmer",
 	Reboot: "Redémarrer", PowerOff: "Éteindre", Cancel: "Annuler",
 	Rebooting: "Redémarrage…", PoweringOff: "Arrêt…",
+	PowerKeyLive: "Arrêtez la diffusion pour éteindre", PowerKeyRecording: "Arrêtez l’enregistrement pour éteindre", PowerKeyHoldF: "Maintenez le bouton %d s pour éteindre",
 	OneSource: "Une source", Mix: "Mixage", FollowVideo: "Suit la vidéo",
 	ProgramStrip: "Programme", ProgramMix: "mixage", ProgramSingle: "une source",
 	Headphones: "Casque", PhonesOff: "éteint", PhonesMute: "muet", PhonesDbF: "%d dB",
@@ -186,6 +187,7 @@ var French = &Strings{
 	AboutIPs:           "Adresses IP",
 	AboutWeb:           "Page web de l'encodeur",
 	AboutUnknown:       "—",
+	AboutDocs:          "Documentation",
 	SetupAgain:         "Refaire la configuration initiale",
 	SetupAgainConfirm:  "Touchez à nouveau : la configuration commence",
 	SetupContinue:      "Reprendre la configuration initiale",
@@ -254,6 +256,7 @@ var French = &Strings{
 	WizCloudOff:      "L'association n'est pas disponible sur cet encodeur",
 	WizCloudWaiting:  "En attente de votre confirmation…",
 	WizCloudURL:      "app.enhancedirl.com",
+	WizCloudPromoF:   "Pas encore de compte ? Découvrez ce qu'apporte EnhancedIRL : %s",
 	WizDoneText:      "L'encodeur est prêt. Tout cela peut se changer plus tard dans Réglages.",
 	WizNeedsPassword: "Il manque le mot de passe de la page web",
 	Details: map[string]string{

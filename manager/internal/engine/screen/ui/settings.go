@@ -1422,7 +1422,7 @@ func (u *UI) drawAboutPage(d *dc, app *AppSnapshot) {
 	}
 	lines := [][2]string{{tx.AboutRelease, or(dev.Release)}, {tx.AboutApp, or(dev.AppVer)}, {tx.AboutEngine, or(dev.EngineVer)},
 		{tx.AboutCommit, or(commit)}, {tx.AboutName, or(dev.Name)}, {tx.AboutHost, or(dev.Hostname)},
-		{tx.AboutIPs, ips}, {tx.AboutWeb, web}}
+		{tx.AboutIPs, ips}, {tx.AboutWeb, web}, {tx.AboutDocs, DocsHost}}
 	al := lay.AboutLines
 	x0, y0, w0 := float64(al.X), float64(al.Y), float64(al.W)
 	lw := 0.0

@@ -5,8 +5,8 @@
 // on (it is another pipeline).
 //
 // Goroutines: the lifecycle (splash → display → pipeline → retries), the UI (touches, ticks, drawing: it owns
-// the ui.UI), the commands (to the engine, one at a time), the touch reader, and one per pipeline for the
-// screen.jpg snapshots.
+// the ui.UI), the commands (to the engine, one at a time), the touch reader, the power button's reader, the power
+// LED, and one per pipeline for the screen.jpg snapshots.
 package screen
 
 import (
@@ -134,6 +134,8 @@ type Screen struct {
 	fonts *ui.Fonts
 	u     *ui.UI // owned by the UI goroutine
 	touch *touchReader
+	pkey  *powerKeyReader // the board's power button (powerkey.go)
+	led   *led            // the board's power LED (led.go)
 
 	displayWait time.Duration // the last wait for a stable display and the readings it needed (lifecycle
 	displayNeed int           // goroutine only)
@@ -155,6 +157,7 @@ type Screen struct {
 	secret  atomic.Bool
 	wake    chan struct{}
 	touches chan TouchEvent
+	pkeys   chan bool // the power button: down or up
 	cmds    chan ui.Command
 	results chan cmdResult
 	attach  chan attachReq
@@ -168,8 +171,8 @@ type Screen struct {
 func New(o Options) *Screen {
 	s := &Screen{o: o, host: o.Host, sys: o.Sys, state: StateOff,
 		wake: make(chan struct{}, 1), touches: make(chan TouchEvent, 64), cmds: make(chan ui.Command, 32),
-		results: make(chan cmdResult, 32), attach: make(chan attachReq), uiDone: make(chan struct{}),
-		stop: make(chan struct{})}
+		pkeys: make(chan bool, 4), results: make(chan cmdResult, 32), attach: make(chan attachReq),
+		uiDone: make(chan struct{}), stop: make(chan struct{})}
 	if s.sys == nil {
 		s.sys = BoardSys{Root: o.SysRoot}
 	}
@@ -200,6 +203,8 @@ func New(o Options) *Screen {
 	}
 	s.u = u
 	s.touch = &touchReader{root: o.SysRoot, out: s.touches, stop: s.stop}
+	s.pkey = &powerKeyReader{root: o.SysRoot, out: s.pkeys, stop: s.stop}
+	s.led = newLED(o.SysRoot, s.stop)
 	return s
 }
 
@@ -213,11 +218,13 @@ func (s *Screen) SetNet(n ui.Net) {
 
 // Start runs the screen's goroutines.
 func (s *Screen) Start() {
-	s.wg.Add(4)
+	s.wg.Add(6)
 	go func() { defer s.wg.Done(); s.run() }()
 	go func() { defer s.wg.Done(); s.uiLoop() }()
 	go func() { defer s.wg.Done(); s.cmdLoop() }()
 	go func() { defer s.wg.Done(); s.touch.run() }()
+	go func() { defer s.wg.Done(); s.pkey.run() }()
+	go func() { defer s.wg.Done(); s.led.run() }()
 }
 
 // Stop ends the screen within budget (the pipeline closes with its own deadline; the goroutines are left
@@ -225,6 +232,7 @@ func (s *Screen) Start() {
 func (s *Screen) Stop(budget time.Duration) bool {
 	s.once.Do(func() { close(s.stop) })
 	s.touch.close()
+	s.pkey.close()
 	done := make(chan struct{})
 	go func() { s.wg.Wait(); close(done) }()
 	select {
@@ -261,11 +269,13 @@ func (s *Screen) poke() {
 	}
 }
 
-// SetStatus hands the screen the engine's newly published state (from the actor, after each publish).
+// SetStatus hands the screen the engine's newly published state (from the actor, after each publish), and the
+// power LED what it shows.
 func (s *Screen) SetStatus(st *ui.Status) {
 	s.mu.Lock()
 	s.status, s.statusNew = st, true
 	s.mu.Unlock()
+	s.led.set(ledPattern(st))
 	s.poke()
 }
 
@@ -610,6 +620,9 @@ func (s *Screen) uiLoop() {
 			if touchAt.IsZero() && !ev.At.IsZero() && feeder != nil {
 				touchAt = ev.At
 			}
+		case down := <-s.pkeys:
+			s.syncIn()
+			u.OnPowerKey(down)
 		}
 		s.syncIn()
 		if u.Tick() && feeder != nil {
