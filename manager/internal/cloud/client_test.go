@@ -233,6 +233,7 @@ type fakeDevice struct {
 	journal   chan service.Entry
 	jpeg      []byte
 	apPolicy  string // the one in its network.json; empty = no eirl-netsetup
+	recording *StatusRecording
 }
 
 func newFakeDevice(t *testing.T) *fakeDevice {
@@ -246,7 +247,8 @@ func (d *fakeDevice) LanURLs() []string { return []string{"http://jetson.local"}
 func (d *fakeDevice) Status(context.Context) EncoderStatus {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return EncoderStatus{Phase: d.phase, Service: StatusService{State: "active"}, Output: d.cfg.Output, Transport: "srt", At: time.Now().UTC()}
+	return EncoderStatus{Phase: d.phase, Service: StatusService{State: "active"}, Output: d.cfg.Output, Transport: "srt", Recording: d.recording,
+		At: time.Now().UTC()}
 }
 func (d *fakeDevice) Reported() (ReportedConfig, error) {
 	d.mu.Lock()
@@ -687,7 +689,7 @@ func TestActions(t *testing.T) {
 	h := start(t, true)
 	cc := h.fc.conn(t)
 	cc.next(t, "hello")
-	for i, name := range []string{"start", "stop", "rehearsal", "restart"} {
+	for i, name := range []string{"start", "stop", "rehearsal", "restart", "record_start", "record_stop"} {
 		id := "a" + string(rune('0'+i))
 		cc.send(t, map[string]any{"type": "action", "id": id, "name": name})
 		if r := cc.nextWhere(t, "result", func(m map[string]any) bool { return m["id"] == id }); r["ok"] != true {
@@ -724,7 +726,7 @@ func TestActions(t *testing.T) {
 		return ok
 	})
 	h.dev.get(func(d *fakeDevice) {
-		if strings.Join(d.actions, ",") != "start,stop,rehearsal,restart,set_local_password,start,reboot" || strings.Join(d.passwords, ",") != "a-long-password" {
+		if strings.Join(d.actions, ",") != "start,stop,rehearsal,restart,record_start,record_stop,set_local_password,start,reboot" || strings.Join(d.passwords, ",") != "a-long-password" {
 			t.Errorf("actions: %v %v", d.actions, d.passwords)
 		}
 	})
@@ -768,6 +770,29 @@ func TestEventsAndPhaseChanges(t *testing.T) {
 	h.dev.set(func(d *fakeDevice) { d.uplinks = []string{"usb0"} })
 	if ev := cc.next(t, "event"); ev["name"] != EventUplinkDown || ev["detail"].(map[string]any)["uplink"] != "eth0" {
 		t.Errorf("uplink_down: %v", ev)
+	}
+	// The recording (RECORDING.md §6.8): a change of its state sends the snapshot right away, without a phase change
+	h.dev.set(func(d *fakeDevice) {
+		d.recording = &StatusRecording{Setting: "manual", Quality: "high", Mode: "on", State: "on", Disk: StatusRecordingDisk{State: "ready"}}
+	})
+	h.dev.journal <- service.Entry{Kind: "record_toggled", Msg: "[mixer] event=record_toggled on=true by=socket"}
+	st = cc.next(t, "status")["status"].(map[string]any)
+	if r, _ := st["recording"].(map[string]any); r["state"] != "on" || st["phase"] != PhaseWaitingSignal {
+		t.Errorf("snapshot on a recording change: %v", st)
+	}
+}
+
+func TestRecordingKey(t *testing.T) {
+	left := 10
+	a := &StatusRecording{Setting: "manual", Quality: "high", Mode: "on", State: "on", Disk: StatusRecordingDisk{State: "ready", MinutesLeft: &left}}
+	b := *a
+	b.ElapsedS, b.Disk.MinutesLeft = &left, nil
+	if recordingKey(a) != recordingKey(&b) {
+		t.Error("the time and the room going down are not a change")
+	}
+	b.Reason, b.State = "disk_full", "off"
+	if recordingKey(a) == recordingKey(&b) || recordingKey(nil) != "" {
+		t.Error("a stop is a change")
 	}
 }
 

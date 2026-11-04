@@ -410,6 +410,9 @@ func newCloud(ctx context.Context, srv *api.Server, apiBase, appBase, confDir, t
 	if _, err := os.Stat("/usr/local/bin/ristsender"); err == nil {
 		caps = append(caps, cloud.CapRIST)
 	}
+	// Local recording (RECORDING.md §6.8): REC from the app. status.recording only comes with the engine's record state
+	// (the mixer running), so an engine without it shows nothing
+	caps = append(caps, cloud.CapRecording)
 	// Thumbnail (the engine: THUMB, THUMB_EVERY in /etc/default/eirl-engine; the app's configuration does
 	// not carry them). CloudDevice announces the thumbnail capability only if there really are thumbnails.
 	thumbOn, thumbEvery := true, 5

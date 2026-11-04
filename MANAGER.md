@@ -950,7 +950,11 @@ The contract (routes, messages, close codes, configuration) is `devops/docs/acti
   compatibility. `restart` restarts the whole of eirl-engine. The client sends `status` immediately when
   the phase or `outputState.state` changes (ENCODER_CLOUD.md §13.3);
   `reboot` (answers `result` and reboots 1 s later with `sudo -n /bin/systemctl reboot`);
-  `set_local_password` (bcrypt to `admin.hash` and closes **all** local sessions).
+  `set_local_password` (bcrypt to `admin.hash` and closes **all** local sessions); `record_start` and `record_stop`
+  (Nov 4, RECORDING.md §6.8) = the screen's REC, the engine's `record`, with its refusals as the result's code
+  (`disabled`, `no_disk`, `disk_full`, `unsupported`, `mixer_off`, `timeout`). `status.recording` carries the recording
+  in short (no file name, no disk label, model or size), and a change of its mode, state, reason or disk sends `status`
+  at once too (the engine's `record_*` journal lines trigger the check).
 - **Unlinking** (from the web, `unlink` or `4401`): if the destination was set by the cloud, it is deleted (the key
   belongs to the account) and it stops streaming (the preview carries on); a destination set locally before linking is respected.
 - **Thumbnail**: a branch of the engine's pipeline (§7, item 8) that leaves `/run/eirl-engine/thumb.jpg` (320×180, every 5 s). The
@@ -988,7 +992,10 @@ it gives SRT, adaptive bitrate and consistent uplinks; `-signal-flap 2m` loses t
 (`ENCODER_CLOUD.md` §13.3): Go live and Stop streaming (`stop` and `rehearsal`) change the output
 hot, without restarting, and `outputState` goes through `connecting` (2 s) → `on`; `error` with
 `no_destination` without a destination or `no_uplinks` with SRTLA and all uplinks off. `-legacy` imitates an
-older device: phase `rehearsal`, Go live/Rehearsal restart and `stop` stops the service.
+older device: phase `rehearsal`, Go live/Rehearsal restart and `stop` stops the service. `-recording manual` (or
+`off`, `with_output`) gives it the local recording and its capability (`cloudrec.go`): REC from the app, Go live with
+`with_output`, the time and the room going down, and the disk as a word in `<state>.disk` (`ready`, `low`, `full`,
+`none`, `checking`, `unsupported`…; `-rec-disk` without the file, `-rec-power-lost` starts after a power cut).
 
 **Deviations from the contract** (the most conservative ones; to be confirmed in `ENCODER_CLOUD.md`):
 1. The script's thumbnail branch works **always** (0.2 fps), not only with `watch`: `gst-launch` cannot

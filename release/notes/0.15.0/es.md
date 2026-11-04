@@ -1,0 +1,1 @@
+- Nuevo: con el codificador vinculado a tu cuenta de EnhancedIRL, la app enseña la grabación local (si está grabando, cuánto lleva y cuánto espacio le queda al disco) y te deja grabar o parar desde allí. El modo y la calidad se siguen eligiendo en el codificador.

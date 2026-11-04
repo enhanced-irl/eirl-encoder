@@ -1,0 +1,1 @@
+- Nouveau : avec l'encodeur lié à votre compte EnhancedIRL, l'application affiche l'enregistrement local (s'il enregistre, depuis combien de temps et la place restante sur le disque) et permet de le lancer ou de l'arrêter. Le mode et la qualité se choisissent toujours sur l'encodeur.

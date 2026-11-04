@@ -14,6 +14,7 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/cloud"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/config"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/i18n"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/mixer"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/network"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/service"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/uplinks"
@@ -317,6 +318,8 @@ func (d *CloudDevice) Action(ctx context.Context, name, password string) error {
 		}
 		d.Srv.Log.Warn("restarting the board on EnhancedIRL's order")
 		return d.Rebooter.Reboot(ctx)
+	case "record_start", "record_stop":
+		return d.record(ctx, name == "record_start")
 	case "set_local_password":
 		err := d.Srv.Auth.SetPassword(password)
 		if ref, ok := passwordError(err); ok {
@@ -328,6 +331,32 @@ func (d *CloudDevice) Action(ctx context.Context, name, password string) error {
 		return err
 	}
 	return d.actionError("unknown_action", "common.unknown_action")
+}
+
+// record: REC from the app, the engine's record command like the screen's REC button and PUT /record (RECORDING.md
+// §6.8). The engine's refusals keep their code (disabled, no_disk, disk_full, unsupported), with the message in the
+// device language.
+func (d *CloudDevice) record(ctx context.Context, on bool) error {
+	if d.Srv.Mixer == nil {
+		return d.actionError("unsupported", "mixer.disabled")
+	}
+	err := d.Srv.Mixer.Do(ctx, mixer.Command{Cmd: "record", On: &on})
+	var ce *mixer.CommandError
+	switch {
+	case err == nil:
+		d.Srv.Log.Info("recording", "on", on, "via", "cloud")
+		return nil
+	case errors.Is(err, mixer.ErrOff):
+		return d.actionError("mixer_off", "mixer.off")
+	case errors.As(err, &ce) && ce.Code == "unknown_command": // an engine older than the recording
+		return d.actionError("unsupported", mixerErrorKey("record", ce.Code))
+	case errors.As(err, &ce) && ce.Code == "timeout":
+		return d.actionError("timeout", "mixer.timeout")
+	case errors.As(err, &ce):
+		return d.actionError(ce.Code, mixerErrorKey("record", ce.Code))
+	}
+	d.Srv.Log.Error("mixer", "cmd", "record", "err", err)
+	return d.actionError("mixer_error", "mixer.unreachable")
 }
 
 // setOutput: Start (on) or Stop streaming (off), like the local web's buttons (PUT /output with apply
@@ -498,6 +527,20 @@ func CloudStatus(st Status, now time.Time) cloud.EncoderStatus {
 	if p := st.System.Power; p != nil {
 		out.System.Power = &cloud.StatusPower{InMw: p.InMw, InMv: p.InMv}
 	}
+	if st.Mixer != nil {
+		out.Recording = cloudRecording(st.Mixer.Record)
+	}
 	out.Normalize()
 	return out
+}
+
+// cloudRecording: the engine's record state in short (ENCODER_CLOUD.md §14): no file name, no disk label, model or
+// size. nil with an engine without the recording's settings (older than 0.12.0's).
+func cloudRecording(r *mixer.Record) *cloud.StatusRecording {
+	if r == nil || r.Setting == "" || r.Quality == "" {
+		return nil
+	}
+	return &cloud.StatusRecording{Setting: r.Setting, Quality: r.Quality, Mode: r.Mode, State: r.State, Reason: r.Reason,
+		ElapsedS: r.ElapsedS, DroppedS: r.DroppedS,
+		Disk: cloud.StatusRecordingDisk{State: r.Disk.State, MinutesLeft: r.Disk.MinutesLeft}}
 }

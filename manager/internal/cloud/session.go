@@ -101,6 +101,7 @@ type session struct {
 	// Only touched by the main goroutine (run)
 	lastPhase   string
 	lastOutput  string
+	lastRecord  string // recordingKey of the last snapshot sent
 	lastUplinks map[string]bool
 	watchUntil  time.Time
 	lastThumbAt time.Time
@@ -357,6 +358,16 @@ var phaseKinds = map[string]bool{
 	"signal_lost": true, "waiting_signal": true, "signal": true, "mode_changed": true,
 	"signal_unsupported": true, "pipeline_exit": true, "pipeline_error": true, "rehearsal": true,
 	"srt_target": true, "device_missing": true, "device_lost": true, "device": true,
+	// the local recording (RECORDING.md §6.8): REC, a recording that starts, stops or fails, a power cut's at start
+	"record_toggled": true, "record_started": true, "record_stopped": true, "record_failed": true, "power_lost": true,
+}
+
+// recordingKey: what of the recording, changed, sends a snapshot right away (not the time or the room going down).
+func recordingKey(r *StatusRecording) string {
+	if r == nil {
+		return ""
+	}
+	return r.Setting + "/" + r.Mode + "/" + r.State + "/" + r.Reason + "/" + r.Disk.State
 }
 
 func (s *session) watching() bool { return !s.watchUntil.IsZero() && time.Now().Before(s.watchUntil) }
@@ -399,8 +410,10 @@ func (s *session) sendStatus(force bool) (string, bool) {
 		st.At = time.Now().UTC()
 	}
 	prev := s.lastPhase
-	// Also a change in how the output is doing (connecting → streaming → failure): the app shows it right away
-	changed := prev != st.Phase || s.lastOutput != st.OutputState.State
+	// Also a change in how the output is doing (connecting → streaming → failure) or in the recording (REC, a stop by
+	// itself, a disk): the app shows it right away
+	rec := recordingKey(st.Recording)
+	changed := prev != st.Phase || s.lastOutput != st.OutputState.State || s.lastRecord != rec
 	if !force && !changed {
 		return st.Phase, false
 	}
@@ -411,6 +424,7 @@ func (s *session) sendStatus(force bool) (string, bool) {
 	}
 	s.lastPhase = st.Phase
 	s.lastOutput = st.OutputState.State
+	s.lastRecord = rec
 	if prev != "" && prev != st.Phase {
 		switch {
 		case st.Phase == PhaseStreaming:
@@ -620,7 +634,8 @@ func fieldNames(fe map[string]string) []string {
 	return out
 }
 
-var actions = map[string]bool{"start": true, "stop": true, "rehearsal": true, "restart": true, "reboot": true, "set_local_password": true}
+var actions = map[string]bool{"start": true, "stop": true, "rehearsal": true, "restart": true, "reboot": true, "set_local_password": true,
+	"record_start": true, "record_stop": true}
 
 func (s *session) action(ctx context.Context, m inbound) {
 	c := s.c

@@ -67,7 +67,10 @@ func main() {
 		"Change the file while it runs to plug another one in, remove it to pull the disk out. The first word: exfat, fat32 or ext4 (ready), "+
 		"ntfs or small (unsupported), blank (unformatted), readonly (error); then any of dirty, another (a second disk too), low (2 min "+
 		"of room), full (no room), slow (disk_slow while recording), checking (stays checking). Eject and Format work from the web")
-	recPowerLost := flag.Bool("rec-power-lost", false, "local mode: the engine starts as after a power cut while recording (record.reason power_lost)")
+	recPowerLost := flag.Bool("rec-power-lost", false, "the engine starts as after a power cut while recording (record.reason power_lost)")
+	recording := flag.String("recording", "", "cloud mode: the local recording's REC_MODE (off, manual or with_output) and its capability; empty = a device without it. "+
+		"The disk is a word in <state>.disk, read every second (ready, low, full, none, checking, unsupported, unformatted, error, ejected)")
+	recDisk := flag.String("rec-disk", "ready", "cloud mode with -recording: the disk while <state>.disk does not exist")
 	flag.Parse()
 
 	var h slog.Handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
@@ -109,6 +112,18 @@ func main() {
 		Capabilities: []string{cloud.CapSRTLA, cloud.CapABR, cloud.CapEDID, cloud.CapThumbnail, cloud.CapRTMP, cloud.CapRTMPS,
 			cloud.CapRIST, cloud.CapUDP, cloud.CapH265, cloud.CapDestinations},
 	}
+	switch *recording {
+	case "":
+	case "off", "manual", "with_output":
+		rec, err := newSimRec(*recording, *recDisk, *statePath+".disk", *recPowerLost, log)
+		if err != nil {
+			fail(log, "-rec-disk", err)
+		}
+		dev.rec = rec
+		dev.info.Capabilities = append(dev.info.Capabilities, cloud.CapRecording)
+	default:
+		fail(log, "-recording", fmt.Errorf("%q: off, manual or with_output", *recording))
+	}
 	cl := &cloud.Client{
 		APIBase: *apiBase, AppBase: *appBase, State: &cloud.StateFile{Path: *statePath, AllowHTTP: true},
 		Identity: &cloud.IdentityFile{Path: *identityPath},
@@ -126,6 +141,7 @@ func main() {
 	}
 
 	go dev.run(ctx)
+	go dev.runRec(ctx)
 	go cl.Run(ctx)
 
 	if cl.View().State != "linked" {

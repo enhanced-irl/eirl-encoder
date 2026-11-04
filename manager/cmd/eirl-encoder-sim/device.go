@@ -41,6 +41,8 @@ type simDevice struct {
 	startDelay time.Duration
 	// connectDelay: how long the output takes to connect after Stream (F3: ~2 s on the board)
 	connectDelay time.Duration
+	// rec: the local recording (-recording, cloudrec.go); nil = a device without it
+	rec *simRec
 
 	mu        sync.Mutex
 	cfg       config.Settings     // the active destination flattened + the global keys, like engine.env
@@ -179,7 +181,47 @@ func (d *simDevice) Status(context.Context) cloud.EncoderStatus {
 		}
 		st.Uplinks = append(st.Uplinks, u)
 	}
+	if d.rec != nil && d.svc == "active" { // like the board: the block comes with the engine's state, the engine running
+		st.Recording = d.rec.status(now)
+	}
 	return st
+}
+
+// runRec: the recording's disk from its control file, and a journal line when the recording changes on its own (a
+// disk pulled out, full), so the client sends the snapshot right away like the engine's record events.
+func (d *simDevice) runRec(ctx context.Context) {
+	if d.rec == nil {
+		return
+	}
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	last := ""
+	for {
+		now := time.Now()
+		d.rec.poll(now)
+		d.mu.Lock()
+		active := d.svc == "active"
+		d.mu.Unlock()
+		key := "stopped"
+		if active {
+			key = recKey(d.rec.status(now))
+		}
+		if key != last {
+			if last != "" {
+				d.journal("record_toggled", "[mixer] event=record_toggled "+key)
+			}
+			last = key
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func recKey(r *cloud.StatusRecording) string {
+	return r.Mode + "/" + r.State + "/" + r.Reason + "/" + r.Disk.State
 }
 
 func (d *simDevice) Reported() (cloud.ReportedConfig, error) {
@@ -251,6 +293,9 @@ func (d *simDevice) Action(ctx context.Context, name, password string) error {
 			d.mu.Unlock()
 			return &cloud.ActionError{Code: "no_destination", Message: i18n.Msg(i18n.EN, "cloud.no_destination")}
 		}
+		if d.rec != nil {
+			d.rec.output(out == "on", time.Now()) // with_output: Go live records too, Stop streaming stops it
+		}
 		d.cfg = next
 		svc, same := d.svc, d.sameRun(next, d.running)
 		hot := !d.legacy && svc == "active" && same && next.Output != d.running.Output
@@ -278,6 +323,11 @@ func (d *simDevice) Action(ctx context.Context, name, password string) error {
 			time.Sleep(3 * time.Second)
 			d.restart("start")
 		}()
+	case "record_start", "record_stop":
+		if d.rec == nil {
+			return &cloud.ActionError{Code: "unknown_action", Message: i18n.Msg(i18n.EN, "common.unknown_action")}
+		}
+		return d.rec.set(name == "record_start", time.Now())
 	case "set_local_password":
 		if len(password) < auth.MinPasswordLen || len(password) > auth.MaxPasswordLen {
 			return &cloud.ActionError{Code: "validation", Message: fmt.Sprintf("between %d and %d characters", auth.MinPasswordLen, auth.MaxPasswordLen)}
@@ -343,6 +393,9 @@ func (d *simDevice) sameRun(a, b config.Settings) bool {
 // restart: activating for 2 s, then active with the saved config (or failed if it is invalid:
 // streaming without a destination).
 func (d *simDevice) restart(kind string) {
+	if d.rec != nil {
+		d.rec.engineStopped(time.Now()) // restarting the engine stops a recording (D6: it is never resumed)
+	}
 	d.mu.Lock()
 	d.svc, d.since = "activating", time.Now()
 	if kind == "restart" {

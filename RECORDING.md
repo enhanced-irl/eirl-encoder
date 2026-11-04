@@ -1,5 +1,6 @@
-> **Status:** RELEASED in 0.12.0 (Oct 28): R1-R4 and R6's release; the cloud's view (D8) and a power cut by the cable still to do
-> **Updated:** 2026-10-28
+> **Status:** RELEASED in 0.12.0 (Oct 28): R1-R4 and R6's release. The cloud (D8: state and REC from the app, §6.8) done
+> on Nov 4, for the next release; a power cut by the cable still to do
+> **Updated:** 2026-11-04
 
 # Local recording to a USB disk
 
@@ -346,6 +347,28 @@ The simulator (`cmd/eirl-encoder-sim`) gets what the web needs: the `record` com
 bitrate, free space going down), `with_output` on Go live, and a storage helper (its state file and eject/format)
 with a disk that can be plugged and pulled.
 
+### 6.8 The cloud (D8, Nov 4)
+
+The contract is `ENCODER_CLOUD.md` §14 (devops). The app's encoder page shows the recording and can start and stop it;
+the mode and the quality stay on the device (the web or the screen): they do not travel in `config.set`, so devices
+before it reject nothing.
+
+- `hello.capabilities` gains `recording`, after the ones the cloud already knows (it keeps the first 16 before
+  filtering). This app always announces it; the block below only comes with the engine's record state.
+- `status.recording`: `setting`, `quality`, `mode`, `state`, `reason`, `elapsedS`, `droppedS` and `disk` with only
+  `state` and `minutesLeft` (`api.cloudRecording`). Never the file's name or the disk's label, model or size: the
+  panel does not need them, and the privacy policy lists what the device sends. Absent with an engine before
+  `setting`/`quality` or without the mixer.
+- A change of the recording's setting, mode, state, reason or disk sends `status` at once, like a phase change: the
+  engine's `record_toggled`, `record_started`, `record_stopped`, `record_failed` and `power_lost` journal lines trigger
+  the check, and the snapshot goes when its `recordingKey` changed (not for the time or the room going down).
+- Actions `record_start` and `record_stop` (`CloudDevice.record`): the engine's `record`, as the screen's REC and
+  `PUT /record`. The result's code is the engine's (`disabled`, `no_disk`, `disk_full`, `unsupported`), `unsupported`
+  for an engine older than the recording, `mixer_off` with the engine stopped, `timeout`, `mixer_error` when its
+  socket fails, any other engine code as it is; the message in the device language. `record_stop` also stops a recording Go live started (`with_output`), like REC on the screen.
+- The simulator's cloud mode has it (`-recording`, `cmd/eirl-encoder-sim/cloudrec.go`), to try the app without the
+  board.
+
 ## 7. Phases
 
 | Phase | What | State |
@@ -356,7 +379,7 @@ with a disk that can be plugged and pulled.
 | R3 | The app and the web: keys, API, card, translations | done (Oct 28, §6), tried in the simulator and on the board; released in 0.12.0 |
 | R4 | The screen: header indicator, REC button, Settings › Recording | done (Oct 28, §6.7), seen in captures and on the board; released in 0.12.0 |
 | R5 | Robustness on the board | nearly done (Oct 24 and 28, §8.1-§8.3): a cable power cut and the owner's editors left |
-| R6 | Release, and the cloud | released in 0.12.0 on Oct 28: a security review of the helper first (§4.4), then the update tried on the test board from 0.11.1 (test builds, the system layer with the five packages, ~1 min, no restart), and the test board updated itself from GitHub. The cloud (D8) still to do |
+| R6 | Release, and the cloud | released in 0.12.0 on Oct 28: a security review of the helper first (§4.4), then the update tried on the test board from 0.11.1 (test builds, the system layer with the five packages, ~1 min, no restart), and the test board updated itself from GitHub. The cloud (D8, §6.8) on Nov 4 |
 
 ## 8. To test on the board (R5)
 

@@ -65,6 +65,8 @@ const (
 	CapUDP          = "udp"
 	CapH265         = "h265"
 	CapDestinations = "destinations"
+	// Local recording to a USB disk (RECORDING.md §6.8): status.recording and the record_start/record_stop actions
+	CapRecording = "recording"
 )
 
 // Journal events forwarded to the cloud (§4.1, the `kind`s of service.ParseJournal) and the ones
@@ -101,7 +103,27 @@ type EncoderStatus struct {
 	Bitrate        *StatusBitrate `json:"bitrate"`
 	System         StatusSystem   `json:"system"`
 	Network        StatusNetwork  `json:"network"`
-	At             time.Time      `json:"at"`
+	// Recording: the local recording in short (RECORDING.md §6.8); absent without the capability or the engine's record
+	Recording *StatusRecording `json:"recording,omitempty"`
+	At        time.Time        `json:"at"`
+}
+
+// StatusRecording: the engine's record state without the file's name or the disk's label, model and size: what the
+// app's panel shows (ENCODER_CLOUD.md §14).
+type StatusRecording struct {
+	Setting  string              `json:"setting"` // off | manual | with_output
+	Quality  string              `json:"quality"` // standard | high | max | efficient
+	Mode     string              `json:"mode"`    // on | off: REC asked for
+	State    string              `json:"state"`   // off | starting | on | error
+	Reason   string              `json:"reason,omitempty"`
+	ElapsedS *int                `json:"elapsedS,omitempty"`
+	DroppedS *int                `json:"droppedS,omitempty"`
+	Disk     StatusRecordingDisk `json:"disk"`
+}
+
+type StatusRecordingDisk struct {
+	State       string `json:"state"` // none | checking | ready | unsupported | unformatted | error | ejected
+	MinutesLeft *int   `json:"minutesLeft,omitempty"`
 }
 
 // StatusOutput: how the output is doing (§13.3): off | connecting | on | error, and the reason (closed list)

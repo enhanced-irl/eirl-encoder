@@ -324,7 +324,9 @@ Local recording (RECORDING.md §6): `-disk exfat` plugs a fake USB disk at start
 `<data>/disk` plugs, changes or pulls it (`exfat`, `fat32`, `ext4`, `ntfs`, `small`, `blank`, `readonly`, plus
 `dirty`, `another`, `full`, `low`, `slow`, `checking`; no file = no disk), and `-rec-power-lost` starts with a
 recording a power cut stopped. The fake recorder and helper follow the engine's rules (`with_output`, eject and format
-refused while recording, the FAT32 split); `eirl-encoder-sim -h` lists them.
+refused while recording, the FAT32 split); `eirl-encoder-sim -h` lists them. In cloud mode, `-recording manual` (or
+`with_output`, `off`) adds the recording as the app's panel sees it (RECORDING.md §6.8), with the disk as a word in
+`<state>.disk` (`echo none > /tmp/sim1.json.disk` pulls it out).
 
 Tests: `internal/i18n` (catalog completeness, negotiation, refs), `internal/device` (migration, hostname, steps,
 setup code, commands passed to timedatectl/hostnamectl, zones), `internal/slots` (validation, duplicates, file),

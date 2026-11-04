@@ -1,0 +1,1 @@
+- New: with the encoder linked to your EnhancedIRL account, the app shows the local recording (whether it is recording, for how long and how much room the disk has left) and lets you start or stop it from there. The mode and the quality are still chosen on the encoder.
