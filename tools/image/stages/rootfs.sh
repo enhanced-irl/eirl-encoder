@@ -84,11 +84,12 @@ mount_all
 printf '# eirl-encoder image: the NVIDIA library paths (as nvfb-early.sh sets them at the first boot)\n/usr/lib/aarch64-linux-gnu/tegra\n/usr/lib/aarch64-linux-gnu/tegra-egl\n' > "$R/etc/ld.so.conf.d/00-eirl-tegra.conf"
 in_root ldconfig
 
-step "the B01 DTB with the TC358743, extlinux (frozen with the base: the system layer never writes /boot)"
+step "the B01 DTB with the TC358743, extlinux (frozen with the base; the layer adds the dual DTB, UPDATES.md §12.11)"
 # Our modules and firmware are the system layer's (UPDATES.md §12), installed with the bundle below
 install -m 0644 "/in/kernel/$DTB" "$R/boot/$DTB"
 # Our FDT in "primary" too: the nvidia-l4t-kernel postinst forces DEFAULT primary (IMAGE.md §3.3).
-# tc358743 is the DEFAULT the bundle's splash copies into its own entry.
+# tc358743 is the DEFAULT the bundle's splash copies into its own entry, which boots the dual DTB the system layer
+# installs; these two keep the base's, for U-Boot to fall back to.
 APPEND='${cbootargs} quiet root=/dev/mmcblk0p1 rw rootwait rootfstype=ext4 console=ttyS0,115200n8 console=tty0 fbcon=map:0 net.ifnames=0'
 cat > "$R/boot/extlinux/extlinux.conf" <<EOF
 TIMEOUT 10

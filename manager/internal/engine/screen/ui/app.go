@@ -82,7 +82,7 @@ type AppAction struct {
 //	dest_secrets  GET /destinations/{ID}/secrets → AppSnapshot.DestSecrets (with its ID; until DropSecrets)
 //	restart       POST /service/restart (apply what is saved)
 //	uplink        PUT /uplinks/{ID}  Body: disabled
-//	input_save    PUT /input  Body: source, device, format, mode, audio, edidPreferred, apply
+//	input_save    PUT /input  Body: source, device, format, mode, audio, edidPreferred, hdmiWired, apply
 //	sources_scan  GET /sources → AppSnapshot.Sources
 //	cloud_unlink  DELETE /cloud (also cancels a pairing)
 //	password      PUT /password  Secrets: current, new
@@ -491,6 +491,8 @@ type InputInfo struct {
 	Audio         string // auto | none | i2s | alsa:<card>
 	EDIDPreferred string
 	EDIDActive    string
+	HDMIWired     string // the board with the HDMI audio and reset wires: "" (automatic) | cam0 | cam1
+	HDMIChips     int    // the board's TC358743 chips: the field to choose HDMIWired shows with two
 	ActiveState   string // starting | waiting_device | ready | ""
 	ActiveSource  string // what runs: hdmi | usb | test ("" an older app)
 	ActiveName    string

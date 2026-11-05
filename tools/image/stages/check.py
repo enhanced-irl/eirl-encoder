@@ -417,7 +417,16 @@ def main():
     fdts = re.findall(r"(?m)^\s*FDT (\S+)", ext)
     appends = re.findall(r"(?m)^\s*APPEND .*", ext)
     ok("extlinux entries primary, tc358743, eirl-splash", set(labels) == {"primary", "tc358743", "eirl-splash"}, ", ".join(labels))
-    ok("every extlinux entry boots our DTB", len(fdts) == len(labels) >= 3 and all(f.endswith(dtb) for f in fdts))
+    # The dual DTB comes with the system layer, pinned in system/modules.lock; only the splash's entry boots it, so
+    # U-Boot falls back to the base's in the others (UPDATES.md §12.11)
+    dual = "tegra210-p3448-0000-p3449-0000-b00-tc358743-dual.dtb"
+    pinned_dual = re.search(r"(?m)^([0-9a-f]{64})  %s$" % re.escape(dual), open(os.path.join(a.repo, "system/modules.lock")).read())
+    ok("the dual DTB is the layer's (system/modules.lock)", pinned_dual is not None and os.path.exists(os.path.join(R, "boot", dual))
+       and sha256_file(os.path.join(R, "boot", dual)) == pinned_dual.group(1))
+    by_label = dict(zip(labels, fdts)) if len(fdts) == len(labels) else {}
+    ok("primary and tc358743 boot the base's DTB, eirl-splash the dual one",
+       by_label.get("primary") == "/boot/" + dtb and by_label.get("tc358743") == "/boot/" + dtb
+       and by_label.get("eirl-splash") == "/boot/" + dual, ", ".join("%s=%s" % kv for kv in sorted(by_label.items())))
     ok("every APPEND has root=/dev/mmcblk0p1", len(appends) == len(labels) and all("root=/dev/mmcblk0p1" in l for l in appends))
     ok("nv_boot_control.conf", os.path.exists(os.path.join(R, "etc/nv_boot_control.conf")))
     fm = open(os.path.join(R, "usr/lib/eirl-image/firmware-mode")).read().strip()

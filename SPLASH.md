@@ -1,5 +1,5 @@
 > **Status:** DEPLOYED on the test board and checked on screen (Oct 12). The app's `install.sh` installs it. Two minor tests remain (§6)
-> **Updated:** 2026-10-15
+> **Updated:** 2026-11-05
 
 # EnhancedIRL boot splash screen
 
@@ -66,6 +66,9 @@ it hands the screen back to the text console, and nothing of it can be reused in
   4.9.337 and on the board). The messages still go to the serial console and the journal. It makes a backup
   (`extlinux.conf.bak-<date>-splash`), writes atomically and saves in
   `/var/lib/eirl-splash/extlinux.prev` the previous DEFAULT and TIMEOUT so it can be undone.
+  Since Nov 5 its `FDT` is the dual DTB (a TC358743 on CAM0, CAM1 or both) instead of the base's when the system layer
+  has installed it (its `state.json` owns the file with its sha256) and the default entry boots the base's DTB. The
+  other entries keep the base's: U-Boot falls back to them if it cannot load ours (UPDATES.md §12.11).
 - **`eirl-splash`** (Go, `manager/cmd/eirl-splash` + `manager/internal/splash`): draws on `/dev/fb0`
   through `mmap`.
   - It reads the mode and the pixel format with `FBIOGET_*SCREENINFO` (on the board: 1024×600, 32 bpp,

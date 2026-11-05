@@ -96,7 +96,7 @@ func (s *Server) putInput(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, 400, "bad_request", "common.bad_body")
 		return
 	}
-	if p.Source == nil && p.Device == nil && p.Format == nil && p.Mode == nil && p.Audio == nil && p.EDIDPreferred == nil {
+	if p.Source == nil && p.Device == nil && p.Format == nil && p.Mode == nil && p.Audio == nil && p.EDIDPreferred == nil && p.HDMIWired == nil {
 		fieldError(w, r, "source", "common.nothing_to_change")
 		return
 	}

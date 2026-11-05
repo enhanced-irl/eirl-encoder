@@ -1,0 +1,3 @@
+- Nuevo: la placa HDMI puede ir en cualquiera de los dos conectores de cámara (CAM0 o CAM1). Con una placa en cada uno tienes dos entradas HDMI, «HDMI 1» y «HDMI 2» (la segunda sin audio propio), y eliges cuál lleva el audio en Entrada, en la web y en Ajustes › Fuentes de la pantalla. Tras actualizar, reinicia el codificador para que tenga efecto.
+- Nuevo: si has montado el cable de reset de la placa HDMI (está en la guía de hardware del repositorio), el codificador lo usa al arrancar y para recuperar el audio HDMI cuando se queda bloqueado.
+- Mejora: las miniaturas de las fuentes en la pantalla táctil se ven fluidas. Antes, algunas cámaras USB se veían a saltos, con menos de la mitad de los fotogramas.

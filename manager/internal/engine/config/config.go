@@ -17,11 +17,12 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/tcchip"
 )
 
 // Paths and defaults the launcher hard-codes.
@@ -40,6 +41,8 @@ const (
 var Whitelist = []string{
 	"SRT_URL", "SRT_MODE", "SRT_LATENCY", "SRT_STREAMID", "SRT_PASSPHRASE", "VBITRATE", "ABITRATE", "OUTPUT",
 	"ABR", "VBITRATE_MIN", "EDID_PREFERRED", "SOURCE", "VIDEO_DEVICE", "VIDEO_FORMAT", "VIDEO_MODE", "AUDIO_SOURCE",
+	// Which HDMI board has the audio and reset wires, when there are two (DEVELOPMENT.md)
+	"HDMI_WIRED",
 	// The output protocols and encoding settings (OUTPUTS.md §3)
 	"OUTPUT_PROTOCOL", "OUTPUT_URL", "OUTPUT_KEY", "OUTPUT_PASSPHRASE", "OUTPUT_USER", "OUTPUT_PASSWORD",
 	"RIST_PROFILE", "OUTPUT_LATENCY", "OUTPUT_VCODEC", "OUTPUT_SIZE", "OUTPUT_FPS",
@@ -83,8 +86,10 @@ type Options struct {
 	ReadFile func(string) ([]byte, error)
 	// Executable is the launcher's `[ -x path ]`, used for SRTLA_BIN and SRTLA_RS_BIN (access(2) with X_OK).
 	Executable func(string) bool
-	// FindVDEV returns the TC358743 capture node when VDEV is empty (sysfs scan, sh:142-147).
+	// FindVDEV returns the TC358743 capture node when VDEV is empty (the first chip's, tcchip).
 	FindVDEV func() string
+	// FindChips lists the board's TC358743s (tcchip.Find): the default of TC_I2C is the wired one's bus.
+	FindChips func() []tcchip.Chip
 	// ScriptDir replaces DefaultScriptDir (the launcher's `dirname $0`).
 	ScriptDir string
 }
@@ -124,7 +129,10 @@ type Config struct {
 	ProbeBin         string // PROBE_BIN (/usr/local/bin/eirl-encoderd)
 
 	EDIDPreferred string // EDID_PREFERRED: 1080p30 | 1080p50 | 720p60 (1080p30)
-	EDID          string // EDID (<ScriptDir>/edid-<EDID_PREFERRED>-lpcm48k.bin)
+	// HDMIWired is HDMI_WIRED: the connector whose TC358743 has the I2S audio and the reset pin wired,
+	// "" (auto: the only chip, or CAM0's with two) | cam0 | cam1 (tcchip.Wired)
+	HDMIWired string
+	EDID      string // EDID (<ScriptDir>/edid-<EDID_PREFERRED>-lpcm48k.bin)
 
 	ALSACard         string // ALSA_CARD (tegrasndt210ref)
 	ALSAAdmaif       int    // ALSA_ADMAIF (2)
@@ -132,7 +140,7 @@ type Config struct {
 	DeviceTimeout    int    // DEVICE_TIMEOUT s (SIGNAL_TIMEOUT); single-source only, validated
 	WatchdogMs       int    // WATCHDOG (3000); single-source only, validated
 	Overlay          bool   // OVERLAY (1); single-source only, validated
-	TCI2C            int    // TC_I2C (8)
+	TCI2C            int    // TC_I2C (the wired chip's bus, tcchip; 8 without a chip)
 	AudioLockTimeout int    // AUDIO_LOCK_TIMEOUT s (10)
 	HWResetInterval  int    // HW_RESET_INTERVAL s (300)
 	StateDir         string // STATE_DIR (/var/lib/eirl-engine)
@@ -383,7 +391,8 @@ func Load(o Options) (*Config, error) {
 		"ALSA_ADMAIF":        e.or("ALSA_ADMAIF", "2"),
 		"SIGNAL_TIMEOUT":     e.or("SIGNAL_TIMEOUT", "60"),
 		"WATCHDOG":           e.or("WATCHDOG", "3000"),
-		"TC_I2C":             e.or("TC_I2C", "8"),
+		"TC_I2C":             e.or("TC_I2C", ""),
+		"HDMI_WIRED":         e.or("HDMI_WIRED", ""),
 		"AUDIO_LOCK_TIMEOUT": e.or("AUDIO_LOCK_TIMEOUT", "10"),
 		"HW_RESET_INTERVAL":  e.or("HW_RESET_INTERVAL", "300"),
 		"STATE_DIR":          e.or("STATE_DIR", "/var/lib/eirl-engine"),
@@ -464,6 +473,13 @@ func Load(o Options) (*Config, error) {
 	if raw["VDEV"] == "" {
 		raw["VDEV"] = o.FindVDEV()
 	}
+	if raw["TC_I2C"] == "" {
+		// The chip whose audio the watcher reads; an invalid HDMI_WIRED is reported by validate
+		raw["TC_I2C"] = "8"
+		if tc, ok := tcchip.Wired(o.FindChips(), raw["HDMI_WIRED"]); ok {
+			raw["TC_I2C"] = strconv.Itoa(tc.Bus)
+		}
+	}
 
 	if err := validate(raw, o); err != nil {
 		return nil, err
@@ -502,6 +518,9 @@ func validate(raw map[string]string, o Options) error {
 	re("RES", reOptSize)
 	re("LIVE_SIZE", reSize)
 	re("EDID_PREFERRED", reEDID)
+	if err == nil && !tcchip.ValidWired(raw["HDMI_WIRED"]) {
+		err = invalid("HDMI_WIRED", "cam0 or cam1")
+	}
 	if err != nil {
 		return err
 	}
@@ -606,6 +625,7 @@ func (c *Config) fill(raw map[string]string) {
 	c.ProbeBin = raw["PROBE_BIN"]
 
 	c.EDIDPreferred = raw["EDID_PREFERRED"]
+	c.HDMIWired = raw["HDMI_WIRED"]
 	c.EDID = raw["EDID"]
 	c.ALSACard = raw["ALSA_CARD"]
 	c.ALSAAdmaif = num("ALSA_ADMAIF")
@@ -737,8 +757,12 @@ func (o Options) withDefaults() Options {
 	if o.Executable == nil {
 		o.Executable = func(p string) bool { return access(p, accessX) }
 	}
+	if o.FindChips == nil {
+		o.FindChips = func() []tcchip.Chip { return tcchip.Find("") }
+	}
 	if o.FindVDEV == nil {
-		o.FindVDEV = findTC358743
+		chips := o.FindChips
+		o.FindVDEV = func() string { return firstTC358743(chips()) }
 	}
 	if o.ScriptDir == "" {
 		o.ScriptDir = DefaultScriptDir
@@ -746,13 +770,11 @@ func (o Options) withDefaults() Options {
 	return o
 }
 
-// findTC358743 is sh:142-147: the first /sys/class/video4linux/video*/name (glob order) that
-// contains "tc358743", else /dev/video0.
-func findTC358743() string {
-	names, _ := filepath.Glob("/sys/class/video4linux/video*/name")
-	for _, n := range names {
-		if b, err := os.ReadFile(n); err == nil && strings.Contains(string(b), "tc358743") {
-			return "/dev/" + filepath.Base(filepath.Dir(n))
+// firstTC358743: the capture node of the first TC358743 (CAM0's with two), else /dev/video0 (sh:142-147).
+func firstTC358743(chips []tcchip.Chip) string {
+	for _, c := range chips {
+		if c.Video != "" {
+			return c.Video
 		}
 	}
 	return "/dev/video0"

@@ -565,6 +565,8 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir, frames string
 			p.InputPick("s_inp_mode")
 		case "settings-input-audio":
 			p.InputPick("s_inp_audio")
+		case "settings-input-wired":
+			p.InputPick("s_inp_wired")
 		case "settings-input-confirm":
 			p.InputEdit("", "MJPG|1920x1080@60", "", "")
 			p.InputConfirmApply()

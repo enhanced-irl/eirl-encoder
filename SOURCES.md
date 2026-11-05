@@ -1,5 +1,5 @@
 > **Status:** IN PROGRESS — **in `main` (MR !5)**, phase 0 measured (1080p60 over USB fits), installed and tested on the board on Oct 12 (hot unplugging too). Still missing: per-source A/V sync and a long test. Camera image settings (§7): released in v0.4.0. Plugging and unplugging while running, and the audio following the video slots (§8): released in v0.6.0. "NO SIGNAL" for a USB capture card without a signal (§9; the MS2109 by its flag, any other by its picture): in progress (Oct 21)
-> **Updated:** 2026-10-21
+> **Updated:** 2026-11-05
 
 # Encoder video sources (board HDMI, capture cards and USB cameras)
 
@@ -96,7 +96,8 @@ the state gains `input.active`, `signal.kind`, `signal.measuredFps`, `audio.stat
 
 ## 3. Tested (Oct 11, on the board, without a capture card)
 
-- `probe -list` against the real sysfs: the board's HDMI (`/dev/video0`) and its I2S audio; without USB,
+- `probe -list` against the real sysfs: the board's HDMI (its `vi-output` node; `hdmi2` too with a second TC358743)
+  and its I2S audio; without USB,
   exit code 3 ("wait"); a `VIDEO_DEVICE` with `..` → exit code 2.
 - Script with `SOURCE=usb` and no device: waits, `state` with `INPUT=waiting_device`, exits after
   `DEVICE_TIMEOUT` s.

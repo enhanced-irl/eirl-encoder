@@ -136,6 +136,9 @@ func TestFollowDefaultLinksAreTheSameDevice(t *testing.T) {
 	if got := DefaultLink("usb", "x;rm"); got != "" { // a card with an odd name: nothing
 		t.Errorf("odd card: %q", got)
 	}
+	if DefaultLink("hdmi-csi", "") != "i2s" || DefaultLink("hdmi-csi", NoI2S) != "" { // two chips: one without the I2S
+		t.Error("board HDMI default audio")
+	}
 	if got := DefaultLink("network", "net:cam2"); got != "net:cam2" { // new: its audio has its id
 		t.Errorf("network: %q", got)
 	}

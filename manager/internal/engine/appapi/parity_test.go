@@ -168,13 +168,16 @@ func TestParityReads(t *testing.T) {
 			map[string]any{"name": "wlan0", "kind": "wifi", "noInternet": true, "conflict": true, "rttMs": 70000, "sendKbps": 1,
 				"nakPerSec": 0, "bond": "active"}},
 		"input": map[string]any{"source": "usb", "device": "/dev/v4l/by-id/usb-Cam-video-index0", "format": "NV12",
-			"mode": "1920x1080@30", "audio": "alsa:Cam", "edidPreferred": "1080p30",
+			"mode": "1920x1080@30", "audio": "alsa:Cam", "edidPreferred": "1080p30", "hdmiWired": "cam1", "hdmiChips": 2,
 			"active": map[string]any{"state": "ready", "source": "usb", "name": "Cam Link", "format": "NV12", "mode": "1920x1080@30"}}})
 	d.PollStatus()
 	st := d.AppSnapshot().Status
 	if st == nil || !st.HasUplinks || len(st.Uplinks) != 2 || st.Uplinks[0].TxKbps != 2480 || !st.Uplinks[1].Conflict ||
 		st.Input.Source != "usb" || st.Input.Format != "NV12" || st.Input.Audio != "alsa:Cam" || st.Input.ActiveState != "ready" || st.Input.ActiveSource != "usb" {
 		t.Fatalf("%+v", st)
+	}
+	if st.Input.HDMIWired != "cam1" || st.Input.HDMIChips != 2 {
+		t.Errorf("the board with the HDMI audio: %q of %d chips", st.Input.HDMIWired, st.Input.HDMIChips)
 	}
 	// The sender's figures (SRTLA.md §9.4): all of them in range, or none (wlan0's RTT is out of range)
 	if u := st.Uplinks[0]; !u.HasStats || u.RTTMs != 57 || u.SendKbps != 2400 || u.NakPerSec != 0.2 || u.Bond != "stalled" ||

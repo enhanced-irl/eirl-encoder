@@ -39,6 +39,9 @@ type inputDraft struct {
 	Mode   string // usb: auto | <format>|<mode>
 	EDID   string // hdmi
 	Audio  string // auto | none | i2s | alsa:<card>
+	// Wired: the board with the HDMI audio and reset wires, auto | cam0 | cam1; only with two chips (WiredShown)
+	Wired      string
+	WiredShown bool
 }
 
 // norm blanks what the source does not use (it is not sent): a draft only differs from what is saved in what
@@ -55,10 +58,13 @@ func (d inputDraft) norm() inputDraft {
 }
 
 // body is PUT /input's body, the web's: source and audio (and apply); edidPreferred for the HDMI; device, format
-// and mode for a USB source.
+// and mode for a USB source; hdmiWired with two chips ("" = automatic).
 func (d inputDraft) body(apply bool) map[string]any {
 	kind, dev := splitSource(d.Source)
 	b := map[string]any{"source": kind, "audio": d.Audio, "apply": apply}
+	if d.WiredShown {
+		b["hdmiWired"] = strings.TrimPrefix(d.Wired, "auto")
+	}
 	switch kind {
 	case "hdmi":
 		b["edidPreferred"] = d.EDID
@@ -97,6 +103,8 @@ func init() {
 			b["s_inp_edid"] = rows[1]
 			b["s_inp_audio"] = rows[2]
 			b["s_inp_audio_up"] = rows[1] // a source without a second field (the test pattern): the audio goes up
+			b["s_inp_wired"] = rows[3]    // with two chips: the board with the HDMI audio
+			b["s_inp_wired_up"] = rows[2] // …up a row with the audio
 			aw := max(260, bottom.W*38/100)
 			vw := max(150, bottom.W/5)
 			b["s_inp_apply"] = Rect{bottom.X + bottom.W - aw, bottom.Y, aw, bottom.H}
@@ -146,6 +154,9 @@ func inputSaved(app *AppSnapshot) inputDraft {
 	}
 	if d.EDID == "" {
 		d.EDID = EDIDModes[0]
+	}
+	if in.HDMIChips >= 2 {
+		d.Wired, d.WiredShown = orAuto(in.HDMIWired), true
 	}
 	return d
 }
@@ -210,7 +221,7 @@ func catalogSource(app *AppSnapshot, v string) *SourceChoice {
 	for i := range app.Sources.Sources {
 		s := &app.Sources.Sources[i]
 		switch {
-		case kind == "hdmi" && s.Kind == "hdmi-csi", kind == "test" && s.Kind == "test":
+		case kind == "hdmi" && s.Kind == "hdmi-csi" && s.ID != "hdmi2", kind == "test" && s.Kind == "test":
 			return s
 		case kind == "usb" && id == "auto" && s.Kind == "usb" && s.Auto != nil:
 			return s
@@ -248,6 +259,9 @@ func (u *UI) sourceOpts(app *AppSnapshot) []pickOpt {
 		s := &app.Sources.Sources[i]
 		switch s.Kind {
 		case "hdmi-csi":
+			if s.ID == "hdmi2" {
+				continue // the input is the board HDMI of the single source: with two chips, HDMI 1
+			}
 			hdmi = true
 			out = append(out, pickOpt{ID: "hdmi", Title: u.sourceName("hdmi", s.Name)})
 		case "usb":
@@ -393,6 +407,13 @@ func (u *UI) audioOpts(app *AppSnapshot, d inputDraft) []pickOpt {
 	return withSaved(out, d.Audio, sprintf(tx.NotConnectedF, strings.TrimPrefix(d.Audio, "alsa:")))
 }
 
+// wiredOpts are the boards the HDMI audio and reset wires can go to: automatic (CAM0's) or either one by its name.
+func (u *UI) wiredOpts() []pickOpt {
+	tx := u.Tx.Input
+	return []pickOpt{{ID: "auto", Title: tx.WiredAuto, Sub: tx.WiredAutoSub},
+		{ID: "cam0", Title: "HDMI 1", Sub: "CAM0"}, {ID: "cam1", Title: "HDMI 2", Sub: "CAM1"}}
+}
+
 // withSaved adds the current value as its own choice if the list does not have it.
 func withSaved(opts []pickOpt, cur, title string) []pickOpt {
 	for _, o := range opts {
@@ -428,6 +449,14 @@ func inputMid(d inputDraft) string {
 	return ""
 }
 
+// wiredKey is the field of the board with the HDMI audio: under the audio, wherever the audio is.
+func wiredKey(d inputDraft) string {
+	if inputMid(d) == "" {
+		return "s_inp_wired_up"
+	}
+	return "s_inp_wired"
+}
+
 // inputKeys are the page's buttons on view.
 func (u *UI) inputKeys(app *AppSnapshot) []string {
 	if !inputReady(app) {
@@ -443,6 +472,9 @@ func (u *UI) inputKeys(app *AppSnapshot) []string {
 		keys = append(keys, "s_inp_edid", "s_inp_audio")
 	default:
 		keys = append(keys, "s_inp_audio_up")
+	}
+	if cur := u.inpShown(app); cur.WiredShown {
+		keys = append(keys, wiredKey(cur))
 	}
 	return append(keys, "s_inp_save", "s_inp_apply")
 }
@@ -473,6 +505,8 @@ func (u *UI) inputTouch(what string) bool {
 	case "s_inp_audio", "s_inp_audio_up":
 		d := u.inpShown(&app)
 		u.openPicker(tx.Audio, d.Audio, u.audioOpts(&app, d), func(u *UI, id string) { u.inpEdit().Audio = id })
+	case "s_inp_wired", "s_inp_wired_up":
+		u.openPicker(tx.Wired, u.inpShown(&app).Wired, u.wiredOpts(), func(u *UI, id string) { u.inpEdit().Wired = id })
 	case "s_inp_scan":
 		if app.Pending != "sources_scan" {
 			u.inp.scanAt = u.now().Add(-time.Millisecond) // results from now on are this scan's
@@ -523,7 +557,7 @@ func (u *UI) inputResult(app *AppSnapshot) *AppResult {
 
 // inputFields maps the app's field errors to the page's fields.
 var inputFields = map[string]string{"source": "source", "device": "source", "videoMode": "mode",
-	"videoFormat": "mode", "edidPreferred": "edid", "audio": "audio"}
+	"videoFormat": "mode", "edidPreferred": "edid", "audio": "audio", "hdmiWired": "wired"}
 
 // inputErrors are the last save's field errors: by the page's field, and the words of each (those of the
 // destination too: the whole configuration is saved at once, so a wrong destination stops the input from saving).
@@ -549,7 +583,7 @@ func (u *UI) inputErrors(app *AppSnapshot) (fields map[string]bool, words []stri
 		case ok:
 			fields[field] = true
 			msg = map[string]string{"source": tx.Source, "mode": tx.CaptureMode, "edid": tx.EDID,
-				"audio": tx.Audio}[field] + u.Tx.Sep + msg
+				"audio": tx.Audio, "wired": tx.Wired}[field] + u.Tx.Sep + msg
 		case k == "url":
 			msg = tx.NeedDest
 		default:
@@ -623,6 +657,11 @@ func (u *UI) drawInputPage(d *dc, app *AppSnapshot) {
 	}
 	u.field(d, audioKey, tx.Audio, optTitle(u.audioOpts(app, cur), cur.Audio), fieldOpt{chevron: true,
 		warn: errs["audio"], changed: cur.Audio != saved.Audio})
+	if cur.WiredShown {
+		last = wiredKey(cur)
+		u.field(d, last, tx.Wired, optTitle(u.wiredOpts(), cur.Wired), fieldOpt{chevron: true, warn: errs["wired"],
+			changed: cur.Wired != saved.Wired})
+	}
 	// Under the fields, what matters most first: the app's errors, the source's warnings, what runs now, the
 	// source's facts, then the hints (as many as fit, whole)
 	type para struct {
@@ -654,6 +693,9 @@ func (u *UI) drawInputPage(d *dc, app *AppSnapshot) {
 		ps = append(ps, para{tx.EDIDHint, false})
 	case "":
 		ps = append(ps, para{tx.TestSub, false})
+	}
+	if cur.WiredShown {
+		ps = append(ps, para{tx.WiredHint, false})
 	}
 	ps = append(ps, para{tx.MixerHint, false})
 	pg := lay.SettingsPage

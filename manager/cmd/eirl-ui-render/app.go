@@ -28,7 +28,8 @@ import (
 //	the test pattern's audio card gone) · settings-input-warn (a USB 2 card with warnings) · settings-input-edited ·
 //	settings-input-pick · settings-input-modes · settings-input-audio · settings-input-confirm (streaming: «Save and
 //	apply» waiting for its second tap) · settings-input-error (the app's field errors) · settings-input-saved ·
-//	settings-input-loading · settings-input-old · wizard-1-language · wizard-2-time · wizard-2-zones · wizard-3-network ·
+//	settings-input-loading · settings-input-old · settings-input-dual (two TC358743: the board with the HDMI audio,
+//	CAM1's saved) · settings-input-wired (its picker) · wizard-1-language · wizard-2-time · wizard-2-zones · wizard-3-network ·
 //	wizard-3-networks · wizard-3-network-ssid-kb · wizard-4-password · wizard-4-password-kb · wizard-4-password-again · wizard-4-password-set ·
 //	wizard-5-name · wizard-5-name-kb · wizard-6-cloud · wizard-6-cloud-pairing · wizard-6-cloud-linked · wizard-7-done
 
@@ -357,6 +358,11 @@ func inputVariant(variant, lang string, now time.Time, snap *ui.AppSnapshot) {
 		yes := true
 		snap.Status.Output = "on"
 		snap.Last = &ui.AppResult{What: "input_save", OK: true, Status: 200, Restarted: &yes, At: now.Add(time.Second)}
+	case "settings-input-dual", "settings-input-wired":
+		in.HDMIChips, in.HDMIWired, in.EDIDActive = 2, "cam1", in.EDIDPreferred
+		snap.Sources.Sources[0].Name = "HDMI 1"
+		snap.Sources.Sources = append(snap.Sources.Sources[:1], append([]ui.SourceChoice{{ID: "hdmi2", Kind: "hdmi-csi",
+			Name: "HDMI 2"}}, snap.Sources.Sources[1:]...)...)
 	case "settings-input-loading":
 		snap.Status, snap.StatusAPI, snap.Sources, snap.SourcesAPI = nil, ui.Unknown, nil, ui.Unknown
 	case "settings-input-old":

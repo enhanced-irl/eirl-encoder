@@ -130,6 +130,7 @@ func (e *Engine) logTimings() {
 		if d := e.scr.TakeTouchMax(); d > 0 {
 			kv = append(kv, "touch_max_ms", fmtMs(d))
 		}
+		kv = append(kv, e.tileTimings()...)
 	}
 	e.scrMu.Lock()
 	if e.mvBridge != nil {
@@ -139,6 +140,32 @@ func (e *Engine) logTimings() {
 	}
 	e.scrMu.Unlock()
 	elog.Event("mixer", "timings", kv...)
+}
+
+// tileTimings: what the screen showed in the window (MIXER.md §24), per second of the screen's own frames.
+// screen: its rate, the phase of its frames' grid and how far it moved in the window (0). tile<N> and
+// screen_pgm: in = frames that reached the tile, shown = the pictures it changed to, hold = the longest run of
+// screen frames with the same one (1 = a new one every frame). Only live sources' tiles.
+func (e *Engine) tileTimings() []any {
+	t, ok := e.scr.TakeTiles()
+	if !ok || t.FPS <= 0 || t.Frames == 0 {
+		return nil
+	}
+	secs := float64(t.Frames) / float64(t.FPS)
+	pad := func(w gst.PadWindow) string {
+		return fmt.Sprintf("in=%.1f shown=%.1f hold=%d", float64(w.In)/secs, float64(w.Fresh)/secs, w.Hold)
+	}
+	kv := []any{"screen", fmt.Sprintf("fps=%d phase=%.1fms jump=%.1fms", t.FPS, float64(t.Phase)/float64(time.Millisecond),
+		float64(t.Jump)/float64(time.Millisecond)), "screen_pgm", pad(t.Program)}
+	for i, s := range e.sources {
+		if s == nil || i >= len(t.Tiles) {
+			continue
+		}
+		if state, _, _ := s.snapshot(); state == StateLive {
+			kv = append(kv, fmt.Sprintf("tile%d", i+1), pad(t.Tiles[i]))
+		}
+	}
+	return kv
 }
 
 // videoMeter writes RUN_DIR/video every second (FPS and FRAMES of the program, after the compositor),

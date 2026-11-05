@@ -1,0 +1,193 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Two TC358743 (HDMI -> CSI-2) on the Jetson Nano B01: one on each camera connector, or a single one on
+ * either. Replaces the B01 DT's imx219/imx477 includes, like tegra210-porg-camera-tc358743.dtsi (CAM1 only:
+ * the frozen base's DTB, UPDATES.md §12.11), whose notes apply to each chip.
+ *
+ * - CAM0: cam_i2cmux channel 0 (bus 7 in Linux), CSI port A (port-index 0, "serial_a").
+ *   CAM1: cam_i2cmux channel 1 (bus 8), CSI port E (port-index 4, "serial_e"). Both at 0x0f behind the mux,
+ *   2 lanes, continuous clock: the layout of NVIDIA's dual imx219 DT for the B01.
+ * - The VI registers one async notifier per channel (vi/graph.c, tegra_vi_graph_init): a connector without a
+ *   chip (the driver's probe fails, tc358743-jetson.patch) leaves only its own channel without a video node.
+ * - tegra-camera-platform: 4 lanes and twice the pixel rate, so that the VI's ISO bandwidth covers two
+ *   1080p50 UYVY streams (2 lanes give ~469 MB/s, two streams need ~520 MB/s with the 25 % margin).
+ * - The reset pin (one wire, to the chip of whichever connector it is soldered to) is declared on top of this
+ *   file, in tegra210-porg-tc358743-rst.dtsi, through the tc358743_cam0/tc358743_cam1 labels.
+ */
+#include <dt-bindings/media/camera.h>
+#include <dt-bindings/platform/t210/t210.h>
+
+#define CAM1_PWDN		TEGRA_GPIO(S, 7)
+#define CAM2_PWDN		TEGRA_GPIO(T, 0)
+#define CAM_I2C_MUX		TEGRA_GPIO(I, 0)
+
+/ {
+	tc358743_refclk: tc358743-refclk {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <27000000>;
+	};
+
+	host1x {
+		vi_base: vi {
+			num-channels = <2>;
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				vi_port0: port@0 {
+					reg = <0>;
+					tc358743_cam0_vi_in: endpoint {
+						port-index = <0>;
+						bus-width = <2>;
+						remote-endpoint = <&tc358743_cam0_csi_out>;
+					};
+				};
+				vi_port1: port@1 {
+					reg = <1>;
+					tc358743_cam1_vi_in: endpoint {
+						port-index = <4>;
+						bus-width = <2>;
+						remote-endpoint = <&tc358743_cam1_csi_out>;
+					};
+				};
+			};
+		};
+
+		csi_base: nvcsi {
+			num-channels = <2>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			csi_chan0: channel@0 {
+				reg = <0>;
+				discontinuous_clk = "no";
+				cil_settletime = "0";
+				ports {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					csi_chan0_port0: port@0 {
+						reg = <0>;
+						tc358743_cam0_csi_in: endpoint@0 {
+							port-index = <0>;
+							bus-width = <2>;
+							remote-endpoint = <&tc358743_cam0_out>;
+						};
+					};
+					csi_chan0_port1: port@1 {
+						reg = <1>;
+						tc358743_cam0_csi_out: endpoint@1 {
+							remote-endpoint = <&tc358743_cam0_vi_in>;
+						};
+					};
+				};
+			};
+			csi_chan1: channel@1 {
+				reg = <1>;
+				discontinuous_clk = "no";
+				cil_settletime = "0";
+				ports {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					csi_chan1_port0: port@2 {
+						reg = <0>;
+						tc358743_cam1_csi_in: endpoint@2 {
+							port-index = <4>;
+							bus-width = <2>;
+							remote-endpoint = <&tc358743_cam1_out>;
+						};
+					};
+					csi_chan1_port1: port@3 {
+						reg = <1>;
+						tc358743_cam1_csi_out: endpoint@3 {
+							remote-endpoint = <&tc358743_cam1_vi_in>;
+						};
+					};
+				};
+			};
+		};
+	};
+
+	cam_i2cmux {
+		compatible = "i2c-mux-gpio";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		mux-gpios = <&gpio CAM_I2C_MUX GPIO_ACTIVE_HIGH>;
+		i2c-parent = <&i2c7>;
+		i2c@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			tc358743_cam0: tc358743@f {
+				compatible = "toshiba,tc358743";
+				reg = <0x0f>;
+				clocks = <&tc358743_refclk>;
+				clock-names = "refclk";
+				status = "okay";
+				ports {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					port@0 {
+						reg = <0>;
+						tc358743_cam0_out: endpoint {
+							port-index = <0>;
+							bus-width = <2>;
+							data-lanes = <1 2>;
+							clock-lanes = <0>;
+							/* 486 MHz DDR = 972 Mbps/lane, as on CAM1 */
+							link-frequencies = /bits/ 64 <486000000>;
+							remote-endpoint = <&tc358743_cam0_csi_in>;
+						};
+					};
+				};
+			};
+		};
+		i2c@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			tc358743_cam1: tc358743@f {
+				compatible = "toshiba,tc358743";
+				reg = <0x0f>;
+				clocks = <&tc358743_refclk>;
+				clock-names = "refclk";
+				status = "okay";
+				ports {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					port@0 {
+						reg = <0>;
+						tc358743_cam1_out: endpoint {
+							port-index = <4>;
+							bus-width = <2>;
+							data-lanes = <1 2>;
+							clock-lanes = <0>;
+							link-frequencies = /bits/ 64 <486000000>;
+							remote-endpoint = <&tc358743_cam1_csi_in>;
+						};
+					};
+				};
+			};
+		};
+	};
+
+	/* As in the single DT: PWDN of CAM0/CAM1 low (the chip answers that way). */
+	gpio@6000d000 {
+		camera-control-output-low {
+			gpio-hog;
+			output-low;
+			gpios = < CAM1_PWDN 0  CAM2_PWDN 0>;
+			label = "cam1-pwdn", "cam2-pwdn";
+		};
+	};
+
+	tegra-camera-platform {
+		compatible = "nvidia, tegra-camera-platform";
+		num_csi_lanes = <4>;
+		max_lane_speed = <1500000>;
+		min_bits_per_pixel = <16>;
+		vi_peak_byte_per_pixel = <2>;
+		vi_bw_margin_pct = <25>;
+		max_pixel_rate = <320000>;
+		isp_peak_byte_per_pixel = <2>;
+		isp_bw_margin_pct = <25>;
+	};
+};

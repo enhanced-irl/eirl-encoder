@@ -202,8 +202,11 @@ func (e *Engine) syncAudio(cat probe.Catalogue) {
 			continue
 		}
 		mine := pairs[s.id]
-		if s.kind == "hdmi-csi" {
-			mine = "i2s" // always open (it is no camera's), but in the HDMI's place
+		s.mu.Lock()
+		wired := s.audioCard != audio.NoI2S
+		s.mu.Unlock()
+		if s.kind == "hdmi-csi" && wired {
+			mine = "i2s" // always open (it is no camera's), but in the place of the HDMI wired to it
 		}
 		// Its own audio stays open also when another was chosen by hand: audio_link only takes an open one,
 		// and that is how the user goes back to it
@@ -381,6 +384,9 @@ func (e *Engine) place(cat probe.Catalogue, retired map[int]*Source, moved map[s
 			}
 		}
 		s := newSource(e, slot, w.ID, w.Kind, w.Name, w.Node)
+		if w.Kind == "hdmi-csi" && w.NoI2S {
+			s.audioCard = audio.NoI2S // the board HDMI that is not wired to the I2S (two TC358743s)
+		}
 		s.prev = prev
 		e.sources[slot] = s
 		have[w.ID] = true

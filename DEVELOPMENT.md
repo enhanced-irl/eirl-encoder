@@ -1,5 +1,5 @@
 > **Status:** IN PROGRESS — the manual of the HDMI capture and the board; the product itself is in [`README.md`](README.md)
-> **Updated:** 2026-10-28
+> **Updated:** 2026-11-05
 
 # Hardware, building and operating
 
@@ -38,13 +38,13 @@ decode the video. See [DSLR diagnosis](#dslr-diagnosis).
 | Board | Jetson Nano Developer Kit 4 GB, carrier **B01** (`p3449-0000-b00`), module P3448-0000 (SD) |
 | OS | Ubuntu 18.04.6, **L4T R32.7.6**, kernel **4.9.337-tegra**. The OS is not upgraded |
 | HDMI bridge | Chip `441473 358743G 2143HNL JAPAN` = **TC358743XBG** (week 43 of 2021). Unbranded module; it looks like a Geekworm C780A or Waveshare clone. **27 MHz crystal** (confirmed: `FV_CNT = 333` → exactly 30.0 fps) |
-| Video connection | 15-pin flat cable to **CAM1** = I2C `cam_i2cmux` channel 1 (bus 8 in Linux), address **0x0f**, CSI port E (`port-index 4`, `serial_e`), 2 lanes |
+| Video connection | 15-pin flat cable to **CAM1** = I2C `cam_i2cmux` channel 1 (bus 8 in Linux), address **0x0f**, CSI port E (`port-index 4`, `serial_e`), 2 lanes. With the dual DTB, also **CAM0** = channel 0 (bus 7), CSI port A (`port-index 0`), or one chip on each: see [HDMI over CSI on CAM0 and CAM1](#hdmi-over-csi-on-cam0-and-cam1) |
 | Audio connection | I2S from the TC358743 (master) to the **I2S4** of the 40-pin header (the Jetson is the slave): SCK→**12**, WS/LRCK→**35**, SD→**38**, GND→39. **Do not connect pin 40**, which is the I2S4's output. Verified with jetson-io: `i2s4 (12,35,38,40)` |
 | I2S level | The chip has it in the VDDIO2 domain (1.65–3.6 V), so the board decides it. On boards for the RPi it is 3.3 V. This module works with the Nano's 3.3 V I2C pull-ups, which is the same domain → 3.3 V (inferred, not measured) |
 | Bandwidth limit | 2 lanes × 972 Mbps in UYVY → **up to 1080p50** (the CSI takes 89 % of each line) **or 720p60**. 1080p60 does not fit (107 %), and the devkit's 15-pin connector has no more lanes (verified Oct 9). The Nano's VI **does not capture interlaced** |
-
-| Power | 5 V jack with jumper **J48**. **Use 5 V 4 A with a short cable** (5.3 V at idle, 5.27 V minimum while streaming). With a 5 V 2 A supply the input dropped to 4.68–4.76 V while streaming (4.86 V stopped; `POM_5V_IN` of the ina3221 6-0040) with `soctherm OC ALARM` warnings, and with a long cable it fell to 4.3 V and the board rebooted when waking the capture cards up |
-| Reset pin | **RST** pad of the TC358743 board (3.3 V, the board's pull-up). **Not connected**: see [Hardware reset](#hardware-reset-of-the-tc358743-rst-pin) |
+| Power | 5 V jack with jumper **J48**. **Use 5 V 4 A with a short cable** (5.3 V at idle, 5.27 V minimum while streaming). With a 5 V 2 A supply the input dropped to 4.68–4.76 V while streaming (4.86 V stopped; `POM_5V_IN` of the ina3221 6-0040) with `soctherm OC ALARM` warnings, and with a long cable it fell to 4.3 V and the board rebooted when waking the capture cards up. To power it from 12–15 V (DC or USB PD), with the USB hub on its own regulator: [`HARDWARE.md`](HARDWARE.md) §3 |
+| Reset pin | **RST** pad of the TC358743 board (3.3 V, the board's pull-up). Since Nov 5, driven from **pin 33** (PE6) through a DRV8833 module, `GPIO_ACTIVE_HIGH`; never with a direct wire: [`HARDWARE.md`](HARDWARE.md) §4-5 and [Hardware reset](#hardware-reset-of-the-tc358743-rst-pin) |
+| Second fan | A 5 V fan switched on and off from **pin 32** through the same DRV8833: [`HARDWARE.md`](HARDWARE.md) §6 |
 
 Access: on a development board, over SSH with a key (`ssh <board>`); a device installed from the microSD image
 has no SSH ([`IMAGE.md`](IMAGE.md)). The commands in this manual use `jetson` as the SSH host for the board
@@ -69,7 +69,9 @@ eirl-encoder/
 ├─ driver/
 │  ├─ tc358743-jetson.patch  ← patch on drivers/media/i2c/tc358743.c from L4T 32.7.6
 │  └─ Makefile               ← obj-m (out-of-tree build, M=)
-├─ dt/tegra210-porg-camera-tc358743.dtsi   ← replaces the B01 DT's imx219/imx477 includes
+├─ dt/tegra210-porg-camera-tc358743.dtsi   ← replaces the B01 DT's imx219/imx477 includes (CAM1: the frozen base's DTB)
+├─ dt/tegra210-porg-camera-tc358743-dual.dtsi ← the same for CAM0, CAM1 or both (the -dual DTB)
+├─ dt/tegra210-porg-tc358743-rst.dtsi      ← the reset pin (pin 33, PE6) on both nodes of the dual one
 ├─ dt/tegra210-porg-tc358743-i2s4.dtsi     ← audio: I2S4 as slave (dai-link-1) + i2s4b pinmux; included at the end
 │                                             (build.sh also generates …-gpio.dtsi: the B01's gpio-input without J4-J7; not enough, see eirl-hdmi-init)
 ├─ edid/make_edid.py         ← EDID generator: modes up to 1080p50, LPCM stereo 48 kHz only
@@ -141,14 +143,17 @@ Both come with the engine (`tools/deploy-engine.sh --unit`, or a release bundle,
 `eirl-hdmi-init` and `eirl-engine`):
 
 ```bash
-# journalctl -u eirl-hdmi-init → "GPIO_CNF puerto J 0xf0 -> 0x00" and "EDID … cargado en /dev/v4l-subdev1" (the script's messages, in Spanish)
+# journalctl -u eirl-hdmi-init → "GPIO_CNF puerto J 0xf0 -> 0x00" (in Spanish), which device tree booted
+# ("device tree with a TC358743 on CAM0 and on CAM1 (the dual one)") and, for every chip,
+# "EDID edid-1080p30-lpcm48k.bin loaded into /dev/v4l-subdevN (tc358743 8-000f)"
 ```
 
 **A new device from a release bundle**: `sudo ./install.sh` in the extracted bundle installs the app, the engine
 with its EDIDs, the senders (`srt-live-transmit` with its `libsrt`, `srtla_send`, `eirl-send`, `ristsender`) and the
 units, and leaves the output off with no destination (an SD card image
-runs it with `--image`, UPDATES.md §9). The bundle does not carry the TC358743 module, the DTB and its extlinux
-entry (above), nor what L4T itself provides: GStreamer with NVIDIA's plugins, `v4l-utils`, `i2c-tools`, `python3`
+runs it with `--image`, UPDATES.md §9). Its system layer carries the TC358743 module and the dual DTB, which the
+splash's extlinux entry boots (UPDATES.md §12.11); the bundle does not carry the base's DTB and its entries (above), nor
+what L4T itself provides: GStreamer with NVIDIA's plugins, `v4l-utils`, `i2c-tools`, `python3`
 and OpenSSL 1.1 (`libsrt` links it).
 
 Entry added to `/boot/extlinux/extlinux.conf`. The `LABEL primary` one stays untouched:
@@ -177,6 +182,76 @@ Check after booting:
 
 > A module that is loaded and in use by the VI cannot be unloaded (`rmmod`): **every change to the module
 > requires a reboot**.
+
+## HDMI over CSI on CAM0 and CAM1
+
+The B01 has two camera connectors. The TC358743 can sit on either of them, or there can be one on each (two
+HDMI inputs). Nothing in the software is tied to one connector any more.
+
+| Connector | I2C (`cam_i2cmux`) | Bus in Linux | CSI port | `port-index` |
+|---|---|---|---|---|
+| CAM0 | channel 0 | 7 | A (`serial_a`) | 0 |
+| CAM1 | channel 1 | 8 | E (`serial_e`) | 4 |
+
+**Two DTBs** come out of `build/build.sh`:
+- `…-b00-tc358743.dtb`: the TC358743 on **CAM1** only. It is the frozen base's, byte for byte (`tools/image/pins.sh`):
+  the microSD image carries it, the updates never change it, and every extlinux entry but the splash's boots it.
+- `…-b00-tc358743-dual.dtb`: a TC358743 node on each connector (the layout of NVIDIA's dual imx219 DT for the B01),
+  `num-channels = <2>` in `vi` and `nvcsi`, `num_csi_lanes = <4>` and twice the `max_pixel_rate` (the VI's ISO
+  bandwidth: 2 lanes give ~469 MB/s, two 1080p50 UYVY streams need ~520 MB/s with the 25 % margin), and the reset pin
+  (`tegra210-porg-tc358743-rst.dtsi`). Next to the frozen one, decompiled with `dtc`, only the camera nodes differ.
+  The system layer installs it next to the frozen one (`system/built.txt`, its sha256 in `system/modules.lock`) and
+  the splash's entry boots it once the layer owns it; the other entries keep the frozen one, for U-Boot to fall back to
+  when it cannot load it (UPDATES.md §12.11, accepted by the owner on Nov 5). On a board without the layer (the test
+  board), by hand, in a **new** `extlinux.conf` entry (copy first).
+
+**A connector without a chip.** The VI registers one async notifier per channel (`vi/graph.c` of L4T): a channel
+whose sensor never binds only stays without a video node, the other works. That needs the driver's probe to fail on
+an empty connector, and the upstream 4.9 one did not: it reads `CHIPID` without checking the transfer, a chip that
+does not answer reads 0, which is the TC358743's own id, so an empty connector got a subdevice, a video node and an
+I2C error every 500 ms (the interrupt poll). The patch checks the transfer (as mainline does) and the probe fails.
+
+**The reset pin with two connectors.** There is one wire (pin 33), soldered to the board of one chip, which may sit
+on either connector, so both nodes declare it. At probe, requesting the pin releases the reset (even if the level
+shifter left it asserted since boot); a chip that answers within 1 s gets the usual pulses, one that does not gets a
+single pulse and 0.5 s more, and then the connector is empty: the probe fails and the pin goes back, for the other
+connector's chip. With two chips, the first that answers (CAM0's) keeps it, unless the module parameter
+`reset_port` (0 = CAM0, 1 = CAM1) names the other. Only the chip that holds the pin gets the `hardware_reset`
+control, and the engine looks for that control (and for `reset-gpios` in the DT, for a driver from before).
+
+**Which board has the wires: `HDMI_WIRED`.** Only one TC358743 can have the I2S audio (the I2S4 of the 40-pin
+header; the chip is the I2S master, so two cannot share it, and the devkit has no other I2S that fits), and the
+reset wire goes to the same board. `HDMI_WIRED=cam0|cam1` says which one; empty (auto) is the only chip, or CAM0's
+with two. It goes in the board settings (`/etc/default/eirl-engine`) or the app's file (`engine.env`, which wins).
+The engine reads that chip's audio watcher (`TC_I2C` is now its bus by default), sends its reset and replug there,
+and gives the I2S to its source only; `eirl-hdmi-init.sh` turns it into `options tc358743 reset_port=N` in
+`/etc/modprobe.d/eirl-tc358743.conf`, which applies from the next boot.
+
+**The sources.** The engine and the app find the chips in sysfs (`manager/internal/tcchip`): every `tc358743 N-000f`
+subdevice, its bus, its connector (the `chan_id` in the name of its I2C adapter, `i2c-6-mux (chan_id K)`) and its VI
+node (`vi-output, tc358743 N-000f`; its number depends on what else is plugged in). With one chip the source is
+`hdmi`, «HDMI de la placa», on whichever connector; with two, `hdmi` («HDMI 1», CAM0's) and `hdmi2` («HDMI 2»,
+CAM1's). Both get the EDID; the one without the I2S has no audio of its own.
+
+**Check after booting the dual DTB.** `dmesg | grep tc358743`: the chip's connector says
+`tc358743 found @ 0x1e (i2c-6-mux (chan_id K))` (and `chip listo … ms tras el reset` with the reset pin), an empty
+one `no TC358743 on address 0x1e (…)` or `no TC358743 on this connector`, and no `reading register … failed`.
+`/sys/class/video4linux/*/name` has one `vi-output, tc358743 N-000f` per chip.
+
+**Tested** (2026-11-05, one chip on CAM0): found on bus 7, CAM1 empty without an error, `vi_iso_bw=937500`,
+the reset at probe at the first attempt (108 ms) and `hardware_reset` reprogramming the chip; a camera at 1080p30
+live in the engine as «HDMI de la placa» (`/dev/video2`: the USB camera took 0 and 1), with the app's catalogue
+giving it the I2S. Not tested yet: the chip on CAM1 alone, and two chips (no second module yet).
+
+**The new driver with a DT without the pin** (T4, Nov 5, a temporary DTB with the chip on CAM0 and no `reset-gpios`):
+on its first boot the chip was found, video live and no I2C errors (with a module built a minute before the final
+patch, which still gave every chip `hardware_reset`: the engine, which also asks for `reset-gpios`, did not use it);
+the engine saw the audio
+PLL unlocked after the warm restart (`au_status0=0x41`), replugged the EDID and said `audio_pll_unlocked_no_reset_pin`,
+without restarting itself. On the next warm restart the chip did not answer at all: with the reset wire fitted and
+nobody owning pin 33, PE6 rested high (an input reading 1) and the DRV8833 held the chip in reset. So a board with
+the reset wire needs the dual DTB (HARDWARE.md §5). Back on the dual DTB, the reset at probe brought the chip back
+(ready 112 ms after it) and the audio PLL locked: HDMI audio live.
 
 ## Operating
 
@@ -376,7 +451,21 @@ The driver supports `reset-gpios` in the DT (upstream) and the patch adds:
   `s_ctrl` runs with the ctrl_handler's lock, which the interrupt polling also takes.
   Do it with the pipeline stopped: the CSI comes back with the next `s_stream`. The hotplug drops and rises,
   so the source renegotiates.
-- If the pin is not in the DT or cannot be requested, the driver carries on without it (a warning, not an error).
+- If the pin is not in the DT or cannot be requested, the driver carries on without it (a warning, not an error)
+  and the chip has no `hardware_reset` control: the engine tells a resettable chip by that control.
+
+**Since 2026-11-05: wired through a DRV8833** ([`HARDWARE.md`](HARDWARE.md) §4-5).
+- **Wiring:** pin 33 (PE6) drives the module's IN4 (IN3 at GND), and OUT3 goes to the RST pad. OUT3 only pulls to
+  GND or lets go, so the TXB0108 only sees a CMOS input and nothing fights the board's pull-up. It does the job
+  of the open-drain transistor below, with the same polarity: `TEGRA_GPIO(E, 6)` and `GPIO_ACTIVE_HIGH`.
+- **Tested on the test board** (with the dual DTB, and before it a temporary DTB that declared the pin):
+  - a 10 ms pulse returns the chip's registers to their power-on values;
+  - the reset at probe has the chip ready 108 ms later, at the first attempt;
+  - `hardware_reset` reprograms it and the HDMI signal locks again.
+- **In `dt/`:** the dual DTB declares it (`tegra210-porg-tc358743-rst.dtsi`, PE6 and `GPIO_ACTIVE_HIGH`, on both
+  connectors' nodes: see [HDMI over CSI on CAM0 and CAM1](#hdmi-over-csi-on-cam0-and-cam1)). The frozen base's
+  DTB (`tegra210-porg-camera-tc358743.dtsi`, CAM1) keeps the line commented out, with pin 31 and `GPIO_ACTIVE_LOW`
+  from the experiment below. The image carries that one; the updates add the dual one (UPDATES.md §12.11).
 
 **The 2026-10-07 experiment and why it is disabled**: a **direct** wire from the RST pad to
 **pin 31** of the 40-pin header (GPIO11 = PZ0, `TEGRA_GPIO(Z, 0)`).
@@ -386,8 +475,8 @@ The driver supports `reset-gpios` in the DT (upstream) and the patch adds:
   1-2 ms the chip took between 0.1 and more than 3 s to come back. With a 10 ms one, RST stayed at
   **0.6 V** (chip permanently in reset), **even after a power cycle**, and forcing the pin
   high the Jetson read it oscillating. It only recovered **by removing the wire**.
-- That is why `dt/tegra210-porg-camera-tc358743.dtsi` has `reset-gpios` **commented out**. To enable it:
-  fit an **open-drain transistor**, which only pulls to GND and never fights the pull-up:
+- That is why `dt/tegra210-porg-camera-tc358743.dtsi` has `reset-gpios` **commented out**. To enable it,
+  fit the DRV8833 above or an **open-drain transistor**, which only pulls to GND and never fights the pull-up:
   2N7000/BS170 with the gate to pin 31, source to GND, drain to RST and 100 kΩ gate-GND (or an NPN with 1 kΩ
   on the base and 10 kΩ base-emitter). **Careful: the transistor inverts**: GPIO high = RST low; in the DT it
   would be `GPIO_ACTIVE_HIGH`. Uncomment, rebuild the DTB and test the pulse before leaving it in
@@ -639,7 +728,9 @@ Already done before the project and not touched by it: on October 4 an `apt upgr
 ## Pending
 
 1. **Audio that does not come back**: wait for it to happen again and see in the journal whether any software
-   recovery is enough. If not, fit the hardware reset with a transistor.
+   recovery is enough. The hardware reset is wired and tested (DRV8833, [`HARDWARE.md`](HARDWARE.md) §5), and the
+   dual DTB declares it. What is missing is a device running that DTB: it comes with the first release whose layer
+   carries it (UPDATES.md §12.11).
 2. **Output protocols** ([`OUTPUTS.md`](OUTPUTS.md)): tests with real platform keys (Twitch, YouTube, Kick,
    Facebook), the cloud reading H.265 end to end, RIST bonding over real links, the firewall of the SRT listener,
    and the cloud's side of the saved destinations.
@@ -656,6 +747,7 @@ Already done before the project and not touched by it: on October 4 an `apt upgr
    before the backup, a "Wi-Fi/Ethernet only" download option.
 10. **microSD image** ([`IMAGE.md`](IMAGE.md)): the one-time firmware update on a board with older firmware, and
     building it in a GitHub workflow.
-11. **Fan** ([`FAN.md`](FAN.md)): profiles in Settings and a "camera" mode.
+11. **Fan** ([`FAN.md`](FAN.md)): profiles in Settings and a "camera" mode; switching the second fan
+    ([`HARDWARE.md`](HARDWARE.md) §6) on above a CPU temperature.
 12. **Boot splash** ([`SPLASH.md`](SPLASH.md) §6): plugging the screen in with the splash running and a real
     failed boot.

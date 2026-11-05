@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/splash"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/update/syslayer"
 )
 
 var version = "dev" // -ldflags "-X main.version=…"
@@ -241,6 +242,7 @@ func bootEntry(args []string) int {
 	conf := fl.String("conf", "/boot/extlinux/extlinux.conf", "extlinux file")
 	state := fl.String("state", "/var/lib/eirl-splash/extlinux.prev", "previous DEFAULT and TIMEOUT (to undo)")
 	dry := fl.Bool("dry", false, "show the result without writing")
+	layerState := fl.String("layer-state", syslayer.DefaultStateDir, "the system layer's state: whether it installed the dual DTB (UPDATES.md §12.11)")
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: eirl-splash boot-entry install|uninstall|show [-conf f] [-state f] [-dry]")
 		return 64
@@ -273,7 +275,9 @@ func bootEntry(args []string) int {
 		}
 		return 0
 	case "install":
-		out, p, err := splash.InstallEntry(string(cur), prev)
+		// The entry boots the dual DTB once the system layer has installed it (UPDATES.md §12.11); every other
+		// entry keeps the base's, for U-Boot to fall back to
+		out, p, err := splash.InstallEntry(string(cur), prev, splash.LayerFDT("/", syslayer.ReadState(*layerState).Files))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "not installing:", err)
 			return 1
@@ -299,8 +303,8 @@ func bootEntry(args []string) int {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
-		fmt.Printf("entry %s installed as DEFAULT (base %s, TIMEOUT %s→1 s); backup in %s\n",
-			splash.EntryLabel, p.Default, p.Timeout, bak)
+		fmt.Printf("entry %s installed as DEFAULT (base %s, TIMEOUT %s→1 s, FDT %s); backup in %s\n",
+			splash.EntryLabel, p.Default, p.Timeout, splash.EntryFDT(out), bak)
 		return 0
 	case "uninstall":
 		out, err := splash.UninstallEntry(string(cur), prev)

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/tcchip"
 )
 
 const confPath = "/etc/eirl-encoder/engine.env"
@@ -19,6 +21,7 @@ type fake struct {
 	conf    *string // nil = file missing
 	readErr error
 	exec    map[string]bool
+	chips   []tcchip.Chip // the board's TC358743s (none by default)
 }
 
 func (f fake) options() Options {
@@ -38,6 +41,7 @@ func (f fake) options() Options {
 		},
 		Executable: func(p string) bool { return f.exec[p] },
 		FindVDEV:   func() string { return "/dev/video1" },
+		FindChips:  func() []tcchip.Chip { return f.chips },
 	}
 }
 
@@ -130,6 +134,7 @@ func TestKeys(t *testing.T) {
 		{"DEVICE_TIMEOUT", "7", func(c *Config) bool { return c.DeviceTimeout == 7 }, []string{"x"}},
 		{"WATCHDOG", "0", func(c *Config) bool { return c.WatchdogMs == 0 }, []string{"3e3"}},
 		{"TC_I2C", "7", func(c *Config) bool { return c.TCI2C == 7 }, []string{"i2c-7"}},
+		{"HDMI_WIRED", "cam1", func(c *Config) bool { return c.HDMIWired == "cam1" }, []string{"CAM1", "1", "cam2"}},
 		{"AUDIO_LOCK_TIMEOUT", "0", func(c *Config) bool { return c.AudioLockTimeout == 0 }, []string{"1.5"}},
 		{"HW_RESET_INTERVAL", "600", func(c *Config) bool { return c.HWResetInterval == 600 }, []string{"1000000"}},
 		{"STATE_DIR", "/tmp/s", func(c *Config) bool { return c.StateDir == "/tmp/s" }, []string{"/tmp/s s"}},
@@ -272,8 +277,8 @@ func TestWhitelist(t *testing.T) {
 	if len(got) != 1 || got["VBITRATE"] != "5000" {
 		t.Fatalf("ParseConfFile kept %v", got)
 	}
-	if len(Whitelist) != 29 {
-		t.Fatalf("whitelist has %d keys: the launcher's 16, the output's 11 (OUTPUTS.md §3) and the recording's 2", len(Whitelist))
+	if len(Whitelist) != 30 {
+		t.Fatalf("whitelist has %d keys: the launcher's 16, the output's 11 (OUTPUTS.md §3), the recording's 2 and HDMI_WIRED", len(Whitelist))
 	}
 }
 
@@ -505,5 +510,29 @@ func TestRecordingKeys(t *testing.T) {
 	b := mustLoad(t, fake{env: map[string]string{"VBITRATE": "4000"}})
 	if c.SameOutput(c.WithOutput(b)) {
 		t.Fatal("a new bitrate is the output's")
+	}
+}
+
+// TC_I2C defaults to the bus of the chip wired to the I2S (tcchip.Wired): the TC358743 may be on CAM0 or
+// CAM1, or on both; without a chip it stays the former 8.
+func TestTCI2CFromChips(t *testing.T) {
+	c0, c1 := tcchip.Chip{Port: 0, Bus: 7}, tcchip.Chip{Port: 1, Bus: 8}
+	for _, tc := range []struct {
+		chips []tcchip.Chip
+		env   map[string]string
+		want  int
+	}{
+		{nil, nil, 8},
+		{[]tcchip.Chip{c0}, nil, 7},
+		{[]tcchip.Chip{c1}, nil, 8},
+		{[]tcchip.Chip{c0, c1}, nil, 7},
+		{[]tcchip.Chip{c0, c1}, map[string]string{"HDMI_WIRED": "cam1"}, 8},
+		{[]tcchip.Chip{c0, c1}, map[string]string{"HDMI_WIRED": "cam1", "TC_I2C": "3"}, 3},
+		{[]tcchip.Chip{{Port: 0, Bus: 8}}, nil, 8}, // the temporary DT: bus 8 on channel 0
+	} {
+		c := mustLoad(t, fake{env: tc.env, chips: tc.chips})
+		if c.TCI2C != tc.want {
+			t.Errorf("chips %v env %v: TC_I2C %d, want %d", tc.chips, tc.env, c.TCI2C, tc.want)
+		}
 	}
 }

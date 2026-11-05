@@ -82,8 +82,8 @@ func TestDescribeLikePython(t *testing.T) {
 	}
 }
 
-// MultiviewRateTest (the screen's side): the multiview runs at most at 30 per second, a source's frames go to
-// its tile at most one every MVGap (the engine's bridges, SetScreen), and stills always pass (in C).
+// MultiviewRateTest (the screen's side): the multiview runs at most at 30 per second; a source's frames go to
+// its tile one per screen frame (the engine's bridges, SetScreen with Grid), and stills always pass (in C).
 func TestMultiviewGetsAtMost30PerSecond(t *testing.T) {
 	lay := ui.NewLayout(1024, 600, 4)
 	d60 := Describe(pipeline.Tegra, lay, Pipeline{Width: 1920, Height: 1080, FPS: 60})
@@ -94,8 +94,19 @@ func TestMultiviewGetsAtMost30PerSecond(t *testing.T) {
 	if strings.Count(d25, "framerate=25/1") != 6 {
 		t.Fatal(d25)
 	}
-	if MVGap != 25*time.Millisecond || MVMargin != 40*time.Millisecond || pipeline.ScreenFPS != 30 {
+	if MVMargin != 40*time.Millisecond || pipeline.ScreenFPS != 30 {
 		t.Fatal("multiview timing")
+	}
+	// The gate's grid: the screen's rate and the tiles' pad offset; by arrival, 3/4 of a screen frame (what
+	// MV_GAP was at 30)
+	if g := Grid(Pipeline{FPS: 60, Latency: 60 * time.Millisecond}); g.FPS != 30 || g.Offset != 100*time.Millisecond-time.Second/60 {
+		t.Fatalf("grid %+v", g)
+	}
+	if g := Grid(Pipeline{FPS: 25, Latency: 60 * time.Millisecond}); g.FPS != 25 || g.Offset != 60*time.Millisecond {
+		t.Fatalf("grid at 25 %+v", g)
+	}
+	if TileGap(60) != 25*time.Millisecond || TileGap(30) != 25*time.Millisecond || TileGap(25) != 25*time.Millisecond || FPS(0) != 1 {
+		t.Fatal("tile gap: the old MV_GAP's sizes at 30 a second or less")
 	}
 }
 
@@ -122,6 +133,8 @@ type fakeHost struct {
 	mu       sync.Mutex
 	cmds     []map[string]any
 	attached []string
+	grid     gst.ScreenGrid
+	regrids  int
 	detached int
 	changed  int
 	reply    string
@@ -142,10 +155,16 @@ func (h *fakeHost) LinkInfo() (string, int)          { return "srt", 0 }
 func (h *fakeHost) BaseTime() uint64                 { return 4242 }
 func (h *fakeHost) Changed()                         { h.mu.Lock(); h.changed++; h.mu.Unlock() }
 func (h *fakeHost) DetachScreen()                    { h.mu.Lock(); h.detached++; h.mu.Unlock() }
-func (h *fakeHost) AttachScreen(mvs []gst.Element, mvp gst.Element) {
+func (h *fakeHost) Regrid(mvs []gst.Element, grid gst.ScreenGrid) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.attached = nil
+	h.grid = grid
+	h.regrids++
+}
+func (h *fakeHost) AttachScreen(mvs []gst.Element, mvp gst.Element, grid gst.ScreenGrid) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.attached, h.grid = nil, grid
 	for _, e := range append(mvs, mvp) {
 		if e == nil {
 			h.attached = append(h.attached, "<nil>")
@@ -254,15 +273,37 @@ func TestScreenLifecycle(t *testing.T) {
 		t.Fatalf("info %+v", in)
 	}
 	host.mu.Lock()
-	att := strings.Join(host.attached, " ")
+	att, grid := strings.Join(host.attached, " "), host.grid
 	host.mu.Unlock()
 	if att != "mvs0 mvs1 mvs2 mvs3 mvp" {
 		t.Fatalf("attached %q", att)
 	}
+	if grid.FPS != 30 || grid.Offset != 100*time.Millisecond-time.Second/60 {
+		t.Fatalf("grid %+v", grid)
+	}
+	// The meter: the program and the 4 tiles (not the UI layer), read by TakeTiles
+	if len(m.TileMeters) != 1 || m.TileMeters[0].NPads != 5 || m.TileMeters[0].FPS != 30 {
+		t.Fatalf("tile meters %+v", m.TileMeters)
+	}
+	m.TileMeters[0].Set(gst.TileWindow{Frames: 60, Pads: []gst.PadWindow{{In: 60, Fresh: 60, Hold: 1}, {}, {In: 50, Fresh: 50, Hold: 2}, {}, {}}})
+	if tl, ok := s.TakeTiles(); !ok || tl.FPS != 30 || tl.Frames != 60 || tl.Program.Fresh != 60 || len(tl.Tiles) != 4 || tl.Tiles[1].Hold != 2 {
+		t.Fatalf("tiles %+v %v", tl, ok)
+	}
+	// The compositor's phase, once the meter has it, moves the tiles' grid; a change under 1 ms does not
+	m.TileMeters[0].SetPhase(13 * time.Millisecond)
+	want := 100*time.Millisecond - time.Second/60 - 13*time.Millisecond
+	waitFor(t, "the regrid", func() bool { host.mu.Lock(); defer host.mu.Unlock(); return host.grid.Offset == want })
+	m.TileMeters[0].SetPhase(13*time.Millisecond + 300*time.Microsecond)
+	time.Sleep(500 * time.Millisecond)
+	m.TileMeters[0].SetPhase(time.Second/30 - 200*time.Microsecond) // another phase: a real move
+	waitFor(t, "the second regrid", func() bool { host.mu.Lock(); defer host.mu.Unlock(); return host.regrids == 2 })
 	// Each tile as late as the program on the screen: latency + MVMargin, minus a program frame
 	for i := range 4 {
 		if d := p.El(fmt.Sprintf("mvd%d", i)).Offset("src"); d != 100*time.Millisecond-time.Second/60 {
 			t.Errorf("mvd%d offset %v, want 83.3ms", i, d)
+		}
+		if !p.El(fmt.Sprintf("mvd%d", i)).DroppedDuration("sink") {
+			t.Errorf("mvd%d: the tile's buffers keep their duration", i)
 		}
 	}
 	// The UI layer goes through the feeder, full frames
@@ -297,6 +338,9 @@ func TestScreenLifecycle(t *testing.T) {
 	host.mu.Lock()
 	det := host.detached
 	host.mu.Unlock()
+	if len(m.TileMeters) != 2 || !m.TileMeters[0].IsFreed() || m.TileMeters[1].IsFreed() {
+		t.Fatalf("the old pipeline's meter should be freed, the new one's not: %d", len(m.TileMeters))
+	}
 	if det != 1 {
 		t.Fatalf("detached %d", det)
 	}

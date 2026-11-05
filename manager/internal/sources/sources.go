@@ -22,6 +22,7 @@ import (
 
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/btaudio"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/netcfg"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/tcchip"
 )
 
 // Default names of the catalogue. They are data (the engine shows them, probe -list carries them), kept as they
@@ -178,13 +179,16 @@ type Scanner struct {
 	// Cameras: the network cameras list WITHOUT keys (/etc/eirl-encoder/cameras-public.json);
 	// empty = no network cameras
 	Cameras string
+	// Wired is HDMI_WIRED (which TC358743 has the I2S audio, with two); nil = auto
+	Wired func() string
 
 	mu    sync.Mutex
 	cache map[string][]Format // by node + USB device identity (bus/dev changes on re-enumeration)
 }
 
 func New() *Scanner {
-	return &Scanner{SysRoot: "/sys", DevRoot: "/dev", Enum: v4l2Enum{}, Cameras: "/etc/eirl-encoder/" + netcfg.FilePublic}
+	return &Scanner{SysRoot: "/sys", DevRoot: "/dev", Enum: v4l2Enum{}, Cameras: "/etc/eirl-encoder/" + netcfg.FilePublic,
+		Wired: func() string { return tcchip.ReadWired(tcchip.BoardSettings, tcchip.AppSettings) }}
 }
 
 // Scan returns the sources and audio inputs connected right now.
@@ -194,7 +198,34 @@ func (s *Scanner) Scan() Catalog {
 	nodes, _ := filepath.Glob(filepath.Join(s.SysRoot, "class/video4linux/video*"))
 	sort.Strings(nodes)
 	seen := map[string]bool{}
+	// The HDMI over CSI, first in the list: the TC358743 on CAM0 or CAM1, or one on each («HDMI 1» = CAM0's,
+	// id hdmi; «HDMI 2» = CAM1's, hdmi2). The one wired to the I2S (HDMI_WIRED) carries the board's HDMI audio.
 	hdmi := false
+	var chips []tcchip.Chip
+	for _, c := range tcchip.Find(filepath.Dir(s.SysRoot)) {
+		if c.Video != "" && len(chips) < 2 {
+			chips = append(chips, c)
+		}
+	}
+	wiredSetting := tcchip.WiredAuto
+	if s.Wired != nil {
+		wiredSetting = s.Wired()
+	}
+	wired, hasWired := tcchip.Wired(chips, wiredSetting)
+	for i, c := range chips {
+		src := Source{ID: "hdmi", Kind: KindHDMI, Name: HDMIName, Node: c.Video}
+		if len(chips) == 2 {
+			src.Name = "HDMI " + strconv.Itoa(i+1)
+			if i == 1 {
+				src.ID = "hdmi2"
+			}
+		}
+		if hasWired && c.Subdev == wired.Subdev {
+			src.Audio = &AudioInput{ID: "i2s", Kind: "i2s", Name: HDMIAudioName}
+		}
+		cat.Sources = append(cat.Sources, src)
+	}
+	hdmi = hasWired
 	for _, n := range nodes {
 		node := filepath.Base(n)
 		name := readTrim(filepath.Join(n, "name"))
@@ -207,11 +238,7 @@ func (s *Scanner) Scan() Catalog {
 		}
 		usbDir := usbDeviceDir(dev)
 		if usbDir == "" {
-			if strings.Contains(name, "tc358743") && !hdmi {
-				hdmi = true
-				cat.Sources = append(cat.Sources, Source{ID: "hdmi", Kind: KindHDMI, Name: HDMIName, Node: "/dev/" + node})
-			}
-			continue
+			continue // the board's own nodes: the TC358743's are above
 		}
 		if seen[usbDir] {
 			continue // a device with two streaming interfaces: the first one

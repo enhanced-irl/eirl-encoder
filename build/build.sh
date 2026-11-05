@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# build.sh — the patched tc358743 module and the Nano B01's DTB with the TC358743 on CAM1, for
+# build.sh — the patched tc358743 module and the Nano B01's DTBs with the TC358743 (on CAM1: the frozen base's;
+# on CAM0, CAM1 or both: -dual), for
 # L4T R32.7.6 (kernel 4.9.337-tegra). Builds in an ubuntu:18.04 arm64 container: native on an Apple
 # Silicon Mac (no cross-compiling). The kernel Image is NOT installed: it is only built to have
 # Module.symvers and the DT tree ready.
@@ -138,8 +139,21 @@ sed -i "s#^\(\#include \"porg-platforms/tegra210-porg-tc358743-i2s4.dtsi\"\)#\1\
 grep -n "#include" $P/tegra210-p3448-0000-p3449-0000-b00-tc358743.dts
 grep -q b00-tc358743.dtb $P/Makefile || \
   sed -i "s#tegra210-p3448-0000-p3449-0000-b00.dtb#& tegra210-p3448-0000-p3449-0000-b00-tc358743.dtb#" $P/Makefile
+echo "== B00 DTB + a TC358743 on CAM0, on CAM1 or on both, with its reset pin (DEVELOPMENT.md)"
+# Built beside the one above, which stays byte for byte the DTB of the frozen base (UPDATES.md §12.11): the same DT
+# with the dual camera include instead of the CAM1 one, and the reset pin on top of it
+cp /proj/dt/tegra210-porg-camera-tc358743-dual.dtsi /proj/dt/tegra210-porg-tc358743-rst.dtsi $P/porg-platforms/
+sed -e "s#porg-platforms/tegra210-porg-camera-tc358743.dtsi#porg-platforms/tegra210-porg-camera-tc358743-dual.dtsi#" \
+    -e "s#^\(\#include \"porg-platforms/tegra210-porg-tc358743-gpio.dtsi\"\)#\1\n\#include \"porg-platforms/tegra210-porg-tc358743-rst.dtsi\"#" \
+    $P/tegra210-p3448-0000-p3449-0000-b00-tc358743.dts > $P/tegra210-p3448-0000-p3449-0000-b00-tc358743-dual.dts
+grep -q camera-tc358743-dual.dtsi $P/tegra210-p3448-0000-p3449-0000-b00-tc358743-dual.dts && \
+  grep -q tc358743-rst.dtsi $P/tegra210-p3448-0000-p3449-0000-b00-tc358743-dual.dts || { echo "dual DTS: includes not replaced"; exit 1; }
+grep -n "#include" $P/tegra210-p3448-0000-p3449-0000-b00-tc358743-dual.dts
+grep -q b00-tc358743-dual.dtb $P/Makefile || \
+  sed -i "s#tegra210-p3448-0000-p3449-0000-b00-tc358743.dtb#& tegra210-p3448-0000-p3449-0000-b00-tc358743-dual.dtb#" $P/Makefile
 mk dtbs 2>&1 | grep -i "b00-tc358743" || true
-cp $O/arch/arm64/boot/dts/tegra210-p3448-0000-p3449-0000-b00-tc358743.dtb /out/
+cp $O/arch/arm64/boot/dts/tegra210-p3448-0000-p3449-0000-b00-tc358743.dtb \
+   $O/arch/arm64/boot/dts/tegra210-p3448-0000-p3449-0000-b00-tc358743-dual.dtb /out/
 modinfo /out/tc358743.ko | grep vermagic
 '
 # The EDIDs (same modes, a different preferred one: the app picks one, EDID_PREFERRED), from edid/*.hex

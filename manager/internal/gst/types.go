@@ -67,6 +67,43 @@ type Media interface {
 	// NewAnimator sets the compositor's pads sink_0 … sink_<pads-1> from its own thread (frame: the
 	// program's frame duration).
 	NewAnimator(comp Element, pads int, frame time.Duration) Animator
+	// NewTileMeter watches what a compositor making fps frames a second shows from its pads sink_0 …
+	// sink_<pads-1>; nil where it cannot (only GStreamer 1.14's videoaggregator: nvcompositor on the board).
+	NewTileMeter(comp Element, pads, fps int) TileMeter
+}
+
+// ScreenGrid is the screen's frames as a tile sees them: the compositor makes FPS a second, and its frame k
+// starts at k/FPS once Offset is added to a tile's pts: the pad offset of its mvd queue (TileDelay) minus the
+// phase of the compositor's frames (TileMeter.Phase; it does not start them at 0). FPS 0 = no screen.
+type ScreenGrid struct {
+	FPS    int
+	Offset time.Duration
+}
+
+// TileMeter reads, after each frame a compositor makes, the buffer each pad used for it (C, a probe on its
+// src pad), and counts what reaches each pad. MIXER.md §24.
+type TileMeter interface {
+	// Take is what it saw since the previous take, which starts a new window.
+	Take() TileWindow
+	// Phase: the compositor's frames start at Phase + k/fps of the running time; false before its first.
+	Phase() (time.Duration, bool)
+	// Free once the compositor's pipeline is in NULL.
+	Free()
+}
+
+// TileWindow is a TileMeter's window.
+type TileWindow struct {
+	Frames uint64        // the compositor's output frames
+	Phase  time.Duration // of the last one (-1: none yet)
+	Jump   time.Duration // the largest change of the phase between two of them (0: a steady grid)
+	Pads   []PadWindow
+}
+
+// PadWindow is one pad's part of a TileWindow.
+type PadWindow struct {
+	In    uint64 // buffers that reached the pad
+	Fresh uint64 // output frames with a buffer the pad had not shown before: the pictures it changed to
+	Hold  int    // the longest run of output frames with the same buffer (1: a new one every frame)
 }
 
 // Layer is where one compositor pad goes: its rectangle, alpha and zorder.
@@ -155,6 +192,9 @@ type Element interface {
 	// SetPadOffset shifts what goes through one of its pads that much later on the running time
 	// (gst_pad_set_offset); false if there is no such pad.
 	SetPadOffset(pad string, d time.Duration) bool
+	// DropDuration takes the duration off every buffer through one of its pads, for good (the tiles: MIXER.md
+	// §24); false if there is no such pad. Only on buffers nobody else holds (a converter's own output).
+	DropDuration(pad string) bool
 	SetBool(prop string, v bool)
 	SetFloat(prop string, v float64)
 	// PullBytes takes the next appsink sample as bytes (JPEGs); nil after the timeout.
@@ -212,8 +252,9 @@ type BridgeStats struct {
 // slot: Free only once no pipeline can call into it.
 type Bridge interface {
 	SetParams(p BridgeParams)
-	// SetScreen also sends a frame to the screen, at most one every gap (nil = none).
-	SetScreen(dst Element, gap time.Duration)
+	// SetScreen also sends frames to the screen's tile dst (nil = none): the first one that falls in each
+	// frame of the screen, by its pts on g (eg_mv_gate_step).
+	SetScreen(dst Element, g ScreenGrid)
 	// SetThumb sends a frame to a thumbnail appsrc every interval (nil = none).
 	SetThumb(dst Element, every time.Duration)
 	// SetDst changes where the frames go (the hot output's appsrc of each session); nil drops them.

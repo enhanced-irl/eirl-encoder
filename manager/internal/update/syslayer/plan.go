@@ -119,8 +119,10 @@ func makePlan(root string, l *Layer, prev *State, dpkg map[string]dpkgPkg) (*Pla
 	}
 	if prev != nil {
 		for _, path := range sortedKeys(prev.Files) {
-			if declared[path] || !AllowedFile(path, l.Requires.Kernel) || sharedWithPackages[path] {
-				continue // a file the base's packages ship (the system's name) is left as it is, not removed
+			if declared[path] || !AllowedFile(path, l.Requires.Kernel) || sharedWithPackages[path] || path == DualDTB {
+				// a file the base's packages ship (the system's name) is left as it is, not removed; so is the device
+				// tree, which the splash's extlinux entry may boot (only install.sh changes that entry)
+				continue
 			}
 			if sum, err := fileSHA(filepath.Join(root, path)); err == nil && sum != "" {
 				p.Files = append(p.Files, fileOp{Op: "remove", File: File{Path: path, Module: moduleName(path)}})

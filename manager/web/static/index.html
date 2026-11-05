@@ -645,6 +645,17 @@ sudo systemctl restart eirl-encoderd</pre>
             <p class="err" data-for="edidPreferred" hidden></p>
           </div>
 
+          <div id="hdmi-wired-field" hidden>
+            <label for="f-hdmi-wired" data-i18n="input.hdmiWired"></label>
+            <select id="f-hdmi-wired" name="hdmiWired">
+              <option value="" data-i18n="input.hdmiWiredAuto"></option>
+              <option value="cam0">HDMI 1</option>
+              <option value="cam1">HDMI 2</option>
+            </select>
+            <p class="hint" data-i18n="input.hdmiWiredHint"></p>
+            <p class="err" data-for="hdmiWired" hidden></p>
+          </div>
+
           <label for="f-audio" data-i18n="input.audio"></label>
           <select id="f-audio" name="audio"></select>
           <p class="err" data-for="audio" hidden></p>

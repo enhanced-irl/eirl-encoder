@@ -18,7 +18,7 @@ import (
 //
 //	system/packages.lock   the packages: the closure of system/packages.txt over the base, exactly
 //	system/built.txt       what comes from build/out: our modules and firmware, BlueALSA's ALSA plugins
-//	system/modules.lock    the sha256 of each module build/build.sh builds (reproducible builds)
+//	system/modules.lock    the sha256 of each module and device tree build/build.sh builds (reproducible builds)
 //	system/overlay.txt     the files of system/files/ and who reads them
 //	system/units.txt       the units' state
 //	system/groups.txt      system groups
@@ -177,10 +177,13 @@ func Build(in BuildInput) (*Layer, error) {
 			if vm, err := moduleVermagic(src); err != nil || vm != BaseKernel {
 				return nil, fmt.Errorf("%s is built for %q (%v), not %s", r[1], vm, err, BaseKernel)
 			}
+		}
+		// A module or a device tree acts on every board's kernel: its sha256 is pinned (reproducible builds)
+		if strings.HasSuffix(dst, ".ko") || strings.HasSuffix(dst, ".dtb") {
 			if in.UpdateModulesLock {
 				newLock = append(newLock, sum+"  "+r[1])
 			} else if modLock[r[1]] != sum {
-				return nil, fmt.Errorf("%s: sha256 %s, system/modules.lock says %q: a module changed (review it, then eirl-release layer -update-modules-lock)", r[1], sum, modLock[r[1]])
+				return nil, fmt.Errorf("%s: sha256 %s, system/modules.lock says %q: a module or device tree changed (review it, then eirl-release layer -update-modules-lock)", r[1], sum, modLock[r[1]])
 			}
 		}
 		f.SHA256 = sum
@@ -191,8 +194,9 @@ func Build(in BuildInput) (*Layer, error) {
 	}
 	if in.UpdateModulesLock {
 		sort.Slice(newLock, func(i, j int) bool { return strings.Fields(newLock[i])[1] < strings.Fields(newLock[j])[1] })
-		hdr := "# system/modules.lock — the sha256 of each module build/build.sh builds (its builds are reproducible). A change\n" +
-			"# here is a change on every board: review it (eirl-release layer -update-modules-lock rewrites it).\n"
+		hdr := "# system/modules.lock — the sha256 of each module and device tree build/build.sh builds (its builds are\n" +
+			"# reproducible). A change here is a change on every board: review it (eirl-release layer -update-modules-lock\n" +
+			"# rewrites it).\n"
 		if err := os.WriteFile(filepath.Join(sys, "modules.lock"), []byte(hdr+strings.Join(newLock, "\n")+"\n"), 0o644); err != nil {
 			return nil, err
 		}

@@ -3,7 +3,6 @@
 package hdmi
 
 import (
-	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -18,6 +17,7 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/elog"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/pipeline"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/sysx"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/tcchip"
 )
 
 // ErrNotImplemented: the driver does not answer VIDIOC_QUERY_DV_TIMINGS; use v4l2-ctl.
@@ -121,27 +121,36 @@ type Sys struct {
 
 func (s Sys) path(p string) string { return filepath.Join(s.Root, p) }
 
-// FindSubdev is the TC358743's v4l-subdev node, "" if the board has none.
-func (s Sys) FindSubdev() string {
-	sub := ""
-	for _, n := range sysx.Glob(s.path("/sys/class/video4linux/v4l-subdev*/name")) {
-		if b, err := os.ReadFile(n); err == nil && bytes.Contains(b, []byte("tc358743")) {
-			sub = "/dev/" + filepath.Base(filepath.Dir(n))
-		}
+// Chips are the board's TC358743s, in connector order (tcchip): none, CAM0's, CAM1's or both.
+func (s Sys) Chips() []tcchip.Chip { return tcchip.Find(s.Root) }
+
+// WiredSubdev is the v4l-subdev node of the chip wired to the I2S audio and the reset pin (wired is
+// HDMI_WIRED, tcchip.Wired), "" if the board has none.
+func (s Sys) WiredSubdev(wired string) string {
+	if c, ok := tcchip.Wired(s.Chips(), wired); ok {
+		return c.Subdev
 	}
-	return sub
+	return ""
 }
 
-// HasResetPin: the hardware reset only exists if the device tree declares the pin.
+// HasResetPin: the chip has a hardware reset. The device tree must declare the pin, and the driver must
+// have given the chip its "Hardware Reset" control: with two chips both nodes may declare the one pin,
+// and only the chip that holds it gets the control (tc358743-jetson.patch). A driver from before that
+// change gives every chip the control, so the device tree is checked as well.
 func (s Sys) HasResetPin(sub string) bool {
-	return sysx.Exists(s.path("/sys/class/video4linux/" + filepath.Base(sub) + "/device/of_node/reset-gpios"))
+	if sub == "" || !sysx.Exists(s.path("/sys/class/video4linux/"+filepath.Base(sub)+"/device/of_node/reset-gpios")) {
+		return false
+	}
+	r := s.Run(5*time.Second, "v4l2-ctl", "-d", sub, "--list-ctrls")
+	return r.RC == 0 && strings.Contains(r.Out, "hardware_reset")
 }
 
-// Replug rewrites the EDID (edidFile, the one Prepare loaded): the driver drops the hotplug and raises
-// it again, and the source renegotiates HDMI from scratch, audio included. It cuts the HDMI's video for
-// a moment: only with nothing of it on air. False if it could not be done.
-func (s Sys) Replug(edidFile string) bool {
-	sub := s.FindSubdev()
+// Replug rewrites the EDID (edidFile, the one Prepare loaded) of the chip wired to the I2S (wired is
+// HDMI_WIRED): the driver drops the hotplug and raises it again, and the source renegotiates HDMI from
+// scratch, audio included. It cuts that HDMI's video for a moment: only with nothing of it on air. False
+// if it could not be done.
+func (s Sys) Replug(edidFile, wired string) bool {
+	sub := s.WiredSubdev(wired)
 	if sub == "" || !sysx.Exists(edidFile) {
 		return false
 	}
@@ -150,19 +159,20 @@ func (s Sys) Replug(edidFile string) bool {
 }
 
 // Prepare does what the launcher did before the pipeline: a hardware reset asked for by the previous
-// run (STATE_DIR/hw-reset.request, with the pipeline stopped), and the EDID, rewritten only if it
-// changed (writing it drops the hotplug and the source renegotiates). It returns whether the board has
-// a TC358743. capture is the video node, to wait for the signal to drop after a new EDID.
-func (s Sys) Prepare(edidFile, stateDir, capture string) bool {
-	sub := s.FindSubdev()
-	if sub == "" {
+// run (STATE_DIR/hw-reset.request, with the pipeline stopped) on the chip wired to the reset pin (wired is
+// HDMI_WIRED), and the EDID of every chip, rewritten only where it changed (writing it drops the hotplug
+// and the source renegotiates). It returns whether the board has a TC358743.
+func (s Sys) Prepare(edidFile, stateDir, wired string) bool {
+	chips := s.Chips()
+	if len(chips) == 0 {
 		return false
 	}
 	if stateDir != "" {
 		req := filepath.Join(stateDir, "hw-reset.request")
 		if sysx.Exists(req) {
 			os.Remove(req)
-			if r := s.Run(10*time.Second, "v4l2-ctl", "-d", sub, "-c", "hardware_reset=1"); r.RC == 0 {
+			sub := s.WiredSubdev(wired)
+			if sub != "" && s.Run(10*time.Second, "v4l2-ctl", "-d", sub, "-c", "hardware_reset=1").RC == 0 {
 				_ = os.WriteFile(filepath.Join(stateDir, "hw-reset.last"), []byte(strconv.FormatInt(time.Now().Unix(), 10)+"\n"), 0o644)
 				elog.Event("engine", "tc358743_hw_reset_done")
 				s.Sleep(3 * time.Second) // the driver drops and raises the hotplug: the source takes a while
@@ -176,11 +186,19 @@ func (s Sys) Prepare(edidFile, stateDir, capture string) bool {
 		elog.Event("engine", "edid_missing", "file", edidFile)
 		return true
 	}
+	for _, c := range chips {
+		s.loadEDID(c, edidFile, want)
+	}
+	return true
+}
+
+// loadEDID writes edidFile into the chip unless it already has it, and waits for the signal to drop.
+func (s Sys) loadEDID(c tcchip.Chip, edidFile string, want []byte) {
 	tmp, err := os.CreateTemp("", "eirl-edid-")
 	if err == nil {
 		tmp.Close()
 		defer os.Remove(tmp.Name())
-		s.Run(10*time.Second, "v4l2-ctl", "-d", sub, "--get-edid=pad=0,file="+tmp.Name())
+		s.Run(10*time.Second, "v4l2-ctl", "-d", c.Subdev, "--get-edid=pad=0,file="+tmp.Name())
 	}
 	var cur []byte
 	if tmp != nil {
@@ -189,17 +207,19 @@ func (s Sys) Prepare(edidFile, stateDir, capture string) bool {
 	// v4l2-ctl writes the EDID as hex text; compare like the launcher (no spaces, lower case)
 	clean := strings.NewReplacer(" ", "", "\n", "", "\t", "").Replace(strings.ToLower(string(cur)))
 	if clean == hex.EncodeToString(want) {
-		return true
+		return
 	}
-	elog.Event("engine", "edid_loaded", "file", filepath.Base(edidFile))
-	s.Run(10*time.Second, "v4l2-ctl", "-d", sub, "--set-edid=pad=0,file="+edidFile+",format=raw")
+	elog.Event("engine", "edid_loaded", "file", filepath.Base(edidFile), "chip", c.Name)
+	s.Run(10*time.Second, "v4l2-ctl", "-d", c.Subdev, "--set-edid=pad=0,file="+edidFile+",format=raw")
+	if c.Video == "" {
+		return
+	}
 	// Until the signal drops, the timings read are those of the old EDID: wait for it to drop (≤5 s; a
 	// source that ignores the hotplug does not drop it) and let the source pick it up renegotiated
 	for range 10 {
-		if r := s.Run(5*time.Second, "v4l2-ctl", "-d", capture, "--query-dv-timings"); r.RC != 0 {
+		if r := s.Run(5*time.Second, "v4l2-ctl", "-d", c.Video, "--query-dv-timings"); r.RC != 0 {
 			break
 		}
 		s.Sleep(500 * time.Millisecond)
 	}
-	return true
 }

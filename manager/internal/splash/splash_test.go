@@ -190,7 +190,7 @@ func readJetsonConf(t *testing.T) string {
 
 func TestInstallEntry(t *testing.T) {
 	orig := readJetsonConf(t)
-	out, prev, err := InstallEntry(orig, nil)
+	out, prev, err := InstallEntry(orig, nil, FDTSwap{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,11 +229,11 @@ func TestInstallEntry(t *testing.T) {
 	}
 
 	// Idempotent: reinstalling (DEFAULT already ours) with the saved state gives the same result
-	again, prev2, err := InstallEntry(out, &prev)
+	again, prev2, err := InstallEntry(out, &prev, FDTSwap{})
 	if err != nil || again != out || prev2 != prev {
 		t.Fatalf("reinstalling changes the file (err %v)", err)
 	}
-	if _, _, err := InstallEntry(out, nil); err == nil {
+	if _, _, err := InstallEntry(out, nil, FDTSwap{}); err == nil {
 		t.Fatal("reinstalling without previous state should fail")
 	}
 
@@ -251,7 +251,7 @@ func TestInstallEntry(t *testing.T) {
 }
 
 func TestUninstallRespectsNewDefault(t *testing.T) {
-	out, prev, err := InstallEntry(readJetsonConf(t), nil)
+	out, prev, err := InstallEntry(readJetsonConf(t), nil, FDTSwap{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestUninstallRespectsNewDefault(t *testing.T) {
 
 func TestInstallWithoutTimeout(t *testing.T) {
 	conf := "DEFAULT a\n\nLABEL a\n  LINUX /boot/Image\n  APPEND ${cbootargs} quiet fbcon=map:9\n"
-	out, prev, err := InstallEntry(conf, nil)
+	out, prev, err := InstallEntry(conf, nil, FDTSwap{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestInstallErrors(t *testing.T) {
 		"no APPEND":      "DEFAULT a\nLABEL a\n  LINUX /x\n",
 		"broken block":   "DEFAULT a\nLABEL a\n  LINUX /x\n  APPEND y\n" + entryBegin + "\nLABEL eirl-splash\n",
 	} {
-		if _, _, err := InstallEntry(conf, nil); err == nil {
+		if _, _, err := InstallEntry(conf, nil, FDTSwap{}); err == nil {
 			t.Errorf("%s: should fail", name)
 		}
 	}

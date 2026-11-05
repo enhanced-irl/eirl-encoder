@@ -43,6 +43,7 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/safefile"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/service"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/sources"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/tcchip"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/update"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/uplinks"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/wifi"
@@ -70,7 +71,7 @@ func main() {
 	liveVideo := flag.String("live-video", "127.0.0.1:5006", "RTP H.264 of the live preview (the script's LIVE_VPORT)")
 	liveAudio := flag.String("live-audio", "127.0.0.1:5008", "RTP Opus of the live preview (the script's LIVE_APORT)")
 	liveMax := flag.Int("live-max", 3, "live previews at once (0 = off)")
-	i2c := flag.String("i2c", "/dev/i2c-8", "I2C bus of the TC358743 (CAM1)")
+	i2c := flag.String("i2c", "", "I2C bus of the TC358743, /dev/i2c-N (empty = the chip wired to the HDMI audio, found in sysfs)")
 	// Real hosts: prod api.enhancedirl.com / app.enhancedirl.com · dev api.dev.enhancedirl.com / app.dev.enhancedirl.com
 	cloudAPI := flag.String("cloud-api", "https://api.enhancedirl.com", "EnhancedIRL backend to link the device with (empty = no linking)")
 	cloudApp := flag.String("cloud-app", "https://app.enhancedirl.com", "EnhancedIRL app (link to confirm the pairing)")
@@ -110,7 +111,7 @@ func main() {
 	}
 	srv := &api.Server{
 		Unit:         service.Unit{Name: *unit},
-		Board:        &hw.Board{Chip: "tc358743", I2CBus: *i2c, Addr: 0x0f},
+		Board:        &hw.Board{Chip: "tc358743", I2CBus: *i2c, Addr: 0x0f, Wired: func() string { return tcchip.ReadWired(*defEnv, filepath.Join(*confDir, "engine.env")) }},
 		Auth:         auth.New(filepath.Join(*confDir, "admin.hash")),
 		Config:       &config.Store{DefaultPath: *defEnv, AppPath: filepath.Join(*confDir, "engine.env")},
 		StatsPath:    filepath.Join(*runDir, "srt-stats.json"),

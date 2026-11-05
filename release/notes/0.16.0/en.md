@@ -1,0 +1,3 @@
+- New: the HDMI board can go on either camera connector (CAM0 or CAM1). With a board on each you get two HDMI inputs, "HDMI 1" and "HDMI 2" (the second without its own audio), and you choose which one carries the audio under Input, on the web and in the screen's Settings › Sources. After updating, restart the encoder for it to take effect.
+- New: if you have fitted the HDMI board's reset wire (see the hardware guide in the repository), the encoder uses it at startup and to bring the HDMI audio back when it gets stuck.
+- Improvement: the source thumbnails on the touch screen are smooth. Before, some USB cameras looked jerky, showing less than half of their frames.

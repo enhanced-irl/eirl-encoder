@@ -4,7 +4,7 @@
 
 --- tc358743.c.orig
 +++ tc358743.c
-@@ -50,6 +50,10 @@
+@@ -50,6 +50,14 @@
  module_param(debug, int, 0644);
  MODULE_PARM_DESC(debug, "debug level (0-3)");
  
@@ -12,10 +12,14 @@
 +module_param(fifo_level, int, 0644);
 +MODULE_PARM_DESC(fifo_level, "nivel del FIFO de vídeo (FIFOCTL); 0 = calculado para cada modo");
 +
++static int reset_port = -1;
++module_param(reset_port, int, 0444);
++MODULE_PARM_DESC(reset_port, "connector (cam_i2cmux channel: 0 = CAM0, 1 = CAM1) whose chip is wired to the reset pin when both nodes declare it; -1 = the first chip that answers");
++
  MODULE_DESCRIPTION("Toshiba TC358743 HDMI to CSI-2 bridge driver");
  MODULE_AUTHOR("Ramakrishnan Muthukrishnan <ram@rkrishnan.org>");
  MODULE_AUTHOR("Mikhail Khelik <mkhelik@cisco.com>");
-@@ -98,8 +102,20 @@
+@@ -98,8 +106,20 @@
  	u32 mbus_fmt_code;
  
  	struct gpio_desc *reset_gpio;
@@ -36,7 +40,7 @@
  static void tc358743_enable_interrupts(struct v4l2_subdev *sd,
  		bool cable_connected);
  static int tc358743_s_ctrl_detect_tx_5v(struct v4l2_subdev *sd);
-@@ -111,8 +127,46 @@
+@@ -111,8 +131,81 @@
  
  /* --------------- I2C --------------- */
  
@@ -78,12 +82,47 @@
 +		__i2c_wr(sd, reg + i, values + i, 1);
 +}
 +
++/*
++ * Jetson: CHIPID, checking that the chip answered. Upstream's probe reads it
++ * with i2c_rd16, which gives 0 when nothing answers: the TC358743's own id, so
++ * an empty connector was "found" and got a video node and an I2C error every
++ * poll. Mainline checks the transfer too.
++ */
++static int tc358743_read_chipid(struct i2c_client *client, u16 *id)
++{
++	u8 reg[2] = { CHIPID >> 8, CHIPID & 0xff }, val[2];
++	struct i2c_msg msgs[] = {
++		{ .addr = client->addr, .flags = 0, .len = 2, .buf = reg },
++		{ .addr = client->addr, .flags = I2C_M_RD, .len = 2, .buf = val },
++	};
++
++	if (i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs)) !=
++	    ARRAY_SIZE(msgs))
++		return -ENXIO;
++	*id = val[0] | val[1] << 8;
++	return 0;
++}
++
++/* Jetson: whether the chip answers within ms milliseconds (polled every 20 ms) */
++static bool tc358743_answers_within(struct i2c_client *client, unsigned int ms)
++{
++	unsigned long timeout = jiffies + msecs_to_jiffies(ms);
++	u16 id;
++
++	do {
++		if (!tc358743_read_chipid(client, &id))
++			return true;
++		msleep(20);
++	} while (time_before(jiffies, timeout));
++	return false;
++}
++
 +static void __i2c_rd(struct v4l2_subdev *sd, u16 reg, u8 *values, u32 n)
 +{
  	struct tc358743_state *state = to_state(sd);
  	struct i2c_client *client = state->i2c_client;
  	int err;
-@@ -139,7 +193,7 @@
+@@ -139,7 +232,7 @@
  	}
  }
  
@@ -92,7 +131,7 @@
  {
  	struct tc358743_state *state = to_state(sd);
  	struct i2c_client *client = state->i2c_client;
-@@ -237,7 +291,13 @@
+@@ -237,7 +330,13 @@
  
  static void i2c_wr16_and_or(struct v4l2_subdev *sd, u16 reg, u16 mask, u16 val)
  {
@@ -107,7 +146,7 @@
  }
  
  static u32 i2c_rd32(struct v4l2_subdev *sd, u16 reg)
-@@ -675,8 +735,71 @@
+@@ -675,8 +774,71 @@
  		(state->mbus_fmt_code == MEDIA_BUS_FMT_UYVY8_1X16) ?  16 : 24;
  	u32 bps = bt->width * bt->height * fps(bt) * bits_pr_pixel;
  	u32 bps_pr_lane = (pdata->refclk_hz / pdata->pll_prd) * pdata->pll_fbd;
@@ -180,7 +219,7 @@
  }
  
  static void tc358743_set_csi(struct v4l2_subdev *sd)
-@@ -688,6 +811,7 @@
+@@ -688,6 +850,7 @@
  	v4l2_dbg(3, debug, sd, "%s:\n", __func__);
  
  	tc358743_reset(sd, MASK_CTXRST);
@@ -188,7 +227,7 @@
  
  	if (lanes < 1)
  		i2c_wr32(sd, CLW_CNTRL, MASK_CLW_LANEDISABLE);
-@@ -1328,6 +1452,23 @@
+@@ -1328,6 +1491,23 @@
  	return handled ? IRQ_HANDLED : IRQ_NONE;
  }
  
@@ -212,7 +251,7 @@
  static int tc358743_subscribe_event(struct v4l2_subdev *sd, struct v4l2_fh *fh,
  				    struct v4l2_event_subscription *sub)
  {
-@@ -1614,6 +1755,7 @@
+@@ -1614,6 +1794,7 @@
  	for (i = 0; i < edid_len; i += EDID_BLOCK_SIZE)
  		i2c_wr(sd, EDID_RAM + i, edid->edid + i, EDID_BLOCK_SIZE);
  
@@ -220,7 +259,7 @@
  	state->edid_blocks_written = edid->blocks;
  
  	if (tx_5v_power_present(sd))
-@@ -1643,8 +1785,62 @@
+@@ -1643,8 +1824,62 @@
  	.g_mbus_config = tc358743_g_mbus_config,
  	.s_stream = tc358743_s_stream,
  };
@@ -241,13 +280,13 @@
 +	}
 +	return 0;
 +}
-+
+ 
 +static int tc358743_enum_frame_size(struct v4l2_subdev *sd,
 +		struct v4l2_subdev_pad_config *cfg,
 +		struct v4l2_subdev_frame_size_enum *fse)
 +{
 +	struct tc358743_state *state = to_state(sd);
- 
++
 +	if (fse->index > 0)
 +		return -EINVAL;
 +	if (fse->code != MEDIA_BUS_FMT_UYVY8_1X16 &&
@@ -283,17 +322,12 @@
  	.set_fmt = tc358743_set_fmt,
  	.get_fmt = tc358743_get_fmt,
  	.get_edid = tc358743_g_edid,
-@@ -1688,11 +1884,44 @@
+@@ -1688,11 +1923,34 @@
  #ifdef CONFIG_OF
  static void tc358743_gpio_reset(struct tc358743_state *state)
  {
 +	struct i2c_client *client = state->i2c_client;
-+	u8 reg[2] = { CHIPID >> 8, CHIPID & 0xff }, val[2];
-+	struct i2c_msg msgs[] = {
-+		{ .addr = client->addr, .flags = 0, .len = 2, .buf = reg },
-+		{ .addr = client->addr, .flags = I2C_M_RD, .len = 2, .buf = val },
-+	};
-+	unsigned long start, timeout;
++	unsigned long start;
 +	int attempt;
 +
 +	/*
@@ -314,17 +348,12 @@
 +		gpiod_set_value(state->reset_gpio, 0);
 +		start = jiffies;
 +		msleep(100);
-+		timeout = start + msecs_to_jiffies(3000);
-+		do {
-+			if (i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs)) ==
-+			    ARRAY_SIZE(msgs)) {
-+				dev_info(&client->dev,
-+					 "chip listo %u ms tras el reset (intento %d)\n",
-+					 jiffies_to_msecs(jiffies - start), attempt);
-+				return;
-+			}
-+			msleep(20);
-+		} while (time_before(jiffies, timeout));
++		if (tc358743_answers_within(client, 2900)) {
++			dev_info(&client->dev,
++				 "chip listo %u ms tras el reset (intento %d)\n",
++				 jiffies_to_msecs(jiffies - start), attempt);
++			return;
++		}
 +		dev_warn(&client->dev, "el chip no contesta tras el reset (intento %d)\n",
 +			 attempt);
 +	}
@@ -332,7 +361,15 @@
  }
  
  static int tc358743_probe_of(struct tc358743_state *state)
-@@ -1739,8 +1968,15 @@
+@@ -1702,6 +1960,7 @@
+ 	struct device_node *ep;
+ 	struct clk *refclk;
+ 	u32 bps_pr_lane;
++	u32 port;
+ 	int ret = -EINVAL;
+ 
+ 	refclk = devm_clk_get(dev, "refclk");
+@@ -1739,8 +1998,15 @@
  	state->pdata.ddc5v_delay = DDC5V_DELAY_100_MS;
  	state->pdata.enable_hdcp = false;
  	/* A FIFO level of 16 should be enough for 2-lane 720p60 at 594 MHz. */
@@ -349,7 +386,7 @@
  	 * The PLL input clock is obtained by dividing refclk by pll_prd.
  	 * It must be between 6 MHz and 40 MHz, lower frequency is better.
  	 */
-@@ -1776,26 +2012,47 @@
+@@ -1776,30 +2042,86 @@
  	 * link frequency). In principle it should be possible to calculate
  	 * them based on link frequency and resolution.
  	 */
@@ -398,21 +435,63 @@
 +		break;
 +	}
  
- 	state->reset_gpio = devm_gpiod_get_optional(dev, "reset",
- 						    GPIOD_OUT_LOW);
+-	state->reset_gpio = devm_gpiod_get_optional(dev, "reset",
+-						    GPIOD_OUT_LOW);
++	/*
++	 * Jetson: with two connectors there is one reset wire, to the chip of
++	 * whichever connector it is soldered to, so both nodes may declare it.
++	 * The pin is the chip's on connector reset_port or, by default, the first
++	 * chip's that answers: an empty connector gives it back (probe fails).
++	 */
++	if (of_property_read_u32(dev->of_node->parent, "reg", &port))
++		port = U32_MAX;
++	if (reset_port >= 0 && port != (u32)reset_port) {
++		dev_info(dev, "reset pin left to connector %d\n", reset_port);
++		state->reset_gpio = NULL;
++	} else {
++		state->reset_gpio = devm_gpiod_get_optional(dev, "reset",
++							    GPIOD_OUT_LOW);
++	}
  	if (IS_ERR(state->reset_gpio)) {
 -		dev_err(dev, "failed to get reset gpio\n");
 -		ret = PTR_ERR(state->reset_gpio);
 -		goto disable_clk;
 +		/* Jetson: sin el pin de reset el chip funciona igual; solo se
 +		 * pierde el reset en caliente. No vale la pena quedarse sin vídeo. */
-+		dev_warn(dev, "sin gpio de reset (%ld): reset en caliente desactivado\n",
-+			 PTR_ERR(state->reset_gpio));
++		if (PTR_ERR(state->reset_gpio) == -EBUSY)
++			dev_info(dev, "reset pin taken by the other connector's chip\n");
++		else
++			dev_warn(dev, "sin gpio de reset (%ld): reset en caliente desactivado\n",
++				 PTR_ERR(state->reset_gpio));
 +		state->reset_gpio = NULL;
  	}
  
- 	if (state->reset_gpio)
-@@ -1816,7 +2073,100 @@
+-	if (state->reset_gpio)
++	if (state->reset_gpio) {
++		/*
++		 * Requesting the pin released the reset (GPIOD_OUT_LOW), even if the
++		 * level shifter had left it asserted since boot. A chip that answers
++		 * gets the usual pulses. One that does not gets a single pulse, in case
++		 * it was stuck; if it still does not answer, the connector is empty: no
++		 * 3 x 3 s wait, and the pin goes back for the other connector's chip.
++		 */
++		if (!tc358743_answers_within(state->i2c_client, 1000)) {
++			gpiod_set_value(state->reset_gpio, 1);
++			msleep(10);
++			gpiod_set_value(state->reset_gpio, 0);
++			if (!tc358743_answers_within(state->i2c_client, 500)) {
++				dev_info(dev, "no TC358743 on this connector\n");
++				/* not -ENODEV: probe() reads that as "No platform data!" */
++				ret = -ENXIO;
++				goto disable_clk;
++			}
++		}
+ 		tc358743_gpio_reset(state);
++	}
+ 
+ 	ret = 0;
+ 	goto free_endpoint;
+@@ -1816,7 +2138,100 @@
  	return -ENODEV;
  }
  #endif
@@ -445,7 +524,7 @@
 +	int i;
 +
 +	v4l2_info(sd, "reset por hardware\n");
-+
+ 
 +	if (state->i2c_client->irq) {
 +		disable_irq(state->i2c_client->irq);
 +	} else {
@@ -453,7 +532,7 @@
 +		cancel_work_sync(&state->work_i2c_poll);
 +	}
 +	cancel_delayed_work_sync(&state->delayed_work_enable_hotplug);
- 
++
 +	tc358743_gpio_reset(state);
 +
 +	tc358743_initial_setup(sd);
@@ -513,7 +592,29 @@
  static int tc358743_probe(struct i2c_client *client,
  			  const struct i2c_device_id *id)
  {
-@@ -1863,7 +2213,7 @@
+@@ -1825,6 +2240,7 @@
+ 	struct tc358743_state *state;
+ 	struct tc358743_platform_data *pdata = client->dev.platform_data;
+ 	struct v4l2_subdev *sd;
++	u16 chipid;
+ 	int err;
+ 
+ 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_SMBUS_BYTE_DATA))
+@@ -1855,15 +2271,17 @@
+ 	v4l2_i2c_subdev_init(sd, client, &tc358743_ops);
+ 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_HAS_EVENTS;
+ 
+-	/* i2c access */
+-	if ((i2c_rd16(sd, CHIPID) & MASK_CHIPID) != 0) {
+-		v4l2_info(sd, "not a TC358743 on address 0x%x\n",
+-			  client->addr << 1);
++	/* i2c access (Jetson: checked, see tc358743_read_chipid) */
++	err = tc358743_read_chipid(client, &chipid);
++	if (err || (chipid & MASK_CHIPID) != 0) {
++		v4l2_info(sd, "%s TC358743 on address 0x%x (%s)\n",
++			  err ? "no" : "not a", client->addr << 1,
++			  client->adapter->name);
+ 		return -ENODEV;
  	}
  
  	/* control handlers */
@@ -522,17 +623,23 @@
  
  	state->detect_tx_5v_ctrl = v4l2_ctrl_new_std(&state->hdl, NULL,
  			V4L2_CID_DV_RX_POWER_PRESENT, 0, 1, 0, 0);
-@@ -1875,6 +2225,9 @@
+@@ -1875,6 +2293,15 @@
  	state->audio_present_ctrl = v4l2_ctrl_new_custom(&state->hdl,
  			&tc358743_ctrl_audio_present, NULL);
  
 +	INIT_WORK(&state->work_hw_reset, tc358743_work_hw_reset);
-+	v4l2_ctrl_new_custom(&state->hdl, &tc358743_ctrl_hw_reset, NULL);
++	/*
++	 * Only a chip that holds the reset pin gets the control: with two chips
++	 * both nodes may declare the pin, and the engine tells a resettable chip
++	 * by this control, not by the DT.
++	 */
++	if (state->reset_gpio)
++		v4l2_ctrl_new_custom(&state->hdl, &tc358743_ctrl_hw_reset, NULL);
 +
  	sd->ctrl_handler = &state->hdl;
  	if (state->hdl.error) {
  		err = state->hdl.error;
-@@ -1887,14 +2240,13 @@
+@@ -1887,14 +2314,13 @@
  	}
  
  	state->pad.flags = MEDIA_PAD_FL_SOURCE;
@@ -549,7 +656,7 @@
  
  	mutex_init(&state->confctl_mutex);
  
-@@ -1905,7 +2257,8 @@
+@@ -1905,7 +2331,8 @@
  
  	tc358743_s_dv_timings(sd, &default_timing);
  
@@ -559,7 +666,7 @@
  	tc358743_set_csi_color_space(sd);
  
  	tc358743_init_interrupts(sd);
-@@ -1918,6 +2271,12 @@
+@@ -1918,6 +2345,12 @@
  						"tc358743", state);
  		if (err)
  			goto err_work_queues;
@@ -572,7 +679,7 @@
  	}
  
  	tc358743_enable_interrupts(sd, tx_5v_power_present(sd));
-@@ -1927,12 +2286,26 @@
+@@ -1927,12 +2360,26 @@
  	if (err)
  		goto err_work_queues;
  
@@ -599,7 +706,7 @@
  	cancel_delayed_work(&state->delayed_work_enable_hotplug);
  	mutex_destroy(&state->confctl_mutex);
  err_hdl:
-@@ -1946,6 +2319,11 @@
+@@ -1946,6 +2393,11 @@
  	struct v4l2_subdev *sd = i2c_get_clientdata(client);
  	struct tc358743_state *state = to_state(sd);
  
@@ -611,7 +718,7 @@
  	cancel_delayed_work(&state->delayed_work_enable_hotplug);
  	v4l2_async_unregister_subdev(sd);
  	v4l2_device_unregister_subdev(sd);
-@@ -1963,9 +2341,18 @@
+@@ -1963,9 +2415,18 @@
  
  MODULE_DEVICE_TABLE(i2c, tc358743_id);
  

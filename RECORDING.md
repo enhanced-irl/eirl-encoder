@@ -1,5 +1,6 @@
-> **Status:** RELEASED in 0.12.0 (Oct 28): R1-R4 and R6's release. The cloud (D8: state and REC from the app, §6.8) done
-> on Nov 4, for the next release; a power cut by the cable still to do
+> **Status:** CLOSED (Nov 4). Released in 0.12.0 (Oct 28); the cloud's side (D8: its state and REC from the
+> EnhancedIRL app, §6.8) released in 0.15.0 (Nov 4). Not done, decided with the owner: a power cut by the cable and
+> opening the files in every editor (§7, R5). The limits of §4.4 stay as they are. Anything more is a new piece of work.
 > **Updated:** 2026-11-04
 
 # Local recording to a USB disk
@@ -378,8 +379,8 @@ before it reject nothing.
 | R2 | The engine: recorder, writer, socket, state, busy | code and tests done (Oct 24); first board test Oct 24 (§8.1) |
 | R3 | The app and the web: keys, API, card, translations | done (Oct 28, §6), tried in the simulator and on the board; released in 0.12.0 |
 | R4 | The screen: header indicator, REC button, Settings › Recording | done (Oct 28, §6.7), seen in captures and on the board; released in 0.12.0 |
-| R5 | Robustness on the board | nearly done (Oct 24 and 28, §8.1-§8.3): a cable power cut and the owner's editors left |
-| R6 | Release, and the cloud | released in 0.12.0 on Oct 28: a security review of the helper first (§4.4), then the update tried on the test board from 0.11.1 (test builds, the system layer with the five packages, ~1 min, no restart), and the test board updated itself from GitHub. The cloud (D8, §6.8) on Nov 4 |
+| R5 | Robustness on the board | done (Oct 24 and 28, §8.1-§8.3). Closed without two tests (owner's decision, Nov 4): a power cut by the cable (the recovery after a power cut is tested, and QuickTime opens the cut file) and opening the files in VLC, DaVinci Resolve and Premiere |
+| R6 | Release, and the cloud | released in 0.12.0 on Oct 28: a security review of the helper first (§4.4), then the update tried on the test board from 0.11.1 (test builds, the system layer with the five packages, ~1 min, no restart), and the test board updated itself from GitHub. The cloud (D8, §6.8) released in 0.15.0 on Nov 4, tried against the dev cloud with the simulator (the test board did not answer that day) |
 
 ## 8. To test on the board (R5)
 

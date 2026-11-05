@@ -148,7 +148,7 @@ func (s *Server) candidates(ctx context.Context, list []slots.Slot, st *mixer.St
 // kindOf: the kind of a source from its id.
 func kindOf(id string) string {
 	switch {
-	case id == "hdmi":
+	case id == "hdmi", id == "hdmi2": // the TC358743 on CAM0 and/or CAM1
 		return "hdmi-csi"
 	case id == "test":
 		return "test"

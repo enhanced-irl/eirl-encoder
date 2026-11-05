@@ -45,7 +45,6 @@ const (
 	discoverEvery = 2 * time.Second
 	fadeStep      = 20 * time.Millisecond   // the actor's check of a running fade (the audio's steps too)
 	fadeGrace     = time.Second             // a video fade's table no longer holds the actor after its length + this
-	mvGap         = 25 * time.Millisecond   // one frame per source to the screen every MV_GAP (30/s)
 	stopBudget    = 4 * time.Second         // for the sources to end
 	stopTotal     = 9500 * time.Millisecond // all of Stop: the unit gives 10 (TimeoutStopSec)
 )
@@ -614,10 +613,17 @@ func (e *Engine) startTCAudio() {
 		return
 	}
 	hs := hdmiSys(e.run)
-	sys.Hotplug = func() bool { return hs.Replug(c.EDID) }
+	// The watcher reads the chip wired to the I2S (HDMI_WIRED): with the wired board's connector empty,
+	// no chip has the board's HDMI audio
+	sub := hs.WiredSubdev(c.HDMIWired)
+	if sub == "" {
+		elog.Event("audio", "tc358743_audio_unwired", "hdmi_wired", c.HDMIWired)
+		return
+	}
+	sys.Hotplug = func() bool { return hs.Replug(c.EDID, c.HDMIWired) }
 	sys.MayHotplug = e.mayReplugHDMI
 	w := tcaudio.New(tcaudio.Config{I2CBus: c.TCI2C, LockTimeout: c.AudioLockTimeout, ResetInterval: c.HWResetInterval,
-		StateDir: c.StateDir, ALSACard: c.ALSACard, ADMAIF: c.ALSAAdmaif, ResetPin: hs.HasResetPin(hs.FindSubdev())}, sys)
+		StateDir: c.StateDir, ALSACard: c.ALSACard, ADMAIF: c.ALSAAdmaif, ResetPin: hs.HasResetPin(sub)}, sys)
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
@@ -827,9 +833,6 @@ func (e *Engine) toggleRecord(on bool, by string) {
 	e.rec.Set(on)
 }
 
-// hdmiID is the board's HDMI in the catalogue (probe).
-const hdmiID = "hdmi"
-
 // mayReplugHDMI: may the HDMI renegotiate now (the audio watcher's hotplug pulse, ≈2 s without its
 // video)? Only when not broadcasting and with the HDMI not on the program. Asked from the watcher's
 // goroutine; the actor answers, and no answer is a no.
@@ -846,13 +849,24 @@ func (e *Engine) mayReplugHDMI() bool {
 	}
 }
 
-// replugAllowed is mayReplugHDMI's answer, on the actor.
+// replugAllowed is mayReplugHDMI's answer, on the actor. The pulse renegotiates the HDMI wired to the I2S
+// (the audio watcher's chip): with two TC358743s, only that one must not be on air.
 func (e *Engine) replugAllowed() bool {
 	if e.busy() {
 		return false
 	}
+	onAir := map[string]bool{}
 	for _, id := range e.onAirIDs() {
-		if id == hdmiID {
+		onAir[id] = true
+	}
+	for _, s := range e.sources {
+		if s == nil || s.kind != "hdmi-csi" || !onAir[s.id] {
+			continue
+		}
+		s.mu.Lock()
+		wired := s.audioCard != audio.NoI2S
+		s.mu.Unlock()
+		if wired {
 			return false
 		}
 	}

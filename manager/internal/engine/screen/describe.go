@@ -7,13 +7,11 @@ import (
 
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/pipeline"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/engine/screen/ui"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/gst"
 )
 
 // The multiview's timing (engine_mixer.py).
 const (
-	// MVGap: a source's frame goes to its tile if MVGap has passed since the last one (from 60/s one in two,
-	// from 30/s all of them even with some jitter). The engine gives it to each source bridge's SetScreen.
-	MVGap = 25 * time.Millisecond
 	// MVMargin: on top of the program's latency for the program on the screen (what the compositor takes to
 	// give it out). The engine's pgmtap → mvp bridge (BridgeShared) uses Extra = ProgramDelay.
 	MVMargin = 40 * time.Millisecond
@@ -21,6 +19,23 @@ const (
 	// UIFPS: the UI layer's nominal rate (the VU meters, 20 a second).
 	UIFPS = 20
 )
+
+// FPS is the screen's rate for a program of programFPS: the multiview's (MV_FPS), at most 30.
+func FPS(programFPS int) int { return max(1, min(programFPS, pipeline.ScreenFPS)) }
+
+// Grid is what the sources' bridges need to give each tile one frame per screen frame (SetScreen,
+// MIXER.md §24): the screen's rate and the pad offset of the tiles.
+func Grid(c Pipeline) gst.ScreenGrid {
+	return gst.ScreenGrid{FPS: FPS(c.FPS), Offset: TileDelay(c.Latency, c.FPS)}
+}
+
+// TileGap sizes a tile's queue: the gate sends one frame per screen frame by its pts (and, for a source
+// without one, at most one every 3/4 of a screen frame by arrival), and never sized for fewer than one every
+// 25 ms (MV_GAP, the old gate: the same sizes as before at 30 a second or less). A burst of late frames is
+// what the leaky queue drops, oldest first.
+func TileGap(programFPS int) time.Duration {
+	return min(25*time.Millisecond, 3*time.Second/time.Duration(4*FPS(programFPS)))
+}
 
 // ProgramDelay is the Extra of the pgmtap → mvp bridge: the program compositor's latency plus MVMargin,
 // on top of each program frame's pts on the screen.
@@ -38,10 +53,10 @@ func TileDelay(latency time.Duration, fps int) time.Duration {
 // tileQueue sizes a tile's mvd<i> queue for the frames waiting for their (delayed) turn after their
 // conversion (small RGBA from the converter's own pool, never the source's buffers, which the program
 // shares). A tile frame arrives up to MIXER_SYNC ahead of its time, and the offset adds TileDelay: at most
-// one frame every MVGap for that long, plus two. The converter's pool holds those, what the
+// one frame every TileGap for that long, plus two. The converter's pool holds those, what the
 // compositor's pad keeps (up to its latency), the frame on screen and the one being converted.
 func tileQueue(sync, latency time.Duration, fps int) (queue, buffers int) {
-	queue = int((sync+TileDelay(latency, fps))/MVGap) + 2
+	queue = int((sync+TileDelay(latency, fps))/TileGap(fps)) + 2
 	return queue, queue + 6
 }
 
@@ -61,7 +76,7 @@ type Pipeline struct {
 // its latency (jerks and «clock problem», trap 3). Each tile ends in a queue mvd<i> whose src pad the
 // screen shifts by TileDelay.
 func Describe(p pipeline.Platform, lay *ui.Layout, c Pipeline) string {
-	fps := min(c.FPS, pipeline.ScreenFPS)
+	fps := FPS(c.FPS)
 	appsrc := func(name, caps string) string {
 		return fmt.Sprintf(`appsrc name=%s is-live=true format=time do-timestamp=true min-latency=0 max-latency=500000000 `+
 			`max-bytes=0 block=false caps="%s"`, name, caps)

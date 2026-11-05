@@ -36,10 +36,16 @@ var (
 // source. A source without signal now does not count: the EDID does not say what the camera will send.
 func Prepare(c *config.Config, run sysx.Runner, hs hdmi.Sys) Prepared {
 	var p Prepared
-	p.TC358743 = hs.Prepare(c.EDID, c.StateDir, c.VDEV)
+	p.TC358743 = hs.Prepare(c.EDID, c.StateDir, c.HDMIWired)
 	if p.TC358743 {
-		if t, ok := hdmi.QueryDV(c.VDEV, run); ok {
-			p.Rates = append(p.Rates, t.FPS)
+		// Every chip's current mode (CAM0 and CAM1)
+		for _, tc := range hs.Chips() {
+			if tc.Video == "" {
+				continue
+			}
+			if t, ok := hdmi.QueryDV(tc.Video, run); ok {
+				p.Rates = append(p.Rates, t.FPS)
+			}
 		}
 	}
 	if fileExecutable(c.ProbeBin) {

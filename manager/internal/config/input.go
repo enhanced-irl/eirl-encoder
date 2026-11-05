@@ -50,6 +50,7 @@ type InputPatch struct {
 	Mode          *string `json:"mode"`
 	Audio         *string `json:"audio"`
 	EDIDPreferred *string `json:"edidPreferred"`
+	HDMIWired     *string `json:"hdmiWired"` // "" | cam0 | cam1: which HDMI board has the audio and reset wires
 	Apply         bool    `json:"apply"`
 }
 
@@ -66,6 +67,7 @@ func (p InputPatch) ApplyTo(cur Settings) (Settings, error) {
 	set(p.Mode, &s.VideoMode)
 	set(p.Audio, &s.AudioSource)
 	set(p.EDIDPreferred, &s.EDIDPreferred)
+	set(p.HDMIWired, &s.HDMIWired)
 	if err := s.Validate(); err != nil {
 		return cur, err
 	}

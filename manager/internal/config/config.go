@@ -30,6 +30,7 @@ import (
 
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/i18n"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/safefile"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/tcchip"
 )
 
 // Settings is what the app manages: engine.env, that is the ACTIVE destination flattened (destinations.go) plus
@@ -53,6 +54,10 @@ type Settings struct {
 	// EDIDPreferred: preferred mode of the EDID announced to the source (one of EDIDModes). The list
 	// of modes is the same in all of them; what changes is which one the device asks for.
 	EDIDPreferred string
+	// HDMIWired: HDMI_WIRED as the app saved it (cam0 | cam1), "" = not set here: the board settings' value, or
+	// auto. Which TC358743 has the audio and reset wires, with two (DEVELOPMENT.md). Only written when set, so
+	// that the board's value is not frozen into this file.
+	HDMIWired string
 	// Input (SOURCES.md): where video and audio come from. See input.go.
 	Source      string // hdmi | usb | test
 	VideoDevice string // auto | /dev/v4l/by-id/… | /dev/v4l/by-path/… (with usb)
@@ -148,6 +153,9 @@ func (s Settings) Validate() error {
 	}
 	if s.Output != "on" && s.Output != "off" {
 		errs["output"] = i18n.Ref("config.output")
+	}
+	if !tcchip.ValidWired(s.HDMIWired) {
+		errs["hdmiWired"] = i18n.Ref("config.one_of", tcchip.WiredCAM0+", "+tcchip.WiredCAM1)
 	}
 	if !validEDID(s.EDIDPreferred) {
 		errs["edidPreferred"] = i18n.Ref("config.one_of", strings.Join(EDIDModes, ", "))
@@ -377,6 +385,9 @@ func Load(defaultPath, appPath string) (Settings, error) {
 			return s, err
 		}
 		apply(&s, env)
+		if p == appPath {
+			s.HDMIWired = env["HDMI_WIRED"] // only the app's own (see Settings.HDMIWired)
+		}
 	}
 	return s, nil
 }
@@ -457,6 +468,11 @@ func (s Settings) Render() []byte {
 	b.WriteString("# eirl-engine.service loads it after /etc/default/eirl-engine (drop-in eirl-encoder.conf).\n")
 	for _, k := range keys {
 		b.WriteString(k + "=" + vals[k] + "\n")
+	}
+	// Unlike the rest, only when set: "" lets the board settings' value through (a hidden setting for a device
+	// built with two HDMI boards), or auto
+	if s.HDMIWired != "" {
+		b.WriteString("HDMI_WIRED=" + s.HDMIWired + "\n")
 	}
 	return []byte(b.String())
 }

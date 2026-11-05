@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -31,6 +32,8 @@ var (
 	reSourceID = regexp.MustCompile(`^/dev/v4l/by-(id|path)/[A-Za-z0-9_:.-]{1,200}$`)
 	reAllLine  = regexp.MustCompile(`^SRC([0-9])_([A-Z_]+)=(.*)$`)
 	reNode     = regexp.MustCompile(`^/dev/video[0-9]{1,3}$`)
+	// The board HDMI's names in the catalogue: one chip, or «HDMI 1» and «HDMI 2» (the same in every language)
+	reHDMIName = regexp.MustCompile(`^HDMI( de la placa| [12])$`)
 	reALSA     = regexp.MustCompile(`^alsa:[A-Za-z0-9_-]{1,32}$`)
 )
 
@@ -139,6 +142,9 @@ type Entry struct {
 	// Audio is the audio input of the same device ("alsa:<card>" of a USB camera, the network camera's
 	// own id), "" if none: the audio of a camera follows its video slot (Engine.syncAudio)
 	Audio string
+	// NoI2S: a board HDMI (hdmi-csi) without the board's HDMI audio: with two TC358743s, the one that is not
+	// wired to the I2S (the catalogue gives the wired one "audio": {"id": "i2s"})
+	NoI2S bool
 }
 
 // AudioEntry is one audio input of the catalogue (used by the audio phase). Profile: a Bluetooth input's
@@ -178,7 +184,8 @@ func ParseList(out string, test bool, netValid NetworkValid, netName NetworkName
 			_ = json.Unmarshal(a, &raw.Audio)
 		}
 	}
-	var want []Entry
+	var want, hdmis []Entry
+	hdmiAudio := false // some board HDMI says whether it has the I2S (an app from before two chips says nothing)
 	if test {
 		want = append(want, Entry{ID: "test", Kind: "test", Name: "Barras"})
 	}
@@ -192,9 +199,25 @@ func ParseList(out string, test bool, netValid NetworkValid, netName NetworkName
 		node, _ := str(s, "node")
 		switch kind {
 		case "hdmi-csi":
-			if reNode.MatchString(node) {
-				want = append([]Entry{{ID: "hdmi", Kind: "hdmi-csi", Name: "HDMI de la placa", Node: node}}, want...)
+			// The TC358743 on CAM0 and/or CAM1: "hdmi" and "hdmi2" (any other id is the one board HDMI of an app
+			// from before two chips)
+			if id != "hdmi2" {
+				id = "hdmi"
 			}
+			if !reNode.MatchString(node) || slices.ContainsFunc(hdmis, func(h Entry) bool { return h.ID == id }) {
+				continue
+			}
+			e := Entry{ID: id, Kind: "hdmi-csi", Name: "HDMI de la placa", Node: node}
+			if n, _ := str(s, "name"); reHDMIName.MatchString(n) {
+				e.Name = n
+			}
+			if a, ok := s["audio"].(map[string]any); ok {
+				hdmiAudio = true
+				e.NoI2S = a["id"] != "i2s"
+			} else {
+				e.NoI2S = true
+			}
+			hdmis = append(hdmis, e)
 		case "usb":
 			if reSourceID.MatchString(id) {
 				name := "USB"
@@ -219,7 +242,12 @@ func ParseList(out string, test bool, netValid NetworkValid, netName NetworkName
 			}
 		}
 	}
-	c.Sources = want
+	if !hdmiAudio {
+		for i := range hdmis {
+			hdmis[i].NoI2S = hdmis[i].ID != "hdmi"
+		}
+	}
+	c.Sources = append(hdmis, want...)
 	for _, a := range raw.Audio {
 		id, _ := str(a, "id")
 		kind, _ := str(a, "kind")

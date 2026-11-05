@@ -629,3 +629,61 @@ func TestInputLayout(t *testing.T) {
 		}
 	}
 }
+
+// With two TC358743 chips the page has the board with the HDMI audio (the web's hdmiWired): under the audio, also
+// when the audio goes up a row; one chip has no such field and saves without it.
+func TestInputWiredBoard(t *testing.T) {
+	h, app := inputHarness(t)
+	if keys := h.u.inputKeys(&app.snap); slices.Contains(keys, "s_inp_wired") || slices.Contains(keys, "s_inp_wired_up") {
+		t.Fatalf("one chip, a field to choose its board: %v", keys)
+	}
+	h.press("s_inp_edid", 0.1)
+	pickChoice(t, h, "1080p50")
+	h.press("s_inp_save", 0.1)
+	if a := app.lastDid(); a.What != "input_save" || a.Body["hdmiWired"] != nil {
+		t.Fatalf("one chip: %+v", a.Body)
+	}
+
+	h.u.inp = inputState{}
+	app.snap.Status.Input.HDMIChips = 2
+	app.snap.Sources.Sources = append(app.snap.Sources.Sources, SourceChoice{ID: "hdmi2", Kind: "hdmi-csi", Name: "HDMI 2"})
+	app.snap.Sources.Sources[0].Name = "HDMI 1"
+	if keys := h.u.inputKeys(&app.snap); !slices.Contains(keys, "s_inp_wired") {
+		t.Fatalf("two chips, no field: %v", keys)
+	}
+	h.press("s_inp_wired", 0.1)
+	if got := optIDs(h.u.chooser.opts); !reflect.DeepEqual(got, []string{"auto", "cam0", "cam1"}) || h.u.chooser.opts[0].Title != "Automático" {
+		t.Fatalf("%+v", h.u.chooser.opts)
+	}
+	pickChoice(t, h, "cam1")
+	if !h.u.inpDirty(&app.snap) {
+		t.Fatal("the choice is not a change")
+	}
+	h.press("s_inp_save", 0.1)
+	if a := app.lastDid(); a.Body["hdmiWired"] != "cam1" || a.Body["source"] != "hdmi" {
+		t.Fatalf("%+v", a.Body)
+	}
+	// Saved: automatic again sends "" (the app drops its line, and the board's setting rules)
+	h.u.inp = inputState{}
+	app.snap.Status.Input.HDMIWired = "cam1"
+	h.press("s_inp_wired", 0.1)
+	pickChoice(t, h, "auto")
+	h.press("s_inp_save", 0.1)
+	if a := app.lastDid(); a.Body["hdmiWired"] != "" {
+		t.Fatalf("%+v", a.Body)
+	}
+	// The test pattern has no second field: the audio and this one go up a row
+	h.u.inp = inputState{}
+	app.snap.Status.Input.Source = "test"
+	if keys := h.u.inputKeys(&app.snap); !slices.Contains(keys, "s_inp_wired_up") || slices.Contains(keys, "s_inp_wired") {
+		t.Fatalf("%v", keys)
+	}
+	// Its errors are its field's
+	h.advance(time.Second)
+	h.u.inp.savedAt = h.now().Add(-time.Millisecond)
+	app.snap.Last = &AppResult{What: "input_save", OK: false, At: h.now().Add(time.Millisecond),
+		Fields: map[string]AppFieldError{"hdmiWired": {Code: "one_of", Message: "debe ser cam0 o cam1"}}}
+	if f, words := h.u.inputErrors(&app.snap); !f["wired"] || len(words) != 1 || !strings.HasPrefix(words[0], "Placa HDMI con el audio") {
+		t.Fatalf("%v %v", f, words)
+	}
+}

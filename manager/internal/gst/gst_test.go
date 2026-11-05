@@ -355,3 +355,177 @@ func TestAnimatorOneStepPerFrame(t *testing.T) {
 		t.Error("still busy after the last step")
 	}
 }
+
+// The tiles' gate (MIXER.md §24): one frame per screen frame, by the pts on the screen's grid, whatever
+// the arrival jitter; by arrival only without a pts.
+func TestMvGateOnePerScreenFrame(t *testing.T) {
+	ms := time.Millisecond
+	off := 100*ms - time.Second/60 // TileDelay at 60 with MIXER_LATENCY 60
+	slot := func(pts time.Duration) int64 { return int64((pts + off) * 30 / time.Second) }
+	// passed runs the gate over n frames at fps with arrivals jittered by up to jit, and returns the slots
+	// of those it let through
+	passed := func(fps, n int, jit time.Duration) []int64 {
+		g := newMvGate()
+		var got []int64
+		for k := range n {
+			pts := time.Duration(k) * time.Second / time.Duration(fps)
+			// arrivals: 19 ms after the capture plus a jitter that alternates sign and grows (like the Logi's)
+			arr := time.Hour + pts + 19*ms + time.Duration((k*7919)%int(jit/ms+1))*ms
+			if g.step(30, off, pts, arr) {
+				got = append(got, slot(pts))
+			}
+		}
+		return got
+	}
+	for _, c := range []struct {
+		fps  int
+		want int // frames through in 3 s
+	}{{60, 90}, {50, 90}, {30, 90}} {
+		got := passed(c.fps, 3*c.fps, 25*ms)
+		if len(got) < c.want-1 || len(got) > c.want+1 {
+			t.Errorf("%d fps: %d through in 3 s, want %d (30 a second)", c.fps, len(got), c.want)
+		}
+		for i := 1; i < len(got); i++ {
+			if got[i] != got[i-1]+1 {
+				t.Errorf("%d fps: slots %d then %d: a screen frame without a new picture or with two", c.fps, got[i-1], got[i])
+				break
+			}
+		}
+	}
+	// A 25 one: every frame, one screen frame in six without a new one (no way around it at 30)
+	if got := passed(25, 75, 25*ms); len(got) != 75 {
+		t.Errorf("25 fps: %d of 75 through", len(got))
+	}
+	// A pts that jumps forward (a larger sync offset): the next one goes, the empty slots stay empty
+	g := newMvGate()
+	if !g.step(30, 0, 0, 0) || g.step(30, 0, 10*ms, 0) || !g.step(30, 0, 500*ms, 0) || g.step(30, 0, 510*ms, 0) || !g.step(30, 0, 534*ms, 0) {
+		t.Error("forward jump")
+	}
+	// No screen: nothing; no pts: by arrival, one every 3/4 of a screen frame (25 ms at 30)
+	if newMvGate().step(0, 0, 0, 0) {
+		t.Error("fps 0 lets frames through")
+	}
+	g = newMvGate()
+	var n int
+	for k := range 60 {
+		if g.step(30, 0, -1, time.Hour+time.Duration(k)*time.Second/60) {
+			n++
+		}
+	}
+	if n != 30 {
+		t.Errorf("without pts, a 60 one by arrival: %d of 60, want 30", n)
+	}
+	// After a reset (another screen pipeline) the same slot goes again
+	g = newMvGate()
+	g.step(30, 0, 0, 0)
+	g.g = newMvGate().g
+	if !g.step(30, 0, 5*ms, 0) {
+		t.Error("reset")
+	}
+	// A regrid (the same screen, its phase measured: 13 ms): the frame just sent keeps its screen frame on
+	// the new grid, so the next one in it waits; the one after the new boundary goes
+	g = newMvGate()
+	if !g.step(30, 0, 20*ms, 0) {
+		t.Fatal("first")
+	}
+	g.regrid(30, -13*ms) // 20 ms → 7 ms on the new grid: frame 0, which ends at 33.3 → pts 46.3
+	if g.step(30, -13*ms, 40*ms, 0) || !g.step(30, -13*ms, 47*ms, 0) {
+		t.Error("regrid: the slot of the last frame sent is kept on the new grid")
+	}
+	// A still takes its screen frame: a live frame in it waits for the next
+	g = newMvGate()
+	g.mark(30, 0, 10*ms)
+	if g.step(30, 0, 20*ms, 0) || !g.step(30, 0, 34*ms, 0) {
+		t.Error("still: its screen frame is taken")
+	}
+	g.mark(30, 0, 30*ms) // an older still does not move the gate back
+	if g.step(30, 0, 40*ms, 0) {
+		t.Error("still from the past moved the gate")
+	}
+}
+
+// Real GStreamer: a 50 fps source gives its tile 30 frames a second (before Nov 5: every other frame, 25)
+// and the program all 50.
+func TestBridgeScreenTileAt30From50(t *testing.T) {
+	g := New()
+	pgm, err := g.Parse("program", "appsrc name=m0 is-live=true format=time do-timestamp=true min-latency=0 "+
+		"max-latency=500000000 max-bytes=0 block=false caps=video/x-raw,format=I420,width=64,height=36,framerate=50/1 "+
+		"! queue ! fakesink name=out sync=false")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pgm.Close()
+	scr, err := g.Parse("screen", "appsrc name=mvs0 is-live=true format=time do-timestamp=true min-latency=0 "+
+		"max-latency=500000000 max-bytes=0 block=false caps=video/x-raw,format=I420,width=64,height=36,framerate=30/1 "+
+		"! queue ! fakesink name=tile sync=false")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer scr.Close()
+	src, err := g.Parse("source", "videotestsrc is-live=true pattern=ball ! video/x-raw,format=I420,width=64,height=36,framerate=50/1 "+
+		"! appsink name=snk emit-signals=false sync=false max-buffers=2 drop=true enable-last-sample=false")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	pgm.FixBase(g.Now())
+	scr.FixBase(pgm.BaseTime())
+	b := g.NewBridge(BridgeSource, pgm, pgm.ByName("m0"))
+	defer b.Free()
+	b.SetParams(BridgeParams{Sync: 120 * time.Millisecond})
+	b.SetScreen(scr.ByName("mvs0"), ScreenGrid{FPS: 30, Offset: 80 * time.Millisecond})
+	out, tile := g.NewCounter(pgm.ByName("out"), "sink"), g.NewCounter(scr.ByName("tile"), "sink")
+	for _, p := range []Pipeline{pgm, scr} {
+		if err := p.SetState(StatePlaying); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b.Attach(src.ByName("snk"))
+	if err := src.SetState(StatePlaying); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second) // settle
+	out.Take()
+	tile.Take()
+	time.Sleep(3 * time.Second)
+	np, _ := out.Take()
+	nt, _ := tile.Take()
+	if np < 140 || np > 160 {
+		t.Errorf("program: %d frames in 3 s, want ~150", np)
+	}
+	if nt < 85 || nt > 95 {
+		t.Errorf("tile: %d frames in 3 s, want ~90 (30 a second)", nt)
+	}
+	// Off the screen: nothing more to the tile
+	b.SetScreen(nil, ScreenGrid{})
+	time.Sleep(200 * time.Millisecond)
+	tile.Take()
+	time.Sleep(300 * time.Millisecond)
+	if n, _ := tile.Take(); n != 0 {
+		t.Errorf("tile after SetScreen(nil): %d", n)
+	}
+	b.Detach() // before the deferred Free: the source's appsink would still call into it
+}
+
+// DropDuration: on a pad that exists, and the frames keep flowing.
+func TestDropDuration(t *testing.T) {
+	g := New()
+	p, err := g.Parse("dur", "videotestsrc is-live=true ! video/x-raw,format=I420,width=64,height=36,framerate=30/1 "+
+		"! queue name=q ! fakesink name=out sync=false")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	q := p.ByName("q")
+	if !q.DropDuration("sink") || q.DropDuration("nope") {
+		t.Fatal("DropDuration should say whether the pad exists")
+	}
+	cnt := g.NewCounter(p.ByName("out"), "sink")
+	if err := p.SetState(StatePlaying); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second)
+	if n, _ := cnt.Take(); n < 20 {
+		t.Fatalf("frames through: %d", n)
+	}
+}

@@ -3,7 +3,7 @@
 # board, which file of build/out it is, what part of the encoder it is (hdmi | bluetooth | uplinks | system: what
 # "restart to finish" names) and its flags: reboot (it acts only after a restart: the camera input keeps tc358743
 # loaded) or usedBy=<module> (firmware: read when that module probes a device). A module acts at once when it is not
-# loaded, and after a restart when it is. A module's sha256 is pinned in system/modules.lock.
+# loaded, and after a restart when it is. A module's or device tree's sha256 is pinned in system/modules.lock.
 # path on the board                                            build/out/…                                   area       flags
 /lib/modules/<kernel>/extra/tc358743.ko                        tc358743.ko                                   hdmi       reboot
 /lib/modules/<kernel>/updates/eirl-modems/qmi_wwan.ko          modules/qmi_wwan.ko                           uplinks
@@ -13,6 +13,10 @@
 /lib/modules/<kernel>/updates/eirl-modems/ipheth.ko            modules/ipheth.ko                             uplinks
 /lib/modules/<kernel>/updates/eirl-bluetooth/btusb.ko          modules-bt/btusb.ko                           bluetooth
 /lib/modules/<kernel>/updates/eirl-bluetooth/btrtl.ko          modules-bt/btrtl.ko                           bluetooth
+# The B01 device tree with a TC358743 on CAM0, CAM1 or both (dt/tegra210-porg-camera-tc358743-dual.dtsi): a new file
+# next to the frozen base's, which stays. The splash's extlinux entry boots it once it is here; the other entries keep
+# the base's, so U-Boot falls back to them (UPDATES.md §12.11). Its sha256 is pinned in system/modules.lock too
+/boot/tegra210-p3448-0000-p3449-0000-b00-tc358743-dual.dtb   tegra210-p3448-0000-p3449-0000-b00-tc358743-dual.dtb   hdmi   reboot
 /lib/firmware/rtl_bt/rtl8761bu_fw.bin                          firmware/rtl_bt/rtl8761bu_fw.bin              bluetooth  usedBy=btrtl
 /lib/firmware/rtl_bt/rtl8761bu_config.bin                      firmware/rtl_bt/rtl8761bu_config.bin          bluetooth  usedBy=btrtl
 /lib/firmware/rtl_bt/LICENCE.rtlwifi_firmware.txt              firmware/rtl_bt/LICENCE.rtlwifi_firmware.txt  bluetooth

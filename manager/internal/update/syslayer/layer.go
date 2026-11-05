@@ -119,8 +119,9 @@ var (
 	reKernel  = regexp.MustCompile(`^[0-9][0-9A-Za-z.+_-]*$`)
 )
 
-// allowedPrefixes: where the layer may own files (UPDATES.md §12.8). Never /boot, /etc/eirl-encoder,
-// sudoers, /home, /root or dpkg's database; the app's own files (files.txt) are not the layer's either.
+// allowedPrefixes: where the layer may own files (UPDATES.md §12.8). Never /boot (but the one device tree of
+// allowedExact), /etc/eirl-encoder, sudoers, /home, /root or dpkg's database; the app's own files (files.txt) are
+// not the layer's either.
 // "<kernel>" is replaced by Requires.Kernel.
 var allowedPrefixes = []string{
 	"/lib/modules/<kernel>/updates/eirl-",
@@ -135,6 +136,9 @@ var allowedPrefixes = []string{
 // allowedExact: single files the layer may own.
 var allowedExact = []string{
 	"/lib/modules/<kernel>/extra/tc358743.ko",
+	// The B01 device tree with a TC358743 on CAM0, CAM1 or both: a new file next to the frozen base's, which the
+	// splash's extlinux entry boots once it is here (splash.DualFDT, UPDATES.md §12.11). Nothing else in /boot
+	DualDTB,
 	// The first-boot units of the image (they only run once, but a board and an image must not differ)
 	"/etc/systemd/system/eirl-firstboot.service",
 	"/etc/systemd/system/eirl-firmware.service",
@@ -146,6 +150,9 @@ var allowedExact = []string{
 	"/usr/share/alsa/alsa.conf.d/20-bluealsa.conf",
 	"/etc/dbus-1/system.d/eirl-encoder-bluetooth.conf",
 }
+
+// DualDTB: the device tree the layer may install in /boot (splash.DualFDT names the same file).
+const DualDTB = "/boot/tegra210-p3448-0000-p3449-0000-b00-tc358743-dual.dtb"
 
 // A drop-in of ours for any unit: /etc/systemd/system/<unit>.d/90-eirl*.conf
 var reDropIn = regexp.MustCompile(`^/etc/systemd/system/[A-Za-z0-9:_.@-]+\.(service|socket|timer)\.d/90-eirl[A-Za-z0-9_.-]*\.conf$`)

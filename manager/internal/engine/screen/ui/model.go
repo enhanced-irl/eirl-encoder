@@ -173,6 +173,9 @@ func (s *Status) mainID() string { return str(s.Program.Main) }
 // sourceName is a source's name in the screen's language: the engine's own sources (fixed ids: hdmi, i2s,
 // test) by their translated name; the rest as the engine says (a device's or the user's name).
 func (u *UI) sourceName(id, name string) string {
+	if (id == "hdmi" || id == "hdmi2") && (name == "HDMI 1" || name == "HDMI 2") {
+		return name // two TC358743s: the catalogue's names, the same in every language
+	}
 	if n, ok := u.Tx.SourceNames[id]; ok {
 		return n
 	}

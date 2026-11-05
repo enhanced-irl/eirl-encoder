@@ -53,6 +53,25 @@ typedef struct {
 	gint64 lag_ns;           // minimum age since the last take (network cameras' backlog)
 } EgBridgeStats;
 
+// The tile's gate (MIXER.md §24): a source's frame goes to its tile if it is the first one that falls in a
+// new frame of the screen, by its pts on the screen: pts + offset on the grid of fps frames a second from 0
+// (offset = the tile's pad offset minus the phase of the compositor's frames).
+// That is what the compositor uses to pick a pad's buffer for each frame it makes, so it gets exactly one
+// per frame (a 60 or a 50 one, 30 a second), whatever the frames' arrival jitter. Without a pts (-1: the
+// appsrc stamps it on arrival), by arrival: at most one every 3/4 of a screen frame. 1 = send it.
+typedef struct {
+	gint64 slot;      // the screen frame of the last one sent (G_MININT64: none yet)
+	gint64 last_pts;  // its pts (-1: none), to place it again on another grid of the same screen
+	gint64 last_mono; // its arrival (monotonic ns), for the frames without a pts
+} EgMvGate;
+void eg_mv_gate_reset(EgMvGate *g);
+int eg_mv_gate_step(EgMvGate *g, int fps, gint64 offset_ns, gint64 pts, gint64 mono);
+// The same screen with another grid (its phase, measured): the last frame sent keeps its screen frame, so the
+// next one in it does not go through too
+void eg_mv_gate_regrid(EgMvGate *g, int fps, gint64 offset_ns);
+// A still went to the tile with this pts: its screen frame is taken (stills always go, the gate never stops them)
+void eg_mv_gate_mark(EgMvGate *g, int fps, gint64 offset_ns, gint64 pts);
+
 // CaptureJudge: are a source's capture times usable? The window minimum of the age (the closest to the
 // real delay: hiccups only make it bigger), decided every 60 frames: usable if −5 ms ≤ min ≤ limit.
 typedef struct {
@@ -73,7 +92,9 @@ EgBridge *eg_bridge_new(int kind, GstElement *pgm_pipe, GstElement *dst);
 void eg_bridge_free(EgBridge *b);
 void eg_bridge_params(EgBridge *b, gint64 sync_ns, gint64 extra_ns, gint64 early_ns, int raw_clock,
 		      gint64 judge_limit_ns);
-void eg_bridge_mv(EgBridge *b, GstElement *mv_dst, gint64 gap_ns);
+// The screen's grid for this bridge's tile: the compositor makes fps frames a second, frame k starting at
+// k/fps once offset_ns is added to a tile's pts (its pad offset minus the grid's phase). fps 0 = no tile.
+void eg_bridge_mv(EgBridge *b, GstElement *mv_dst, int fps, gint64 offset_ns);
 void eg_bridge_thumb(EgBridge *b, GstElement *thumb_dst, gint64 every_ns);
 void eg_bridge_every(EgBridge *b, int every);
 void eg_bridge_dst(EgBridge *b, GstElement *dst);
@@ -142,5 +163,26 @@ int eg_anim_busy(EgAnim *a);
 void eg_anim_free(EgAnim *a);
 // A pad's offset (gst_pad_set_offset): its data is that much later on the running time; 0 if no such pad
 int eg_set_pad_offset(GstElement *el, const char *pad, gint64 offset_ns);
+// A probe on a pad that takes the duration off every buffer through it, if the buffer is writable (nobody
+// else holds it); for the pad's life. 0 if no such pad
+int eg_drop_duration(GstElement *el, const char *pad);
+
+// What a compositor shows from each of its pads sink_0 … sink_<npads-1> (MIXER.md §24): a probe on its src
+// pad reads, after each output frame, the buffer each pad used for it, and one on each sink pad counts what
+// reaches it. Only on GStreamer 1.14's videoaggregator (nvcompositor): NULL on anything else.
+typedef struct {
+	guint64 in;    // buffers that reached the pad
+	guint64 fresh; // output frames with a buffer the pad had not shown before
+	gint32 hold;   // the longest run of output frames with the same buffer
+} EgMeterPad;
+typedef struct EgTileMeter EgTileMeter;
+EgTileMeter *eg_tile_meter_new(GstElement *comp, int npads, int fps);
+// The phase of the compositor's frames: they start at phase + k/fps of the running time. 0 = no frame yet
+int eg_tile_meter_phase(EgTileMeter *m, gint64 *phase_ns);
+// Since the previous take, which starts a new window: output frames, the phase (-1: none yet), its largest
+// change between two frames (0: a steady grid), and npads EgMeterPad
+void eg_tile_meter_take(EgTileMeter *m, guint64 *frames, gint64 *phase_ns, gint64 *jump_ns, EgMeterPad *pads);
+// Once the compositor's pipeline is in NULL
+void eg_tile_meter_free(EgTileMeter *m);
 
 #endif

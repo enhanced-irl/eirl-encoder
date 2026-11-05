@@ -1,0 +1,3 @@
+- Nouveau : la carte HDMI peut aller sur l'un ou l'autre connecteur de caméra (CAM0 ou CAM1). Avec une carte sur chacun, vous avez deux entrées HDMI, « HDMI 1 » et « HDMI 2 » (la seconde sans audio propre), et vous choisissez celle qui porte l'audio dans Entrée, sur le web et dans Réglages › Sources de l'écran. Après la mise à jour, redémarrez l'encodeur pour l'activer.
+- Nouveau : si vous avez monté le fil de reset de la carte HDMI (voir le guide matériel du dépôt), l'encodeur s'en sert au démarrage et pour récupérer l'audio HDMI quand il reste bloqué.
+- Amélioration : les miniatures des sources sur l'écran tactile sont fluides. Avant, certaines caméras USB s'affichaient par à-coups, avec moins de la moitié de leurs images.

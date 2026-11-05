@@ -2642,7 +2642,7 @@ function savedInput() {
 function catalogSource(value) {
   const [kind, id] = splitSource(value);
   if (!state.catalog) return null;
-  if (kind !== 'usb') return state.catalog.sources.find((s) => s.kind === (kind === 'hdmi' ? 'hdmi-csi' : 'test')) || null;
+  if (kind !== 'usb') return state.catalog.sources.find((s) => (kind === 'hdmi' ? s.kind === 'hdmi-csi' && s.id !== 'hdmi2' : s.kind === 'test')) || null;
   if (id === 'auto') return state.catalog.sources.find((s) => s.kind === 'usb' && s.auto) || null;
   return state.catalog.sources.find((s) => s.id === id) || null;
 }
@@ -2659,7 +2659,7 @@ function fillInputForm() {
   const cur = sv.source === 'usb' ? `usb|${sv.device}` : sv.source;
   const opts = [];
   for (const s of state.catalog.sources) {
-    if (s.kind === 'hdmi-csi') opts.push(option('hdmi', s.name, cur === 'hdmi'));
+    if (s.kind === 'hdmi-csi' && s.id !== 'hdmi2') opts.push(option('hdmi', s.name, cur === 'hdmi')); // two chips: HDMI 1
     if (s.kind === 'usb') opts.push(option(`usb|${s.id}`, `${s.name} · ${usbSpeed(s)}`, cur === `usb|${s.id}`));
   }
   opts.push(option('usb|auto', t('input.usbAuto'), cur === 'usb|auto'));
@@ -2677,6 +2677,9 @@ function fillInputForm() {
   $('f-audio').replaceChildren(...aopts);
 
   if (sv.edidPreferred) $('f-edid').value = sv.edidPreferred;
+  // Two TC358743s (CAM0 and CAM1): which board has the audio and reset wires (HDMI_WIRED); hidden with one
+  $('hdmi-wired-field').hidden = !(sv.hdmiChips >= 2);
+  $('f-hdmi-wired').value = sv.hdmiWired === 'cam0' || sv.hdmiWired === 'cam1' ? sv.hdmiWired : '';
   state.inputSaved = JSON.stringify(sv);
   renderModeOptions(sv);
   renderSourceInfo();
@@ -2754,6 +2757,7 @@ $('input-form').addEventListener('submit', async (ev) => {
   const [kind, device] = splitSource($('f-source').value);
   const body = { source: kind, audio: $('f-audio').value, apply };
   if (kind === 'hdmi') body.edidPreferred = $('f-edid').value;
+  if (!$('hdmi-wired-field').hidden) body.hdmiWired = $('f-hdmi-wired').value;
   if (kind === 'usb') {
     const [format, mode] = $('f-mode').value === 'auto' ? ['auto', 'auto'] : splitSource($('f-mode').value);
     Object.assign(body, { device, format, mode });

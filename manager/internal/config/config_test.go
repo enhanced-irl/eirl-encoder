@@ -329,3 +329,38 @@ func TestHashesWithoutOutput(t *testing.T) {
 		t.Errorf("fingerprint without OUTPUT %s", h2.NoOutput)
 	}
 }
+
+// HDMI_WIRED (which of two TC358743s has the audio and reset wires): the app's file only has it once chosen
+// here, so that the board settings' value (a hidden setting for a device built with two HDMI boards) is not
+// frozen into it by the next save; choosing auto again removes it.
+func TestHDMIWiredOnlyWhenChosen(t *testing.T) {
+	dir := t.TempDir()
+	def, app := filepath.Join(dir, "default"), filepath.Join(dir, "app.env")
+	os.WriteFile(def, []byte("SOURCE=hdmi\nSRT_URL=srt://:9000\nSRT_MODE=listener\nHDMI_WIRED=cam1\n"), 0o644)
+	s, err := Load(def, app)
+	if err != nil || s.HDMIWired != "" {
+		t.Fatalf("the board's value is not the app's: %q %v", s.HDMIWired, err)
+	}
+	if err := Save(app, s); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(app); strings.Contains(string(b), "HDMI_WIRED") {
+		t.Errorf("auto written into the app's file:\n%s", b)
+	}
+	cam0 := "cam0"
+	s2, err := InputPatch{HDMIWired: &cam0}.ApplyTo(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	Save(app, s2)
+	if b, _ := os.ReadFile(app); !strings.HasSuffix(string(b), "\nHDMI_WIRED=cam0\n") {
+		t.Errorf("a choice not written:\n%s", b)
+	}
+	if s3, _ := Load(def, app); s3.HDMIWired != "cam0" {
+		t.Errorf("reloaded: %q", s3.HDMIWired)
+	}
+	bad := "CAM1"
+	if _, err := (InputPatch{HDMIWired: &bad}).ApplyTo(s); err == nil {
+		t.Error("an invalid value accepted")
+	}
+}

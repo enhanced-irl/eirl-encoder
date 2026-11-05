@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * The TC358743's hardware reset (the RST pad of its board) on pin 33 of the 40-pin header (GPIO13 = PE6),
+ * through a DRV8833: pin 33 drives IN4, OUT3 pulls RST low. It inverts: pin high = chip in reset, so
+ * GPIO_ACTIVE_HIGH. Never wire pin 33 straight to RST: the header's level shifter (TXB0108) then latches the
+ * chip in reset (DEVELOPMENT.md, "Hardware reset of the TC358743").
+ *
+ * Included after tegra210-porg-camera-tc358743-dual.dtsi. There is one wire, soldered to the board of one chip,
+ * which may sit on either connector, so both nodes declare it: the driver (tc358743-jetson.patch) gives the pin
+ * to the first chip that answers, an empty connector hands it back, and with two chips the module parameter
+ * reset_port says which connector's chip is wired. A board with nothing on pin 33 is unaffected: requesting
+ * the pin drives it low, the reset's released level.
+ */
+#include <dt-bindings/gpio/tegra-gpio.h>
+
+#define TC358743_RESET		TEGRA_GPIO(E, 6)
+
+&tc358743_cam0 {
+	reset-gpios = <&gpio TC358743_RESET GPIO_ACTIVE_HIGH>;
+};
+
+&tc358743_cam1 {
+	reset-gpios = <&gpio TC358743_RESET GPIO_ACTIVE_HIGH>;
+};

@@ -272,6 +272,17 @@ func (e *element) SetPad(pad, prop, value string) bool {
 	return C.eg_set_pad_arg(el, cpad, cp, cv) != 0
 }
 
+func (e *element) DropDuration(pad string) bool {
+	el, done := e.use()
+	defer done()
+	if el == nil {
+		return false
+	}
+	cpad := C.CString(pad)
+	defer C.free(unsafe.Pointer(cpad))
+	return C.eg_drop_duration(el, cpad) != 0
+}
+
 func (e *element) SetPadOffset(pad string, d time.Duration) bool {
 	el, done := e.use()
 	defer done()
@@ -404,8 +415,12 @@ func (b *bridge) SetParams(p BridgeParams) {
 	C.eg_bridge_params(b.p, C.gint64(p.Sync), C.gint64(p.Extra), C.gint64(p.Early), rc, C.gint64(p.JudgeLimit))
 }
 
-func (b *bridge) SetScreen(dst Element, gap time.Duration) {
-	C.eg_bridge_mv(b.p, raw(dst), C.gint64(gap))
+func (b *bridge) SetScreen(dst Element, g ScreenGrid) {
+	fps := g.FPS
+	if dst == nil {
+		fps = 0
+	}
+	C.eg_bridge_mv(b.p, raw(dst), C.int(fps), C.gint64(g.Offset))
 }
 
 func (b *bridge) SetThumb(dst Element, every time.Duration) {
@@ -581,6 +596,69 @@ func (f *feeder) Free() {
 		C.eg_feeder_free(f.p)
 		f.p = nil
 	}
+}
+
+func (Real) NewTileMeter(comp Element, pads, fps int) TileMeter {
+	if comp == nil || pads <= 0 {
+		return nil
+	}
+	m := C.eg_tile_meter_new(raw(comp), C.int(pads), C.int(fps))
+	if m == nil {
+		return nil
+	}
+	return &tileMeter{p: m, pads: pads}
+}
+
+type tileMeter struct {
+	p    *C.EgTileMeter
+	pads int
+}
+
+func (m *tileMeter) Take() TileWindow {
+	var frames C.guint64
+	var phase, jump C.gint64
+	ps := make([]C.EgMeterPad, m.pads)
+	C.eg_tile_meter_take(m.p, &frames, &phase, &jump, &ps[0])
+	w := TileWindow{Frames: uint64(frames), Phase: time.Duration(phase), Jump: time.Duration(jump), Pads: make([]PadWindow, m.pads)}
+	for i, p := range ps {
+		w.Pads[i] = PadWindow{In: uint64(p.in), Fresh: uint64(p.fresh), Hold: int(p.hold)}
+	}
+	return w
+}
+
+func (m *tileMeter) Phase() (time.Duration, bool) {
+	var ph C.gint64
+	ok := C.eg_tile_meter_phase(m.p, &ph) != 0
+	return time.Duration(ph), ok
+}
+
+func (m *tileMeter) Free() {
+	if m.p != nil {
+		C.eg_tile_meter_free(m.p)
+		m.p = nil
+	}
+}
+
+// mvGate exposes the tiles' gate to the tests (cgo is not allowed in them).
+type mvGate struct{ g C.EgMvGate }
+
+func newMvGate() *mvGate {
+	g := &mvGate{}
+	C.eg_mv_gate_reset(&g.g)
+	return g
+}
+
+// step: pts < 0 = none; mono is the arrival on the monotonic clock
+func (g *mvGate) step(fps int, offset, pts, mono time.Duration) bool {
+	return C.eg_mv_gate_step(&g.g, C.int(fps), C.gint64(offset), C.gint64(pts), C.gint64(mono)) != 0
+}
+
+func (g *mvGate) regrid(fps int, offset time.Duration) {
+	C.eg_mv_gate_regrid(&g.g, C.int(fps), C.gint64(offset))
+}
+
+func (g *mvGate) mark(fps int, offset, pts time.Duration) {
+	C.eg_mv_gate_mark(&g.g, C.int(fps), C.gint64(offset), C.gint64(pts))
 }
 
 // judge and captureTime expose the bridge's per-frame logic to the tests (cgo is not allowed in them).

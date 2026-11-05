@@ -264,11 +264,17 @@ type View struct {
 	Main   string
 }
 
+// NoI2S is the card of a board HDMI that is not wired to the I2S: with two TC358743s (CAM0 and CAM1) only one
+// has the board's HDMI audio (HDMI_WIRED, DEVELOPMENT.md); the other one has no audio of its own.
+const NoI2S = "-"
+
 // DefaultLink is a video source's audio when nobody changed it: its own device's (the board's HDMI →
-// the I2S; a USB with a sound card → that card; a network camera → its audio, same id). "" = no audio
-// of its own.
+// the I2S, unless its card is NoI2S; a USB with a sound card → that card; a network camera → its audio,
+// same id). "" = no audio of its own.
 func DefaultLink(kind, card string) string {
 	switch {
+	case kind == "hdmi-csi" && card == NoI2S:
+		return ""
 	case kind == "hdmi-csi":
 		return "i2s"
 	case kind == "usb" && card != "" && ValidID("alsa:"+card):

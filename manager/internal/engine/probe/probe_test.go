@@ -77,3 +77,30 @@ func TestParseList(t *testing.T) {
 		}
 	}
 }
+
+// Two TC358743s (CAM0 and CAM1): "hdmi" and "hdmi2" with their names; the I2S goes with the one the catalogue
+// marks, and an app from before two chips (no marks) gives it to "hdmi".
+func TestParseListTwoHDMI(t *testing.T) {
+	two := `{"sources":[
+		{"id":"hdmi","kind":"hdmi-csi","node":"/dev/video2","name":"HDMI 1"},
+		{"id":"hdmi2","kind":"hdmi-csi","node":"/dev/video3","name":"HDMI 2","audio":{"id":"i2s","kind":"i2s"}},
+		{"id":"hdmi2","kind":"hdmi-csi","node":"/dev/video4","name":"HDMI 2"},
+		{"id":"hdmi","kind":"hdmi-csi","node":"/dev/videoX","name":"; rm"}]}`
+	c := ParseList(two, false, nil, nil)
+	if len(c.Sources) != 2 {
+		t.Fatalf("sources: %+v", c.Sources)
+	}
+	h1, h2 := c.Sources[0], c.Sources[1]
+	if h1.ID != "hdmi" || h1.Name != "HDMI 1" || h1.Node != "/dev/video2" || !h1.NoI2S ||
+		h2.ID != "hdmi2" || h2.Name != "HDMI 2" || h2.Node != "/dev/video3" || h2.NoI2S {
+		t.Errorf("two chips, the I2S on HDMI 2: %+v %+v", h1, h2)
+	}
+	old := ParseList(`{"sources":[{"id":"hdmi","kind":"hdmi-csi","node":"/dev/video0","name":"HDMI de la placa"}]}`, false, nil, nil)
+	if len(old.Sources) != 1 || old.Sources[0].NoI2S || old.Sources[0].Name != "HDMI de la placa" {
+		t.Errorf("an app from before two chips: %+v", old.Sources)
+	}
+	odd := ParseList(`{"sources":[{"id":"hdmi","kind":"hdmi-csi","node":"/dev/video0","name":"Evil"}]}`, false, nil, nil)
+	if odd.Sources[0].Name != "HDMI de la placa" {
+		t.Errorf("a name the engine does not know: %+v", odd.Sources[0])
+	}
+}

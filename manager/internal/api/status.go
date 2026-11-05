@@ -18,6 +18,7 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/network"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/sources"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/srtstats"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/tcchip"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/update"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/uplinks"
 )
@@ -109,6 +110,8 @@ type InputView struct {
 	Format        string       `json:"format"`
 	Mode          string       `json:"mode"`
 	Audio         string       `json:"audio"`
+	HDMIWired     string       `json:"hdmiWired,omitempty"` // the app's HDMI_WIRED ("" = the board's, or auto)
+	HDMIChips     int          `json:"hdmiChips,omitempty"` // TC358743s found (two: the HDMI_WIRED choice applies)
 	Active        *ActiveInput `json:"active,omitempty"`
 }
 
@@ -195,7 +198,8 @@ func (s *Server) collect(ctx context.Context) Status {
 	}
 	source := cfg.Source
 	st.Input = InputView{EDIDPreferred: cfg.EDIDPreferred, Source: cfg.Source, Device: cfg.VideoDevice,
-		Format: cfg.VideoFormat, Mode: cfg.VideoMode, Audio: cfg.AudioSource}
+		Format: cfg.VideoFormat, Mode: cfg.VideoMode, Audio: cfg.AudioSource, HDMIWired: cfg.HDMIWired,
+		HDMIChips: len(tcchip.Find(""))}
 	rs, running := s.runState()
 	running = running && svc.State == "active"
 	if running {

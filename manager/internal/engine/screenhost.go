@@ -121,11 +121,11 @@ func (h screenHost) BaseTime() uint64 { return h.e.pgm.BaseTime() }
 
 // AttachScreen points the sources' bridges and the program's tap at the screen's pipeline. Without
 // waiting for the actor: the black for slots without a source is posted to it.
-func (h screenHost) AttachScreen(mvs []gst.Element, mvp gst.Element) {
+func (h screenHost) AttachScreen(mvs []gst.Element, mvp gst.Element, grid gst.ScreenGrid) {
 	e := h.e
 	for i, b := range e.bridges {
 		if i < len(mvs) {
-			b.SetScreen(mvs[i], screen.MVGap)
+			b.SetScreen(mvs[i], grid)
 		}
 	}
 	e.scrMu.Lock()
@@ -148,10 +148,18 @@ func (h screenHost) AttachScreen(mvs []gst.Element, mvp gst.Element) {
 	})
 }
 
+func (h screenHost) Regrid(mvs []gst.Element, grid gst.ScreenGrid) {
+	for i, b := range h.e.bridges {
+		if i < len(mvs) {
+			b.SetScreen(mvs[i], grid)
+		}
+	}
+}
+
 func (h screenHost) DetachScreen() {
 	e := h.e
 	for _, b := range e.bridges {
-		b.SetScreen(nil, 0)
+		b.SetScreen(nil, gst.ScreenGrid{})
 	}
 	e.scrMu.Lock()
 	if e.mvBridge != nil {

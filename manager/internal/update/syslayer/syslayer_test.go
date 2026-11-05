@@ -576,6 +576,11 @@ func TestValidateAllowLists(t *testing.T) {
 			l.Files[1].Path = "/boot/extlinux/extlinux.conf"
 			l.Files[1].Src = "files/boot/extlinux/extlinux.conf"
 		},
+		"the base's DTB": func(l *Layer) {
+			l.Files[1].Path = "/boot/tegra210-p3448-0000-p3449-0000-b00-tc358743.dtb"
+			l.Files[1].Src = "files" + l.Files[1].Path
+		},
+		"the kernel": func(l *Layer) { l.Files[1].Path = "/boot/Image"; l.Files[1].Src = "files/boot/Image" },
 		"sudoers":    func(l *Layer) { l.Files[1].Path = "/etc/sudoers.d/x"; l.Files[1].Src = "files/etc/sudoers.d/x" },
 		"app config": func(l *Layer) { l.Files[1].Path = "/etc/eirl-encoder/x"; l.Files[1].Src = "files/etc/eirl-encoder/x" },
 		"dotdot": func(l *Layer) {
@@ -913,6 +918,40 @@ func TestSharedFilesAreNotRemoved(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "usr/lib/os-release")); err != nil {
 		t.Error("a file the base's packages ship was removed")
+	}
+}
+
+func TestDualDTB(t *testing.T) {
+	root, fx := newBoard(t)
+	dir, l := newLayer(t, "0.16.0", "a")
+	dtb := []byte("\xd0\x0d\xfe\xed the dual device tree")
+	write(t, filepath.Join(dir, "files"+DualDTB), string(dtb), 0o644)
+	l.Files = append(l.Files, File{Path: DualDTB, Src: "files" + DualDTB, SHA256: shaOf(dtb), Mode: "0644", Area: "hdmi", Reboot: true})
+	writeLayer(t, dir, l)
+	res, err := applier(root, fx).Apply(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(filepath.Join(root, DualDTB)); err != nil || string(b) != string(dtb) {
+		t.Fatalf("the device tree is not in /boot (%v)", err)
+	}
+	if st := ReadState(filepath.Join(root, DefaultStateDir)); st.Files[DualDTB] != shaOf(dtb) {
+		t.Errorf("state.json does not own it: %v", st.Files)
+	}
+	waits := false
+	for _, p := range res.Pending {
+		waits = waits || p.Area == "hdmi" && p.What == filepath.Base(DualDTB) && p.Effect == "reboot"
+	}
+	if !waits {
+		t.Errorf("it acts at the next boot, but nothing says so: %+v", res.Pending)
+	}
+	// A later layer without it leaves it: the splash's extlinux entry may boot it
+	dir2, _ := newLayer(t, "0.17.0", "a")
+	if _, err := applier(root, fx).Apply(context.Background(), dir2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, DualDTB)); err != nil {
+		t.Error("the device tree was removed")
 	}
 }
 

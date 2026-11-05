@@ -18,6 +18,7 @@ type Media struct {
 	Pipelines  []*Pipeline
 	Bridges    []*Bridge
 	Animators  []*Animator
+	TileMeters []*TileMeter
 	Elements   map[string]bool // factories that exist (HasElement)
 	ParseErr   map[string]error
 	mono       time.Duration
@@ -137,6 +138,53 @@ func (m *Media) NewAnimator(comp gst.Element, pads int, frame time.Duration) gst
 	m.mu.Unlock()
 	return a
 }
+
+func (m *Media) NewTileMeter(comp gst.Element, pads, fps int) gst.TileMeter {
+	if comp == nil || pads <= 0 {
+		return nil
+	}
+	t := &TileMeter{NPads: pads, FPS: fps}
+	m.mu.Lock()
+	m.TileMeters = append(m.TileMeters, t)
+	m.mu.Unlock()
+	return t
+}
+
+// TileMeter is a fake tile meter: Take returns (and clears) what the test put in Next.
+type TileMeter struct {
+	mu    sync.Mutex
+	NPads int
+	FPS   int
+	Next  gst.TileWindow
+	Ph    time.Duration // Phase, once HavePh
+	HaveP bool
+	Freed bool
+}
+
+func (t *TileMeter) SetPhase(p time.Duration) { t.mu.Lock(); t.Ph, t.HaveP = p, true; t.mu.Unlock() }
+
+func (t *TileMeter) Phase() (time.Duration, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.Ph, t.HaveP
+}
+
+func (t *TileMeter) Set(w gst.TileWindow) { t.mu.Lock(); t.Next = w; t.mu.Unlock() }
+
+func (t *TileMeter) Take() gst.TileWindow {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	w := t.Next
+	t.Next = gst.TileWindow{}
+	if len(w.Pads) == 0 {
+		w.Pads = make([]gst.PadWindow, t.NPads)
+	}
+	return w
+}
+
+func (t *TileMeter) Free() { t.mu.Lock(); t.Freed = true; t.mu.Unlock() }
+
+func (t *TileMeter) IsFreed() bool { t.mu.Lock(); defer t.mu.Unlock(); return t.Freed }
 
 // Animator is a fake animator: the last step of each table lands on the compositor's pads at once (as
 // strings, like SetPad), unless Hold keeps it busy.
@@ -337,6 +385,8 @@ type Element struct {
 	Select  string
 	Missing map[string]bool // properties that do not exist
 	Offsets map[string]time.Duration
+	// NoDuration: the pads DropDuration was called on
+	NoDuration map[string]bool
 }
 
 func (e *Element) Name() string { return e.name }
@@ -369,6 +419,23 @@ func (e *Element) SetPadOffset(pad string, d time.Duration) bool {
 	}
 	e.Offsets[pad] = d
 	return true
+}
+
+func (e *Element) DropDuration(pad string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.NoDuration == nil {
+		e.NoDuration = map[string]bool{}
+	}
+	e.NoDuration[pad] = true
+	return true
+}
+
+// DroppedDuration: DropDuration was called on that pad.
+func (e *Element) DroppedDuration(pad string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.NoDuration[pad]
 }
 
 // Offset is a pad's offset as set.
@@ -453,6 +520,7 @@ type Bridge struct {
 	mu       sync.Mutex
 	Params   gst.BridgeParams
 	Screen   string
+	Grid     gst.ScreenGrid // SetScreen's, while Screen is set
 	Thumb    string
 	Attached string
 	Stills   []string // From of each still pushed
@@ -466,12 +534,12 @@ func (b *Bridge) SetParams(p gst.BridgeParams) { b.mu.Lock(); b.Params = p; b.mu
 
 func (b *Bridge) SetEvery(n int) { b.mu.Lock(); b.Every = n; b.mu.Unlock() }
 
-func (b *Bridge) SetScreen(dst gst.Element, _ time.Duration) {
+func (b *Bridge) SetScreen(dst gst.Element, g gst.ScreenGrid) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.Screen = ""
+	b.Screen, b.Grid = "", gst.ScreenGrid{}
 	if dst != nil {
-		b.Screen = dst.(*Element).name
+		b.Screen, b.Grid = dst.(*Element).name, g
 	}
 }
 

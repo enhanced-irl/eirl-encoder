@@ -1,4 +1,4 @@
-> **Status:** RELEASED (the OTA since v0.1.0, Oct 14; the system layer, §12, since 0.11.0, Oct 22) · **Updated:** 2026-11-04
+> **Status:** RELEASED (the OTA since v0.1.0, Oct 14; the system layer, §12, since 0.11.0, Oct 22; the dual device tree, §12.11, not released yet) · **Updated:** 2026-11-05
 
 # Over-the-air updates
 
@@ -13,8 +13,9 @@ signed with **ed25519**. The policy:
 **What is updated**: our software (the app, the engine, the helpers, their units and configuration files) and, since
 the system layer (§12), what is below it: our kernel modules and firmware, the Ubuntu packages added to the image's
 frozen base, system files and the units' state. A board flashed with any published image reaches the same system as a
-new image. **Never** the QSPI, the bootloader, `/boot` (the DTB, extlinux), NVIDIA's kernel, or a package of the base
-as such (§12.11).
+new image. **Never** the QSPI, the bootloader, NVIDIA's kernel, the base's DTB, or a package of the base as such
+(§12.11). In `/boot` only two things move: the splash's extlinux entry, and the dual device tree that entry boots (a
+TC358743 on CAM0, on CAM1 or on both).
 
 | Piece | Code |
 |---|---|
@@ -462,7 +463,11 @@ nothing streaming.
   every board, whatever image and release it runs. `tools/release.sh build` now refuses a `files.txt` with a path the
   helper would refuse (`eirl-release check-files`).
 - **Below the system layer nothing moves** (§12.11): a release that needs another L4T, kernel Image, bootloader or
-  device tree cannot be delivered this way. Kernel modules, firmware and Ubuntu packages can (§12).
+  device tree cannot be delivered this way, but for the one dual device tree. Kernel modules, firmware and Ubuntu
+  packages can (§12).
+- **The dual device tree is the one change no rollback covers** (§12.11, accepted by the owner on Nov 5): one that
+  loads and stops the kernel before Linux leaves the board without a boot until its card is fixed in another computer.
+  U-Boot falls back to the base's entries only when it cannot load the files.
 - **`/etc/eirl-encoder` is not backed up** (root does not touch the app's directory). A new app that
   migrates its configuration must stay readable by the old app after a rollback. The API and
   configuration contracts are additive for that reason.
@@ -498,7 +503,8 @@ audio in 0.7.0 (`bluez`, the patched `btusb`/`btrtl`, the RTL8761B firmware), an
 
 ```
 QSPI, bootloader, the card's boot partitions          never (§12.11)
-/boot (DTB, extlinux), NVIDIA's Image and initrd      frozen with the base (§12.11)
+/boot: the base's DTB and entries, NVIDIA's Image and initrd   frozen with the base (§12.11)
+/boot: the dual DTB (the layer) and the splash's entry (install.sh) that boots it   OTA (§12.11)
 the base: Ubuntu 18.04 + L4T R32.7.6 (tools/image/base.lock = the image of 0.7.0)   frozen
 the system layer: our modules + depmod, firmware, the packages added since, system files, units   OTA (this section)
 our software: app, engine, helpers (files.txt)        OTA (§1-§11)
@@ -517,7 +523,7 @@ our software: app, engine, helpers (files.txt)        OTA (§1-§11)
 | D-7 | Space and metered links | The space is checked before anything changes; the automatic download waits for Wi-Fi or a cable (§12.7) |
 | D-8 | Security | The same trust model (§3): the layer is data under the release's signature; its own allow-lists, the packages checked against their sha256 and control, the modules against the kernel (§12.8) |
 | D-9 | Licences | The layer's `SOURCES.md` in the bundle's `doc/`, and copies of every new source package next to the image's (§12.9) |
-| D-10 | DTB and extlinux | Frozen with the base: L4T's U-Boot cannot go back to an earlier entry by itself (§12.11) |
+| D-10 | DTB and extlinux | Frozen with the base: L4T's U-Boot cannot go back to an earlier entry by itself (§12.11). **Nov 5**: one exception, the dual device tree, as a new file only the splash's entry boots; the owner accepted the risk that remains (§12.11) |
 | D-11 | The kernel's Image and initrd | Frozen: NVIDIA's, on hold, and R32.7.6 is the last release (§12.11) |
 | D-12 | The version the system says | The layer writes `os-release`, `lsb-release` and `issue` with the installed release (§12.12) |
 
@@ -657,11 +663,12 @@ board accepts no other source (no apt source, nothing from the network). The rel
 board (`install.sh` runs as root): the layer gives it no new power, only more surface, the maintainer scripts of Ubuntu's
 packages (the same ones that run when the image is built, exercised by §12.10 at every release). On top of the signature:
 
-- **Files**: only `/lib/modules/4.9.337-tegra/extra/tc358743.ko`, `/lib/modules/4.9.337-tegra/updates/eirl-*/`,
+- **Files**: only `/lib/modules/4.9.337-tegra/extra/tc358743.ko`, `/boot/tegra210-p3448-0000-p3449-0000-b00-tc358743-dual.dtb`
+  (§12.11), `/lib/modules/4.9.337-tegra/updates/eirl-*/`,
   `/lib/firmware/`, `/etc/systemd/system/<unit>.d/90-eirl*.conf`, `/etc/systemd/journald.conf.d/90-eirl-*`,
   `/etc/systemd/logind.conf.d/90-eirl-*` (the power button, MIXER.md §14.1),
   `/etc/NetworkManager/conf.d/`, `/usr/lib/eirl-image/`, the image's two first-boot units and the system's name files.
-  Never `/boot`, `/etc/eirl-encoder`, sudoers, `/home`, dpkg's database or the app's files.
+  Never anything else in `/boot`, `/etc/eirl-encoder`, sudoers, `/home`, dpkg's database or the app's files.
 - **Packages**: never `nvidia-l4t-*`, `jetson-*`, a kernel or a bootloader; `apt` refuses to change one on hold.
 - **Units**: never `ssh` or the app's own (`eirl-*` but the image's first-boot units).
 - **Modules**: built for 4.9.337-tegra (vermagic), checked before anything changes.
@@ -697,15 +704,37 @@ disabled by hand (`nvweston`, `nvmemwarning`: now in `units.txt`) and the DTB's 
 ### 12.11 What stays frozen, and why
 
 - **The QSPI, the bootloader and the card's boot partitions**: never (the board's rules).
-- **The DTB and extlinux** (`/boot`, in the root filesystem): frozen with the base, the layer never writes `/boot`. L4T
-  R32.7.6's U-Boot (2020.04, read in NVIDIA's sources) has no boot counter (`CONFIG_BOOTCOUNT_LIMIT`), no "boot this once",
-  no `fdtoverlays` in extlinux and no USB keyboard, and keeps its environment in the QSPI. A new entry made the default with
-  a DTB that does not reach Linux cannot be undone by any software: choosing the earlier entry takes a serial cable or the
-  card in another computer. That breaks "never leave the board without a boot". The DTB has not changed since Oct 9; a change
-  of the `tc358743` driver must work with the frozen DT. `build/build.sh` now builds the DTB with a fixed
-  `SOURCE_DATE_EPOCH` (NVIDIA's tree records its build time in `nvidia,dtbbuildtime`), so it is byte for byte the image of
-  0.7.0's, and `tools/image/pins.sh` pins its sha256: the image's checks refuse another one. The splash's extlinux entry
-  (a copy of the default one with other kernel arguments) stays as it is (§4).
+- **The base's DTB and extlinux entries** (`/boot`, in the root filesystem): frozen with the base. L4T
+  R32.7.6's U-Boot (2020.04, read in NVIDIA's sources) has no boot counter (`CONFIG_BOOTCOUNT_LIMIT`), no "boot this
+  once", no `fdtoverlays` in extlinux and no USB keyboard, and keeps its environment in the QSPI. A new entry made the
+  default with a DTB that does not reach Linux cannot be undone by any software: choosing the earlier entry takes a
+  serial cable or the card in another computer. That breaks "never leave the board without a boot". The base's DTB has
+  not changed since Oct 9, and a change of the `tc358743` driver must still work with it (a board whose default entry is
+  not the base's keeps it, below). `build/build.sh` builds it with a fixed `SOURCE_DATE_EPOCH` (NVIDIA's tree records
+  its build time in `nvidia,dtbbuildtime`), so it is byte for byte the image of 0.7.0's, and `tools/image/pins.sh` pins
+  its sha256: the image's checks refuse another one. The splash's extlinux entry (a copy of the default one with other
+  kernel arguments) is the one entry the OTA rewrites (§4).
+- **The dual device tree** (Nov 5; the owner accepted the risk that remains): `tegra210-p3448-0000-p3449-0000-b00-tc358743-dual.dtb`,
+  a TC358743 on CAM0, on CAM1 or on both (DEVELOPMENT.md, "HDMI over CSI on CAM0 and CAM1"). It is the one exception,
+  made so that the boards already sold can take a chip on either connector:
+  - **A new file** next to the base's, which stays. The layer installs it like its other files (`system/built.txt`;
+    its sha256 pinned in `system/modules.lock`, a reproducible build like the base's; checked before anything
+    changes, written under a temporary name and renamed, removed if the apply is undone) and never removes it, even
+    when a later layer stops listing it.
+  - **Only the splash's entry boots it.** `eirl-splash boot-entry install`, which every release's `install.sh` runs
+    after the layer, writes the entry's `FDT` as the dual DTB when its base entry boots the base's DTB and the layer's
+    `state.json` owns the file with its sha256 (`splash.LayerFDT`). `primary` and `tc358743` keep the base's. A board
+    whose default entry boots another DT (built by its owner) or whose layer was skipped keeps its boot as it is.
+  - **What covers what.** A failure while the layer applies removes the file, and `install.sh` stops before the entry
+    changes. A release that is rolled back gets its previous `extlinux.conf` back (it is in `files.txt`): the board
+    boots the base's DTB again, and the next release puts the entry back. If U-Boot cannot load the entry's files
+    (the DTB missing or unreadable after a power cut), it skips it ("Skipping eirl-splash for failure retrieving FDT")
+    and tries the entries not yet attempted, in order (`cmd/pxe_utils.c`, `handle_pxe_menu` →
+    `boot_unattempted_labels`): `primary`, with the base's DTB. **Nothing covers a device tree that loads and stops the
+    kernel before Linux**: that board needs its card fixed in another computer. The dual DTB only changes the camera
+    nodes (a `dtc` diff against the base's) and booted on the test board on Nov 5, with the chip on CAM0. With the chip
+    on CAM1 alone it has not run on a board yet (on Nov 5 the test board is the only board, and its chip is on CAM0).
+  - It acts at the next restart (`reboot`, area `hdmi`, §12.5), together with the `tc358743` module that goes with it.
 - **NVIDIA's Image and initrd** (`nvidia-l4t-kernel`, on hold): R32.7.6 is the last release, there will be no other Image;
   changing it would invalidate every module (vermagic) and has the same problem as the DTB. Everything of ours is an
   out-of-tree module.
@@ -723,6 +752,9 @@ card was flashed with is in `/usr/lib/eirl-image/flashed` (images from the new r
   apt and systemctl, a failure in the middle and its undo, a power cut and the recovery, retiring, drift, the base check, the
   pending restarts (also comment-only changes), the fingerprint and its comparison, the DTB without its build time, and
   `eirl-release layer`.
+- `go test ./internal/update/syslayer ./internal/splash`: the dual device tree is the one file the layer may own in
+  `/boot`, pinned like a module, waits for a restart and is never removed; the splash's entry boots it only when the
+  layer owns it and its base boots the base's DTB, the other entries keep the base's, and undoing gives the file back.
 - `go test ./internal/update ./internal/api`: the metered link and the download that waits; `GET /update`'s `system` and
   `downloadWaits`, `POST /update/reboot`.
 - In a container, the root filesystem of the published image of 0.7.0 gets a test release: the layer applies for real

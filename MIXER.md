@@ -1,7 +1,7 @@
 # Multi-camera: composition, multiview and touch screen
 
 > **Status:** IN PROGRESS (F0, F1 —single engine— and F2 —web ↔ screen— in main; F3 —no rehearsal mode— on the board; next F4, per-source audio)
-> **Updated:** 2026-11-04 (Nov 4: the board's power button, §14.1, and its LED, §14.2; Oct 28: the local recording on the screen, §23; Oct 15: the HDMI output stays lit when the screen closes, §3 trap 27; USB cameras plugged and unplugged while running, "Sources and slots" in §4, and a camera's audio follows its video slot, §10; the output protocols and encoding settings in the state and `output_config`, §5, [`OUTPUTS.md`](OUTPUTS.md); translated to English; the Python engine retired, the Go engine is the only one: [`ENGINE_GO.md`](ENGINE_GO.md); last content change Oct 13: header and Settings, §18; Wi-Fi in Settings, §19; Oct 14: renaming "Create my Wi-Fi", §19; everything the web configures, on the screen, §21; fades one step per program frame and the screen's tiles in step with the program, §22)
+> **Updated:** 2026-11-05 (Nov 5: two TC358743s, `hdmi` and `hdmi2`, §4, and the tiles' cadence on the screen, one picture per screen frame, and what the screen shows per pad in the timings line, §24; Nov 4: the board's power button, §14.1, and its LED, §14.2; Oct 28: the local recording on the screen, §23; Oct 15: the HDMI output stays lit when the screen closes, §3 trap 27; USB cameras plugged and unplugged while running, "Sources and slots" in §4, and a camera's audio follows its video slot, §10; the output protocols and encoding settings in the state and `output_config`, §5, [`OUTPUTS.md`](OUTPUTS.md); translated to English; the Python engine retired, the Go engine is the only one: [`ENGINE_GO.md`](ENGINE_GO.md); last content change Oct 13: header and Settings, §18; Wi-Fi in Settings, §19; Oct 14: renaming "Create my Wi-Fi", §19; everything the web configures, on the screen, §21; fades one step per program frame and the screen's tiles in step with the program, §22)
 
 **The mixer is the encoder.** `eirl-engine` captures all the sources it detects at the same time, and what
 comes out is always the composed **program** (cut, PiP, side by side, fades). That includes SRT/SRTLA
@@ -218,7 +218,8 @@ pieces today (`manager/internal/engine/…`):
   with the same serial share one by-id link), and once more 3 s after each change, for what was still
   binding the first time (a camera's sound card). The board's HDMI goes in slot 1 and the USB ones in
   catalogue order.
-- Each source's id is the catalogue's: `hdmi`, the USB's by-id path or `test`.
+- Each source's id is the catalogue's: `hdmi` (with two TC358743s, `hdmi` and `hdmi2`: DEVELOPMENT.md, "HDMI over CSI
+  on CAM0 and CAM1"), the USB's by-id path or `test`.
 - Each source has its own thread and pipeline (`… ! nvvidconv output-buffers=16 ! NV12 NVMM 1920×1080
   ! appsink`). Its buffers go to its slot's `appsrc` in the program and in the multiview.
 - States: `starting` · `live` · `no_signal` (HDMI without a signal, or the mode is not stable yet: 3 equal
@@ -1293,7 +1294,9 @@ a download that waits for Wi-Fi or a cable, and a system part that failed or was
 - **Slots**: besides what each slot is and its alias, a Hide/Show button for the source in it (live, outside the
   draft; the source on air cannot be hidden).
 - **Input**: the main source, its capture mode (USB), the EDID (HDMI) and the start audio, as the web's card; a
-  draft until «Save» / «Save and apply»; «Scan».
+  draft until «Save» / «Save and apply»; «Scan». With two TC358743 (`status.input.hdmiChips`, Nov 5) a fourth field,
+  the board with the HDMI audio and reset wires (`hdmiWired`: automatic, HDMI 1, HDMI 2; DEVELOPMENT.md, "HDMI over
+  CSI on CAM0 and CAM1"). Previews `settings-input-dual` and `settings-input-wired`.
 - **Image (camera settings)** (`camera.go`, [`SOURCES.md`](SOURCES.md) §7): the USB cameras whose source carries
   `controls`, by slot (chips with more than one; the chosen camera and group last while the page is on view), the
   groups it has (chips: Image, Exposure, White balance, Focus & framing), and that group's settings as rows: an
@@ -1460,3 +1463,87 @@ settings and the disk from the app (`GET /recording` over the local socket).
   rec-withoutput-live rec-nodisk rec-withoutput-nodisk rec-full rec-powerlost rec-diskremoved rec-refused rec-plugwarn
   rec-off` and `settings-recording` with `-on -fat32 -ntfs -unformatted -readonly -none -ejected -format -formatting
   -formatted -modes -qualities -offask -powerlost -old` (its `rec.go` describes each).
+
+## 24. The tiles' cadence: one picture per screen frame (Nov 5)
+
+Seen on the touch screen: the sources' tiles looked like they ran at a lower rate than they should.
+
+**What is by design.** The screen runs at `min(program, 30)` frames a second (`pipeline.ScreenFPS`, the 7"
+screen does not need more and it halves the conversions, §17); the program tile goes through `videorate
+max-rate=30`. With a program at 60, a tile can show 30 different pictures a second, never 60. The panel itself
+is 1024×600 at 60 Hz.
+
+**Measured on the board** (Nov 5, a 35 min slot, not streaming; program 1080p60, the board's HDMI at 1080p30,
+a Logi 4K Stream in MJPEG at 1080p60; the meter below, in diagnostic builds; 60 s windows):
+
+| Build | Program tile (in / shown) | HDMI 30 tile | Logi 60 tile | Engine CPU | Power | VIC load |
+|---|---|---|---|---|---|---|
+| A: the gate of main (by arrival) | 29.7 / 29.7 | 30.0 / 30.0 | **29.4 / 12.6** | 54.5 % | 4476 mW | 419 |
+| B: gate by pts on the screen's grid | 29.7 / 29.7 | 30.0 / 30.0 | **30.0 / 13.2** | 54.9 % | 4426 mW | 385 |
+| C2: B and the screen at 60 | 57.4 / 57.4 | 30.0 / 30.0 | **57.6 / 13.0** | 61.2 % | 4641 mW | 429 |
+| E: B and the frames without a duration | 29.7 / 29.7 | 29.8 / 29.8 | **29.8 / 29.8** | 59.8 % | 4506 mW | 420 |
+| **B3: what is in main** (B, the phase, the tiles' buffers without a duration) | 29.7 / 29.6 | 29.8 / 29.8 | **29.8 / 29.8** | 59.6 % | 4696 mW* | 487* |
+
+(CPU: `top` of the engine, 6-18 samples of 10 s; power: the ina3221's total input; VIC load: `54340000.vic/load`,
+both every 2 s. Few samples: the differences of a few points are within the noise. *B3 was measured right after
+another test had loaded the four cores for 6 minutes, with the board still hot: its power and VIC load are not
+comparable with the rest. With the Logi on air, the program made 59 new frames a second with B3, as with the
+engine before it.)
+
+**The cause: the duration of the source's frames.** A frame trace of the Logi's tile (build D: every buffer
+reaching the compositor's pad and the buffer it used for each frame) showed that all its frames arrived in time,
+52-221 ms before the screen frame they belong to was made, and that the compositor used 438 of 996. The HDMI's
+tile: 997 of 997. The difference: the Logi's buffers keep the duration of its 60 fps frames (16.7 ms), the
+HDMI's (`nvv4l2camerasrc`) come with none. GStreamer 1.14's videoaggregator drops most of the ones with a duration
+even with the screen at 60 (C2), where the duration matches their spacing; without a duration (E) it uses
+each one for the screen frame it falls in. The exact branch of the aggregator was not pinned down; the
+measurement is what counts. The gate was not what lost those pictures: by arrival or by pts, the Logi's tile got
+30 frames a second and showed 13.
+
+**The fix:**
+- **The tiles' buffers without a duration** (`Element.DropDuration`, `eg_drop_duration`): a probe on the sink
+  pad of each tile's `mvd` queue, so on the converter's own buffers. Not on the source's buffer, which the program
+  compositor shares: E did it there, and with the Logi on air the program's new frames went from 58.9-59 to
+  57-58.5. That may be noise, but there is no reason to touch the program. The probe only changes a buffer that
+  nobody else holds (`gst_buffer_is_writable`), never a copy (§3, trap 23).
+- **The gate by pts, on the screen's own grid** (`eg_mv_gate_step` in `gstc.c`): a source's frame goes to its
+  tile if it is the first that falls in a new screen frame, `(pts + offset) × fps / 1 s`, the offset being the
+  tile's pad offset (`TileDelay`, §22.2) minus the phase of the compositor's frames. Before, it was `MV_GAP` (25
+  ms) since the last one sent **by arrival**: with the arrival jitter of a USB camera, frames went through one,
+  two or three apart, and from a **50 fps** source (the HDMI at 1080p50, the board's top mode) it let every other
+  frame through, 25 a second on a screen of 30, one screen frame in six showing the previous picture again. Now
+  it is one per screen frame from anything at 30 or more (from 50, 30 a second: `TestBridgeScreenTileAt30From50`
+  with real GStreamer), every frame of a slower one, and nothing is converted that the screen would not show.
+  The pts never goes backwards; a forward jump (a larger sync offset) leaves the skipped screen frames as they
+  were. Without a pts (`MIXER_SYNC=0`, the appsrc stamps on arrival) it falls back to arrival, at most one every
+  3/4 of a screen frame. A still (slate, black, pause) always goes to the tile and takes its screen frame
+  (`eg_mv_gate_mark`). The queue and pool sizes do not change at 30 a second or less (`screen.TileGap` never
+  sizes for fewer than one frame every 25 ms, the old `MV_GAP`); a burst of late frames, from a camera that
+  catches up, is what the leaky `mvd` queue drops, oldest first.
+- **The phase of the compositor's frames.** They do not start at 0 of the running time: the phase was 13, 0,
+  6.7 (at 60) and 20 ms in successive starts of the screen. The meter reads it from the compositor's output and
+  the screen hands the bridges the grid again (`Host.Regrid`, event `screen_grid fps=… phase_ms=…`) as soon as it
+  has it, and again if it ever moves by more than 1 ms; the last frame sent keeps its screen frame on the new
+  grid (`eg_mv_gate_regrid`), so the change lets no second frame into it. Until then the bridges use phase 0,
+  and so for good where there is no meter (event `screen_meter_unavailable`). A tile whose duration could not be
+  dropped logs `screen_tile_duration_kept`.
+
+**What the screen shows, measured** (`gst.TileMeter`, `eg_tile_meter_*`): a probe on the screen compositor's
+src pad reads, after each frame it makes, the buffer each pad used for it (the public `buffer` field of
+GStreamer 1.14's `GstVideoAggregatorPad`, the same read as the Oct 14 pad trace, §22.2; it checks the pad type
+and the version, and is off on anything else), and a probe on each sink pad counts what reaches it. Every 60 s,
+in the `timings` line:
+- `screen="fps=30 phase=13.0ms jump=0.0ms"`: the screen's rate, the phase of its frames and how far it moved in
+  the window (0: a steady grid).
+- `screen_pgm` and `tile<N>` (live sources only): `in` = frames a second that reached the pad, `shown` =
+  pictures a second it changed to, `hold` = the longest run of screen frames with the same picture (1 = a new
+  one every frame; the first window after a start includes the start). Healthy, from a source at 30 or more:
+  `in` = `shown` = the screen's rate. `shown` below `in` = frames that reached the tile and were never shown.
+
+Its cost is a lock and a few counters per screen frame and per tile frame.
+
+**The screen at 60 (F2), not done.** C2 shows what it gives: the program tile at 57 pictures a second instead of
+30, and a 60 fps source's tile would follow once its frames are shown (C2 still had the duration problem). It
+costs, with two sources and not streaming, ~6.7 points of CPU of the engine and ~165 mW (3.7 %); the VIC's load
+did not move. With four sources and streaming it is the tiles' conversions twice over on a board whose power
+supply already has little margin (§3): to be decided with a measurement in those conditions.

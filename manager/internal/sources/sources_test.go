@@ -347,3 +347,44 @@ func TestScanNetworkCameras(t *testing.T) {
 		t.Errorf("invalid list: %+v", cat.Sources)
 	}
 }
+
+// Two TC358743s (CAM0 and CAM1): «HDMI 1» (hdmi) and «HDMI 2» (hdmi2); the board's HDMI audio goes with the
+// chip HDMI_WIRED names (auto: CAM0's), and with the wired board's connector empty there is none.
+func TestScanTwoHDMI(t *testing.T) {
+	s, _ := fakeBoard(t, "5000")
+	sys := s.SysRoot
+	root := filepath.Dir(sys)
+	write(t, filepath.Join(sys, "class/video4linux/v4l-subdev1/name"), "tc358743 8-000f")
+	write(t, filepath.Join(sys, "class/video4linux/v4l-subdev2/name"), "tc358743 7-000f")
+	write(t, filepath.Join(sys, "class/video4linux/video3/name"), "vi-output, tc358743 7-000f")
+	write(t, filepath.Join(root, "sys/bus/i2c/devices/i2c-7/name"), "i2c-6-mux (chan_id 0)")
+	write(t, filepath.Join(root, "sys/bus/i2c/devices/i2c-8/name"), "i2c-6-mux (chan_id 1)")
+	for _, tc := range []struct{ wired, audioOn string }{{"", "hdmi"}, {"cam0", "hdmi"}, {"cam1", "hdmi2"}} {
+		s.Wired = func() string { return tc.wired }
+		cat := s.Scan()
+		if len(cat.Sources) < 2 {
+			t.Fatalf("sources: %+v", cat.Sources)
+		}
+		h1, h2 := cat.Sources[0], cat.Sources[1]
+		if h1.ID != "hdmi" || h1.Name != "HDMI 1" || h1.Node != "/dev/video3" || h2.ID != "hdmi2" || h2.Name != "HDMI 2" || h2.Node != "/dev/video0" {
+			t.Errorf("HDMI_WIRED=%q: %+v %+v", tc.wired, h1, h2)
+		}
+		for _, h := range []Source{h1, h2} {
+			if (h.Audio != nil) != (h.ID == tc.audioOn) || (h.Audio != nil && h.Audio.ID != "i2s") {
+				t.Errorf("HDMI_WIRED=%q: the I2S on %s: %+v", tc.wired, h.ID, h.Audio)
+			}
+		}
+	}
+	// Only CAM1's chip and the wiring on CAM0: no board HDMI audio
+	os.Remove(filepath.Join(sys, "class/video4linux/v4l-subdev2/name"))
+	s.Wired = func() string { return "cam0" }
+	cat := s.Scan()
+	if cat.Sources[0].ID != "hdmi" || cat.Sources[0].Name != HDMIName || cat.Sources[0].Audio != nil {
+		t.Errorf("one chip, not the wired one: %+v", cat.Sources[0])
+	}
+	for _, a := range cat.Audio {
+		if a.ID == "i2s" {
+			t.Error("the I2S input without its chip")
+		}
+	}
+}

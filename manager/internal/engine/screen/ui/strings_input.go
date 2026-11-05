@@ -29,7 +29,9 @@ type InputStrings struct {
 	EDIDRecommended, EDIDHint string
 	// Audio: automatic (the source's), none, a saved one that is not connected
 	AudioAuto, AudioNone string
-	NotConnectedF        string // %s = the saved audio's name
+	// With two HDMI chips: the board with the audio and reset wires (its field, automatic and what it takes, a hint)
+	Wired, WiredAuto, WiredAutoSub, WiredHint string
+	NotConnectedF                             string // %s = the saved audio's name
 	// What runs now, if it is not what is saved
 	InUseF      string // %s = name, %s = format, %s = width×height
 	WaitingUSB  string
@@ -78,6 +80,10 @@ var (
 		EDIDHint:        "La cámara puede elegir otro modo de la lista. Muchas solo dan 50 fps en PAL (50 Hz); en NTSC (60 Hz) se quedan en 1080p30. 1080p60 no es posible por esta entrada: usa una capturadora USB 3.",
 		AudioAuto:       "Automático (el de la fuente)",
 		AudioNone:       "Sin audio",
+		Wired:           "Placa HDMI con el audio",
+		WiredAuto:       "Automático",
+		WiredAutoSub:    "La de CAM0 (HDMI 1)",
+		WiredHint:       "Hay dos entradas HDMI: elige la de la placa que lleva los cables del audio y del reset. El audio cambia al reiniciar la emisión; el reset, al reiniciar el aparato.",
 		NotConnectedF:   "%s (no conectada)",
 		InUseF:          "En uso: %s · %s %s",
 		WaitingUSB:      "La emisión está esperando a que se conecte la fuente USB.",
@@ -126,6 +132,10 @@ var (
 		EDIDHint:        "The camera may pick another mode of the list. Many only give 50 fps in PAL (50 Hz); in NTSC (60 Hz) they stay at 1080p30. 1080p60 is not possible through this input: use a USB 3 capture card.",
 		AudioAuto:       "Automatic (the source's)",
 		AudioNone:       "No audio",
+		Wired:           "HDMI board with the audio",
+		WiredAuto:       "Automatic",
+		WiredAutoSub:    "CAM0's (HDMI 1)",
+		WiredHint:       "There are two HDMI inputs: choose the one whose board has the audio and reset wires. The audio changes when the stream restarts; the reset, when the device restarts.",
 		NotConnectedF:   "%s (not connected)",
 		InUseF:          "In use: %s · %s %s",
 		WaitingUSB:      "The stream is waiting for the USB source to be connected.",
@@ -174,6 +184,10 @@ var (
 		EDIDHint:        "La caméra peut choisir un autre mode de la liste. Beaucoup ne donnent 50 i/s qu'en PAL (50 Hz) ; en NTSC (60 Hz), elles restent en 1080p30. Le 1080p60 n'est pas possible par cette entrée : utilisez une carte de capture USB 3.",
 		AudioAuto:       "Automatique (celui de la source)",
 		AudioNone:       "Sans audio",
+		Wired:           "Carte HDMI avec l’audio",
+		WiredAuto:       "Automatique",
+		WiredAutoSub:    "Celle de CAM0 (HDMI 1)",
+		WiredHint:       "Il y a deux entrées HDMI : choisissez celle dont la carte porte les fils de l’audio et du reset. L’audio change au redémarrage de la diffusion ; le reset, au redémarrage de l’appareil.",
 		NotConnectedF:   "%s (non connectée)",
 		InUseF:          "En cours : %s · %s %s",
 		WaitingUSB:      "La diffusion attend que la source USB soit branchée.",

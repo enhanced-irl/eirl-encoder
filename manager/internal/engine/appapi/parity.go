@@ -343,6 +343,7 @@ var (
 	reRistUser    = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
 	onOff         = set("on", "off")
 	inputKinds    = set("hdmi", "usb", "test")
+	hdmiWired     = set("cam0", "cam1")
 	activeState   = set("starting", "waiting_device", "ready")
 	srcKinds      = set("hdmi-csi", "usb", "test")
 	audioKinds    = set("i2s", "usb", "network")
@@ -630,6 +631,8 @@ func statusInfo(v any) *ui.StatusInfo {
 		if e, _ := in["edidActive"].(string); reEDID.MatchString(e) {
 			i.EDIDActive = e
 		}
+		i.HDMIWired = oneOf(in, "hdmiWired", hdmiWired)
+		i.HDMIChips, _ = intIn(in["hdmiChips"], 0, 2)
 		if a := obj(in["active"]); a != nil {
 			i.ActiveState = oneOf(a, "state", activeState)
 			i.ActiveSource = oneOf(a, "source", inputKinds)

@@ -1,6 +1,8 @@
 //go:build linux && cgo
 
 #include "gstc.h"
+#include <gst/base/gstaggregator.h>
+#include <gst/video/video-info.h>
 
 #include <errno.h>
 #include <stdio.h>
@@ -268,7 +270,10 @@ struct EgBridge {
 	GMutex lock;          // everything below; one frame at a time, and the stills from Go
 	GstElement *current;  // the appsink whose frames count; the others are closing pipelines
 	GstElement *mv_dst, *thumb_dst;
-	gint64 mv_gap_ns, thumb_every_ns, mv_last, thumb_last;
+	int mv_fps;           // the screen's grid (eg_bridge_mv)
+	gint64 mv_offset_ns;
+	EgMvGate mv_gate;
+	gint64 thumb_every_ns, thumb_last;
 	gint64 sync_ns, extra_ns, early_ns, judge_limit_ns;
 	int raw_clock;
 	gint64 last_pts;      // never backwards, across reopenings of the source (Engine.stamp)
@@ -301,7 +306,8 @@ EgBridge *eg_bridge_new(int kind, GstElement *pgm_pipe, GstElement *dst)
 	b->prev_arrival = -1;
 	b->judge_min = G_MAXINT64;
 	b->judge_limit_ns = 150 * MS;
-	b->mv_last = b->thumb_last = G_MININT64 / 2;
+	b->thumb_last = G_MININT64 / 2;
+	eg_mv_gate_reset(&b->mv_gate);
 	b->st.judge = -1;
 	b->st.lag_ns = G_MAXINT64;
 	timing_reset(&b->st);
@@ -344,12 +350,79 @@ static void swap_ref(GstElement **slot, GstElement *el)
 	*slot = el ? gst_object_ref(el) : NULL;
 }
 
-void eg_bridge_mv(EgBridge *b, GstElement *mv_dst, gint64 gap_ns)
+void eg_bridge_mv(EgBridge *b, GstElement *mv_dst, int fps, gint64 offset_ns)
 {
 	g_mutex_lock(&b->lock);
 	swap_ref(&b->mv_dst, mv_dst);
-	b->mv_gap_ns = gap_ns;
+	GstElement *before = b->mv_dst;
+	gboolean same = mv_dst != NULL && mv_dst == before;
+	swap_ref(&b->mv_dst, mv_dst);
+	b->mv_fps = fps;
+	b->mv_offset_ns = offset_ns;
+	if (same)
+		eg_mv_gate_regrid(&b->mv_gate, fps, offset_ns); // the same tile, its phase measured
+	else
+		eg_mv_gate_reset(&b->mv_gate); // another screen pipeline: its own grid
 	g_mutex_unlock(&b->lock);
+}
+
+void eg_mv_gate_reset(EgMvGate *g)
+{
+	g->slot = G_MININT64;
+	g->last_pts = -1;
+	g->last_mono = G_MININT64 / 2;
+}
+
+// floor((pts + offset) × fps / 1 s): the screen frame a pts falls in
+static gint64 mv_slot(int fps, gint64 offset_ns, gint64 pts)
+{
+	gint64 at = pts + offset_ns;
+	return at < 0 ? -1 : (gint64)gst_util_uint64_scale((guint64)at, (guint64)fps, GST_SECOND);
+}
+
+void eg_mv_gate_regrid(EgMvGate *g, int fps, gint64 offset_ns)
+{
+	if (fps > 0 && g->last_pts >= 0)
+		g->slot = mv_slot(fps, offset_ns, g->last_pts);
+	else
+		g->slot = G_MININT64;
+}
+
+void eg_mv_gate_mark(EgMvGate *g, int fps, gint64 offset_ns, gint64 pts)
+{
+	if (fps <= 0 || pts < 0)
+		return;
+	gint64 slot = mv_slot(fps, offset_ns, pts);
+	if (slot > g->slot) {
+		g->slot = slot;
+		g->last_pts = pts;
+	}
+}
+
+// Until Nov 5 the gate was "MV_GAP (25 ms) since the last one sent, by arrival". A USB camera's frames
+// arrive with ±10 ms of jitter, so from a 60 one it let frames through one, two or three apart, and from a
+// 50 one every other frame: 25 a second on a screen of 30, one screen frame in six showing the previous
+// picture again (MIXER.md §24). The compositor makes its frame k from the buffer whose running time falls in
+// [k/fps, (k+1)/fps) (once the tiles' buffers carry no duration, eg_drop_duration): one per slot, the first
+// one, by that same running time.
+int eg_mv_gate_step(EgMvGate *g, int fps, gint64 offset_ns, gint64 pts, gint64 mono)
+{
+	if (fps <= 0)
+		return 0;
+	if (pts >= 0) {
+		// a pts never goes backwards (next_pts), so neither does the slot
+		gint64 slot = mv_slot(fps, offset_ns, pts);
+		if (slot <= g->slot)
+			return 0;
+		g->slot = slot;
+		g->last_pts = pts;
+		g->last_mono = mono;
+		return 1;
+	}
+	if (mono - g->last_mono < GST_SECOND * 3 / (4 * (gint64)fps))
+		return 0;
+	g->last_mono = mono;
+	return 1;
 }
 
 void eg_bridge_every(EgBridge *b, int every)
@@ -521,16 +594,15 @@ static GstFlowReturn on_sample(GstAppSink *snk, gpointer data)
 		timing_add(b, now, FALSE, 0);
 	}
 	gint64 extra = b->kind == 0 ? b->sync_ns + b->extra_ns : b->extra_ns;
+	gint64 pts = next_pts(b, at, extra);
 	// The pts goes on the buffer itself: a copy would share its NVMM memory and the original would go
 	// back to its pool while the copy is still queued (MIXER.md §3, trap 23)
-	set_pts(buf, next_pts(b, at, extra));
+	set_pts(buf, pts);
 
 	GstBuffer *mv = NULL, *th = NULL;
 	gint64 mono = b->st.last_frame_ns;
-	if (b->mv_dst != NULL && mono - b->mv_last >= b->mv_gap_ns) {
-		b->mv_last = mono;
+	if (b->mv_dst != NULL && eg_mv_gate_step(&b->mv_gate, b->mv_fps, b->mv_offset_ns, pts, mono))
 		mv = gst_buffer_ref(buf);
-	}
 	if (b->thumb_dst != NULL && b->thumb_every_ns > 0 && mono - b->thumb_last >= b->thumb_every_ns) {
 		b->thumb_last = mono;
 		th = gst_buffer_ref(buf);
@@ -610,7 +682,11 @@ void eg_bridge_push_still(EgBridge *b, GstBuffer *still)
 	gint64 extra = b->kind == 0 ? b->sync_ns + b->extra_ns : b->extra_ns;
 	gint64 pts = b->sync_ns == 0 && b->kind == 0 ? -1 : next_pts(b, (gint64)gst_clock_get_time(b->clock), extra);
 	set_pts(c, pts);
-	GstBuffer *mv = b->mv_dst != NULL ? gst_buffer_ref(c) : NULL;
+	GstBuffer *mv = NULL;
+	if (b->mv_dst != NULL) {
+		mv = gst_buffer_ref(c);
+		eg_mv_gate_mark(&b->mv_gate, b->mv_fps, b->mv_offset_ns, pts);
+	}
 	gst_app_src_push_buffer(GST_APP_SRC(b->dst), c);
 	if (mv != NULL)
 		gst_app_src_push_buffer(GST_APP_SRC(b->mv_dst), mv);
@@ -1104,4 +1180,205 @@ int eg_set_pad_offset(GstElement *el, const char *pad, gint64 offset_ns)
 	gst_pad_set_offset(p, offset_ns);
 	gst_object_unref(p);
 	return 1;
+}
+
+// GStreamer 1.14's videoaggregator used fewer than half of the frames of a USB camera at 60 on its tile (13 a
+// second of the 30 that reached it, Nov 5, MIXER.md §24): they keep the duration of the source's frame, 16.7
+// ms, and the ones of the board's HDMI, which come with none, were all shown. Without a duration the
+// compositor takes each buffer for the frame it falls in, and that is what the tiles' gate counts on.
+static GstPadProbeReturn on_drop_duration(GstPad *pad, GstPadProbeInfo *info, gpointer data)
+{
+	GstBuffer *buf = GST_PAD_PROBE_INFO_BUFFER(info);
+	// Never a copy: a converter's own buffer has one reference; a shared one is left as it is
+	if (buf != NULL && GST_BUFFER_DURATION_IS_VALID(buf) && gst_buffer_is_writable(buf))
+		GST_BUFFER_DURATION(buf) = GST_CLOCK_TIME_NONE;
+	return GST_PAD_PROBE_OK;
+}
+
+int eg_drop_duration(GstElement *el, const char *pad)
+{
+	GstPad *p = gst_element_get_static_pad(el, pad);
+	if (p == NULL)
+		return 0;
+	gst_pad_add_probe(p, GST_PAD_PROBE_TYPE_BUFFER, on_drop_duration, NULL, NULL);
+	gst_object_unref(p);
+	return 1;
+}
+
+// --- what the screen shows from each pad ---
+
+// The public head of gst-plugins-bad 1.14's GstVideoAggregatorPad (gstvideoaggregatorpad.h, not in the build
+// image): `buffer` is the one the aggregator used for the frame it has just made. It is only read from the
+// probe on the aggregator's src pad, on its own thread right after making that frame, and only once
+// eg_tile_meter_new has checked that the pads are of that type on 1.14 (in 1.16 the field went private).
+// The same read gave the exact pts per pad in the Oct 14 measurements (MIXER.md §22.2).
+typedef struct {
+	GstAggregatorPad parent;
+	GstVideoInfo info;
+	GstBuffer *buffer;
+} EgVaggPadHead;
+
+typedef struct {
+	EgMeterPad w;        // the window
+	gint64 last_pts;     // of the buffer it used for the previous output frame (-2: none yet, -1: none)
+	gint32 run;          // output frames in a row with that buffer
+	GstPad *pad;
+	gulong probe;        // on the sink pad: what reaches it
+	struct EgTileMeter *m;
+} EgMeterSlot;
+
+struct EgTileMeter {
+	GMutex lock;          // everything below: the probes (the compositor's thread, each pad's) and the take
+	GstPad *src;
+	gulong probe;
+	int npads, fps;
+	EgMeterSlot *pads;
+	guint64 frames;
+	gint64 phase_ns;      // of the last output frame: its pts modulo a frame (the grid's phase)
+	int have_phase;
+	gint64 jump_ns;       // the largest change of the phase between two output frames in the window
+};
+
+static GstPadProbeReturn on_meter_in(GstPad *pad, GstPadProbeInfo *info, gpointer data)
+{
+	EgMeterSlot *p = data;
+	if (GST_PAD_PROBE_INFO_BUFFER(info) != NULL) {
+		g_mutex_lock(&p->m->lock);
+		p->w.in++;
+		g_mutex_unlock(&p->m->lock);
+	}
+	return GST_PAD_PROBE_OK;
+}
+
+static GstPadProbeReturn on_meter_out(GstPad *pad, GstPadProbeInfo *info, gpointer data)
+{
+	EgTileMeter *m = data;
+	GstBuffer *buf = GST_PAD_PROBE_INFO_BUFFER(info);
+	if (buf == NULL)
+		return GST_PAD_PROBE_OK;
+	g_mutex_lock(&m->lock);
+	m->frames++;
+	if (GST_BUFFER_PTS_IS_VALID(buf) && m->fps > 0) {
+		// The compositor's frames start at phase + k/fps (it does not start the grid at 0: 13 ms on the
+		// board, Nov 5); the tiles' gate needs that phase
+		guint64 pts = GST_BUFFER_PTS(buf);
+		gint64 frame = GST_SECOND / m->fps;
+		guint64 k = gst_util_uint64_scale(pts, (guint64)m->fps, GST_SECOND);
+		gint64 ph = (gint64)pts - (gint64)gst_util_uint64_scale_round(k, GST_SECOND, (guint64)m->fps);
+		ph = ph < 0 ? 0 : ph >= frame ? frame - 1 : ph; // rounding: ±1 ns at the edges
+		if (m->have_phase) {
+			gint64 d = ph > m->phase_ns ? ph - m->phase_ns : m->phase_ns - ph;
+			if (d > frame / 2)
+				d = frame - d; // on a circle: 0 and a frame minus 1 ns are next to each other
+			if (d > m->jump_ns)
+				m->jump_ns = d;
+		}
+		m->phase_ns = ph;
+		m->have_phase = 1;
+	}
+	for (int i = 0; i < m->npads; i++) {
+		EgMeterSlot *p = &m->pads[i];
+		if (p->pad == NULL)
+			continue;
+		GstBuffer *used = ((EgVaggPadHead *)p->pad)->buffer;
+		gint64 v = used != NULL && GST_BUFFER_PTS_IS_VALID(used) ? (gint64)GST_BUFFER_PTS(used) : -1;
+		if (v != p->last_pts) {
+			if (v >= 0)
+				p->w.fresh++;
+			p->run = 1;
+		} else {
+			p->run++;
+		}
+		if (p->run > p->w.hold)
+			p->w.hold = p->run;
+		p->last_pts = v;
+	}
+	g_mutex_unlock(&m->lock);
+	return GST_PAD_PROBE_OK;
+}
+
+EgTileMeter *eg_tile_meter_new(GstElement *comp, int npads, int fps)
+{
+	guint major, minor, micro, nano;
+	gst_version(&major, &minor, &micro, &nano);
+	GType vpad = g_type_from_name("GstVideoAggregatorPad");
+	if (comp == NULL || npads <= 0 || major != 1 || minor != 14 || vpad == 0)
+		return NULL;
+	GstPad **pads = g_new0(GstPad *, npads);
+	for (int i = 0; i < npads; i++) {
+		char name[32];
+		snprintf(name, sizeof(name), "sink_%d", i);
+		pads[i] = gst_element_get_static_pad(comp, name);
+		if (pads[i] != NULL && !g_type_is_a(G_OBJECT_TYPE(pads[i]), vpad)) {
+			for (int j = 0; j <= i; j++)
+				if (pads[j] != NULL)
+					gst_object_unref(pads[j]);
+			g_free(pads);
+			return NULL;
+		}
+	}
+	EgTileMeter *m = g_new0(EgTileMeter, 1);
+	g_mutex_init(&m->lock);
+	m->npads = npads;
+	m->fps = fps;
+	m->pads = g_new0(EgMeterSlot, npads);
+	for (int i = 0; i < npads; i++) {
+		EgMeterSlot *p = &m->pads[i];
+		p->m = m;
+		p->pad = pads[i];
+		p->last_pts = -2;
+		if (p->pad != NULL)
+			p->probe = gst_pad_add_probe(p->pad, GST_PAD_PROBE_TYPE_BUFFER, on_meter_in, p, NULL);
+	}
+	g_free(pads);
+	m->src = gst_element_get_static_pad(comp, "src");
+	if (m->src != NULL)
+		m->probe = gst_pad_add_probe(m->src, GST_PAD_PROBE_TYPE_BUFFER, on_meter_out, m, NULL);
+	return m;
+}
+
+int eg_tile_meter_phase(EgTileMeter *m, gint64 *phase_ns)
+{
+	g_mutex_lock(&m->lock);
+	int ok = m->have_phase;
+	*phase_ns = m->phase_ns;
+	g_mutex_unlock(&m->lock);
+	return ok;
+}
+
+void eg_tile_meter_take(EgTileMeter *m, guint64 *frames, gint64 *phase_ns, gint64 *jump_ns, EgMeterPad *pads)
+{
+	g_mutex_lock(&m->lock);
+	*frames = m->frames;
+	*phase_ns = m->have_phase ? m->phase_ns : -1;
+	*jump_ns = m->jump_ns;
+	m->frames = 0;
+	m->jump_ns = 0;
+	for (int i = 0; i < m->npads; i++) {
+		EgMeterSlot *p = &m->pads[i];
+		pads[i] = p->w;
+		memset(&p->w, 0, sizeof(p->w));
+		p->w.hold = p->run; // a hold in progress counts in the next window from where it is
+	}
+	g_mutex_unlock(&m->lock);
+}
+
+void eg_tile_meter_free(EgTileMeter *m)
+{
+	if (m->src != NULL) {
+		if (m->probe != 0)
+			gst_pad_remove_probe(m->src, m->probe);
+		gst_object_unref(m->src);
+	}
+	for (int i = 0; i < m->npads; i++) {
+		EgMeterSlot *p = &m->pads[i];
+		if (p->pad == NULL)
+			continue;
+		if (p->probe != 0)
+			gst_pad_remove_probe(p->pad, p->probe);
+		gst_object_unref(p->pad);
+	}
+	g_free(m->pads);
+	g_mutex_clear(&m->lock);
+	g_free(m);
 }

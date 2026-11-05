@@ -61,9 +61,9 @@ does not start). They are in the bundle since then, from the next release on: `s
 **first image has to carry a release after 0.1.0** (§12, D-I9).
 
 What the bundle needs from the base system: the groups `i2c` and `input`, and the packages `v4l-utils`,
-`i2c-tools`, `python3`, `libssl1.1`, `sudo` and `systemd`. What it does **not** carry, and the image does: the DTB and
-the `tc358743` extlinux entry (frozen, UPDATES.md §12.11). The TC358743 module and the rest of our kernel bits come with
-the bundle's system layer.
+`i2c-tools`, `python3`, `libssl1.1`, `sudo` and `systemd`. What it does **not** carry, and the image does: the base's DTB and
+the `tc358743` extlinux entry (frozen, UPDATES.md §12.11). The TC358743 module, the rest of our kernel bits and the dual
+DTB (a chip on CAM0, CAM1 or both, which the splash's entry boots) come with the bundle's system layer.
 
 ## 3. How it is built
 
@@ -547,7 +547,8 @@ above cover the obligation to keep it available.
 
 - Packages = `base.lock` plus the system layer's; none of the `base/purge-*.txt` patterns installed; every
   `nvidia-l4t-*` on hold. The system layer applied (its `state.json`: the release, no error, no apply half done), the DTB
-  the frozen base's (`pins.sh`), and the system's fingerprint written to the report (`fingerprint.json`, UPDATES.md
+  the frozen base's (`pins.sh`), the dual DTB the layer's (`system/modules.lock`) and booted only by the `eirl-splash`
+  entry, and the system's fingerprint written to the report (`fingerprint.json`, UPDATES.md
   §12.10).
 - Enabled and masked units = the expected lists; `default.target` = multi-user; no oem-config.
 - Size of the raw and compressed image; free space in `APP`.

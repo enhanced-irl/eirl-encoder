@@ -6,7 +6,6 @@ package hw
 import (
 	"errors"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -60,18 +59,6 @@ func AudioFromStatus(v byte) Audio {
 		a.State = "no_samples"
 	}
 	return a
-}
-
-// FindSubdev finds the /dev/v4l-subdevN node whose name contains `name` (tc358743).
-func FindSubdev(name string) (string, error) {
-	matches, _ := filepath.Glob("/sys/class/video4linux/v4l-subdev*/name")
-	for _, m := range matches {
-		b, err := os.ReadFile(m)
-		if err == nil && strings.Contains(string(b), name) {
-			return "/dev/" + filepath.Base(filepath.Dir(m)), nil
-		}
-	}
-	return "", errors.New("subdev not found: " + name)
 }
 
 func readInt(path string) (int64, error) {

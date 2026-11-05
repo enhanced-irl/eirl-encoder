@@ -67,9 +67,11 @@ type Host interface {
 	// BaseTime: the program pipeline's base_time; the screen's pipeline shares its timeline.
 	BaseTime() uint64
 	// AttachScreen: the screen's pipeline is PLAYING. The engine points each slot's bridge at mvs[i]
-	// (SetScreen(mvs[i], MVGap)), pushes black into those without a source (attach_screen), and sends pgmtap to
-	// mvp through a BridgeShared bridge with Extra = ProgramDelay(latency).
-	AttachScreen(mvs []gst.Element, mvp gst.Element)
+	// (SetScreen(mvs[i], grid): one frame per screen frame), pushes black into those without a source
+	// (attach_screen), and sends pgmtap to mvp through a BridgeShared bridge with Extra = ProgramDelay(latency).
+	AttachScreen(mvs []gst.Element, mvp gst.Element, grid gst.ScreenGrid)
+	// Regrid: the same tiles, another grid (the compositor's phase, measured once it makes frames).
+	Regrid(mvs []gst.Element, grid gst.ScreenGrid)
 	// DetachScreen: before the pipeline closes; once it returns no bridge pushes into it. Neither this nor
 	// AttachScreen may wait for the engine's actor (Stop may be called from it).
 	DetachScreen()
@@ -146,7 +148,8 @@ type Screen struct {
 	w, h      int
 	power     *ui.PowerRequest
 	mv        gst.Element
-	pipe      gst.Pipeline // while the multiview is on, for the latency query
+	pipe      gst.Pipeline  // while the multiview is on, for the latency query
+	meter     gst.TileMeter // while the multiview is on: what it shows of each pad (nil: not on this platform)
 	lay       *ui.Layout
 	aspects   map[int]scene.Aspect
 	status    *ui.Status
@@ -354,6 +357,46 @@ func (s *Screen) TakeTouchMax() time.Duration {
 	return d
 }
 
+// phaseTolerance: a change of the compositor's phase smaller than this does not regrid the tiles (rounding)
+const phaseTolerance = time.Millisecond
+
+// phaseApart is how far apart two phases of a grid of fps frames a second are, on a circle.
+func phaseApart(a, b time.Duration, fps int) time.Duration {
+	frame := time.Second / time.Duration(max(1, fps))
+	d := a - b
+	if d < 0 {
+		d = -d
+	}
+	return min(d, frame-d)
+}
+
+// Tiles is what the screen showed of the program (Program) and of each slot's tile (Tiles[i]) since the
+// previous call, for the engine's timings line (MIXER.md §24). false: the screen is off or the platform has
+// no meter.
+type Tiles struct {
+	FPS     int           // the screen's rate
+	Frames  uint64        // its frames
+	Phase   time.Duration // of its frames' grid (-1: none yet)
+	Jump    time.Duration // the largest change of that phase in the window (0: steady)
+	Program gst.PadWindow
+	Tiles   []gst.PadWindow
+}
+
+// TakeTiles starts a new window.
+func (s *Screen) TakeTiles() (Tiles, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.meter == nil || s.lay == nil {
+		return Tiles{}, false
+	}
+	w := s.meter.Take()
+	if len(w.Pads) < 1+len(s.lay.Tiles) {
+		return Tiles{}, false
+	}
+	return Tiles{FPS: FPS(s.o.FPS), Frames: w.Frames, Phase: w.Phase, Jump: w.Jump, Program: w.Pads[0],
+		Tiles: w.Pads[1 : 1+len(s.lay.Tiles)]}, true
+}
+
 // TakeDrawMax is the slowest full drawing since the last call (the engine's timings line: «dibujo»).
 func (s *Screen) TakeDrawMax() time.Duration {
 	s.mu.Lock()
@@ -459,14 +502,24 @@ func (s *Screen) show(w, h int) string {
 	tShow := time.Now()
 	o := s.o
 	lay := ui.NewLayout(w, h, o.Slots)
-	desc := Describe(o.Platform, lay, Pipeline{Width: o.Width, Height: o.Height, FPS: o.FPS, Latency: o.Latency, Sync: o.Sync,
-		Snapshot: o.RunDir != ""})
+	pc := Pipeline{Width: o.Width, Height: o.Height, FPS: o.FPS, Latency: o.Latency, Sync: o.Sync, Snapshot: o.RunDir != ""}
+	desc := Describe(o.Platform, lay, pc)
 	p, err := o.Media.Parse("screen", desc)
 	if err != nil {
 		elog.Event("mixer", "screen_build_failed", "err", err)
 		return "error"
 	}
 	p.FixBase(s.host.BaseTime())
+	// The program (sink_0) and the tiles (sink_1 …); the UI layer, after them, is not measured
+	var meter gst.TileMeter
+	if mv := p.ByName("mv"); mv != nil {
+		meter = o.Media.NewTileMeter(mv, 1+len(lay.Tiles), FPS(o.FPS))
+	}
+	if meter == nil {
+		// Not GStreamer 1.14's videoaggregator: no tile figures in the timings line, and the tiles' gate keeps
+		// a phase of 0 (MIXER.md §24)
+		elog.Event("mixer", "screen_meter_unavailable")
+	}
 	var feeder gst.Feeder
 	if src := p.ByName("ui"); src != nil && s.fonts != nil {
 		feeder = o.Media.NewFeeder(src, w*h*4, uiBuffers)
@@ -475,8 +528,13 @@ func (s *Screen) show(w, h int) string {
 	for i := range mvs {
 		mvs[i] = p.ByName(fmt.Sprintf("mvs%d", i))
 		// The tile as late as the program: the same frame of a source on its tile and on the program
-		if q := p.ByName(fmt.Sprintf("mvd%d", i)); q == nil || !q.SetPadOffset("src", TileDelay(o.Latency, o.FPS)) {
+		q := p.ByName(fmt.Sprintf("mvd%d", i))
+		if q == nil || !q.SetPadOffset("src", TileDelay(o.Latency, o.FPS)) {
 			elog.Event("mixer", "screen_tile_delay_missing", "tile", i)
+		}
+		// and without the duration of the source's frame, or the compositor drops some (MIXER.md §24)
+		if q == nil || !q.DropDuration("sink") {
+			elog.Event("mixer", "screen_tile_duration_kept", "tile", i)
 		}
 	}
 	s.mu.Lock()
@@ -488,21 +546,24 @@ func (s *Screen) show(w, h int) string {
 			text = m.Text
 		}
 		elog.Event("mixer", "screen_start_failed", "err", text)
-		gst.CloseWithin(p, closeBudget)
+		closed := gst.CloseWithin(p, closeBudget)
 		if feeder != nil {
 			feeder.Free()
+		}
+		if meter != nil && closed {
+			meter.Free()
 		}
 		return "error"
 	}
 	s.mu.Lock()
-	s.mv, s.lay, s.pipe = p.ByName("mv"), lay, p
+	s.mv, s.lay, s.pipe, s.meter = p.ByName("mv"), lay, p, meter
 	s.fitTiles()
 	s.mu.Unlock()
 	if !s.toUI(attachReq{lay: lay, feeder: feeder}) {
 		s.teardown(p, feeder, nil)
 		return ""
 	}
-	s.host.AttachScreen(mvs, p.ByName("mvp"))
+	s.host.AttachScreen(mvs, p.ByName("mvp"), Grid(pc))
 	s.setState(StateOn)
 	elog.Event("mixer", "screen_on", "width", w, "height", h, "display_wait_ms", s.displayWait.Milliseconds(),
 		"need", s.displayNeed, "no_display", s.displayBad, "show_ms", time.Since(tShow).Milliseconds())
@@ -514,7 +575,19 @@ func (s *Screen) show(w, h int) string {
 	}
 	reason := ""
 	next := time.Now().Add(displayPoll)
+	grid, phase := Grid(pc), time.Duration(-1)
 	for !s.stopped() {
+		// The tiles' gate needs the phase of the compositor's frames, which only the meter sees (MIXER.md
+		// §24): once it has it, and again if it ever moves
+		if meter != nil {
+			if ph, ok := meter.Phase(); ok && (phase < 0 || phaseApart(ph, phase, grid.FPS) > phaseTolerance) {
+				phase = ph
+				g := grid
+				g.Offset -= ph
+				s.host.Regrid(mvs, g)
+				elog.Event("mixer", "screen_grid", "fps", grid.FPS, "phase_ms", fmt.Sprintf("%.1f", float64(ph)/float64(time.Millisecond)))
+			}
+		}
 		if m := p.Pop(busPoll, gst.MessageError); m != nil {
 			dbg := m.Debug
 			if len(dbg) > 200 {
@@ -558,13 +631,19 @@ func (s *Screen) teardown(p gst.Pipeline, feeder gst.Feeder, snapDone chan struc
 		<-snapDone
 	}
 	s.mu.Lock()
-	s.mv, s.lay, s.pipe = nil, nil, nil
+	meter := s.meter
+	s.mv, s.lay, s.pipe, s.meter = nil, nil, nil, nil
 	s.mu.Unlock()
-	if !gst.CloseWithin(p, closeBudget) {
+	closed := gst.CloseWithin(p, closeBudget)
+	if !closed {
 		elog.Event("mixer", "screen_close_stuck", "budget_s", closeBudget.Seconds())
 	}
 	if feeder != nil {
 		feeder.Free()
+	}
+	// Its probes run on the compositor's threads: only once the pipeline is in NULL (stuck: leaked)
+	if meter != nil && closed {
+		meter.Free()
 	}
 	if s.o.RunDir != "" {
 		os.Remove(filepath.Join(s.o.RunDir, snapshotName)) // the last image is no longer what is shown

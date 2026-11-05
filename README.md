@@ -44,7 +44,7 @@ draws them again.*
 ## Features
 
 - **Inputs**: the board's HDMI through the TC358743 over CSI (up to 1080p50 or 720p60, with HDMI audio
-  over I2S); USB capture cards (Elgato Cam Link 4K up to 1080p60, MS2130, MS2109) and UVC cameras, plugged
+  over I2S), on either camera connector, or two HDMI inputs with one board on each (the second without audio); USB capture cards (Elgato Cam Link 4K up to 1080p60, MS2130, MS2109) and UVC cameras, plugged
   in and unplugged while running; phones and cameras over RTMP or SRT (H.264 or H.265, e.g. Moblin or
   Larix), through the encoder's own Wi-Fi access point or by cable; a test pattern. Four mixer slots with
   your own names, and more cameras connected than slots if you want.
@@ -93,7 +93,7 @@ draws them again.*
 ## Getting started
 
 Hardware: a **Jetson Nano Developer Kit 4 GB (carrier B01)**, a TC358743 HDMI-to-CSI board on CAM1 (with its
-I2S lines for HDMI audio), a **5 V 4 A** power supply, a 1024×600 HDMI touch screen and a **microSD card of
+I2S lines for HDMI audio; on CAM0 too once the encoder has updated to 0.16.0 or later and restarted), a **5 V 4 A** power supply, a 1024×600 HDMI touch screen and a **microSD card of
 16 GB or more** (a 32 GB high-endurance card is best). See [Hardware](DEVELOPMENT.md#hardware).
 
 ### From the microSD image
@@ -218,13 +218,15 @@ and [`MANAGER.md`](MANAGER.md).
 
 The manual of the HDMI capture and the board (the hardware and its wiring, building, installing by hand,
 operating, the measurements, the bugs found and the history of the test board) is in
-[`DEVELOPMENT.md`](DEVELOPMENT.md).
+[`DEVELOPMENT.md`](DEVELOPMENT.md). To build the extras yourself (12–15 V power with the USB hub on its own
+regulator, the HDMI chip's hardware reset and a second fan, with parts you can buy and no custom PCB), see
+[`HARDWARE.md`](HARDWARE.md).
 
 ## Status
 
 | Area | State | Doc |
 |---|---|---|
-| HDMI capture (TC358743) | ✅ 1080p30 and 1080p50 in real streams, HDMI audio, A/V in sync to the frame, ~1.06 s end-to-end latency. Open: the audio PLL that sometimes does not lock again, a DSLR that does not decode | [`DEVELOPMENT.md`](DEVELOPMENT.md) |
+| HDMI capture (TC358743) | ✅ 1080p30 and 1080p50 in real streams, HDMI audio, A/V in sync to the frame, ~1.06 s end-to-end latency; from 0.16.0, on CAM0 or CAM1, or two boards as HDMI 1 and HDMI 2 (the second without audio), and the chip's reset wire (a DIY addition) used at boot and to recover the audio. Open: the audio PLL that sometimes does not lock again without the reset wire, a DSLR that does not decode; not tested yet on the board: the chip on CAM1 with the dual device tree, two chips | [`DEVELOPMENT.md`](DEVELOPMENT.md) |
 | USB sources | ✅ Released: Cam Link 4K at 1080p60, UVC webcams; plugging and unplugging while running (0.6.0); image settings (0.4.0). Missing: per-source A/V sync and a long test | [`SOURCES.md`](SOURCES.md) |
 | Mixer, touch screen and audio | ✅ Released: 4 slots, layouts, fades, audio mixer, headphones; Settings on the screen with everything the web has; from 0.14.0, the power button opens the Power menu (held 3 s it powers off, never while streaming or recording) and the power LED blinks while streaming or recording | [`MIXER.md`](MIXER.md) §14.1-14.2, [`HEADPHONES.md`](HEADPHONES.md) |
 | Network cameras | ✅ Released: RTMP/SRT over the encoder's Wi-Fi or by cable; for now, one network camera at a time | [`NETWORK_SOURCES.md`](NETWORK_SOURCES.md) |
@@ -238,6 +240,7 @@ operating, the measurements, the bugs found and the history of the test board) i
 | Local recording to a USB disk | ✅ Released in 0.12.0: the program at 25 Mbps (up to 40, or H.265) on exFAT, FAT32 or ext4, alone or with the stream, from the screen and the web; 4 h streaming and recording on the board with nothing lost; from 0.15.0, its state and Record/Stop in the EnhancedIRL app (closed beta). Not tested, an accepted risk: a power cut by the cable (the power-cut recovery is tested) | [`RECORDING.md`](RECORDING.md) |
 | Over-the-air updates | ✅ Released in 0.1.0; since 0.11.0 they also bring drivers, firmware and system packages (the system layer), so a card never has to be written again; the test board updates itself from GitHub Releases like any device | [`UPDATES.md`](UPDATES.md) |
 | Fan control | ✅ Released in 0.6.0 (one curve); profiles next | [`FAN.md`](FAN.md) |
+| DIY hardware: 12–15 V power, the HDMI chip's reset, a second fan | 🟡 Wired and tested on the test board (Nov 5). Next: the reset pin in the device tree of `main` and the second fan's on/off by temperature | [`HARDWARE.md`](HARDWARE.md) |
 | Boot splash | ✅ Released | [`SPLASH.md`](SPLASH.md) |
 | microSD image | ✅ Published with 0.7.0, 0.8.0 and 0.11.1: the whole card, signed with the updates' key. The one-time firmware update is still to be seen on a board with older firmware | [`IMAGE.md`](IMAGE.md) |
 

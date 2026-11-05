@@ -96,6 +96,8 @@ func TestPrepare(t *testing.T) {
 	sub := filepath.Join(root, "sys/class/video4linux/v4l-subdev2")
 	os.MkdirAll(filepath.Join(sub, "device/of_node"), 0o755)
 	os.WriteFile(filepath.Join(sub, "name"), []byte("tc358743 8-000f\n"), 0o644)
+	os.MkdirAll(filepath.Join(root, "sys/class/video4linux/video0"), 0o755)
+	os.WriteFile(filepath.Join(root, "sys/class/video4linux/video0/name"), []byte("vi-output, tc358743 8-000f\n"), 0o644)
 	state := t.TempDir()
 	os.WriteFile(filepath.Join(state, "hw-reset.request"), nil, 0o644)
 	edid := filepath.Join(t.TempDir(), "edid.bin")
@@ -120,11 +122,11 @@ func TestPrepare(t *testing.T) {
 		return sysx.Result{}
 	}
 	s := Sys{Root: root, Run: run, Sleep: func(time.Duration) {}}
-	if s.FindSubdev() != "/dev/v4l-subdev2" || s.HasResetPin("/dev/v4l-subdev2") {
+	if s.WiredSubdev("") != "/dev/v4l-subdev2" || s.HasResetPin("/dev/v4l-subdev2") {
 		t.Fatal("subdev / reset pin")
 	}
 	// Same EDID: only the reset (asked for) and the read
-	if !s.Prepare(edid, state, "/dev/video0") {
+	if !s.Prepare(edid, state, "") {
 		t.Fatal("no TC358743")
 	}
 	if sysx.Exists(filepath.Join(state, "hw-reset.request")) || !sysx.Exists(filepath.Join(state, "hw-reset.last")) {
@@ -135,20 +137,88 @@ func TestPrepare(t *testing.T) {
 	}
 	// Another EDID on the chip: rewritten, then wait for the signal to drop
 	log, chipEDID = nil, "00 00 00"
-	s.Prepare(edid, state, "/dev/video0")
+	s.Prepare(edid, state, "")
 	all := strings.Join(log, "|")
 	if !strings.Contains(all, "--set-edid=pad=0,file="+edid+",format=raw") || queries != 3 {
 		t.Errorf("EDID not loaded or no wait: %v (queries %d)", log, queries)
 	}
-	if (Sys{Root: t.TempDir(), Run: run, Sleep: func(time.Duration) {}}).Prepare(edid, state, "/dev/video0") {
+	if (Sys{Root: t.TempDir(), Run: run, Sleep: func(time.Duration) {}}).Prepare(edid, state, "") {
 		t.Error("a board without TC358743")
 	}
 	// Replug: the same EDID written again, whatever the chip has (the driver drops the hotplug)
 	log, chipEDID = nil, "00 ff ab\n"
-	if !s.Replug(edid) || strings.Join(log, "|") != "-d /dev/v4l-subdev2 --set-edid=pad=0,file="+edid+",format=raw" {
+	if !s.Replug(edid, "") || strings.Join(log, "|") != "-d /dev/v4l-subdev2 --set-edid=pad=0,file="+edid+",format=raw" {
 		t.Errorf("replug: %v", log)
 	}
-	if s.Replug(filepath.Join(t.TempDir(), "none.bin")) || (Sys{Root: t.TempDir(), Run: run}).Replug(edid) {
+	if s.Replug(filepath.Join(t.TempDir(), "none.bin"), "") || (Sys{Root: t.TempDir(), Run: run}).Replug(edid, "") {
 		t.Error("replug without an EDID file or a TC358743")
+	}
+}
+
+// Two chips (CAM0 and CAM1): every chip gets the EDID; the reset, the replug and the reset pin are the
+// wired chip's (HDMI_WIRED), and only a chip with the driver's control has a hardware reset.
+func TestTwoChips(t *testing.T) {
+	root := t.TempDir()
+	w := func(p, v string) {
+		os.MkdirAll(filepath.Dir(filepath.Join(root, p)), 0o755)
+		os.WriteFile(filepath.Join(root, p), []byte(v+"\n"), 0o644)
+	}
+	w("sys/class/video4linux/v4l-subdev2/name", "tc358743 8-000f")
+	w("sys/class/video4linux/v4l-subdev3/name", "tc358743 7-000f")
+	w("sys/class/video4linux/video0/name", "vi-output, tc358743 8-000f")
+	w("sys/class/video4linux/video1/name", "vi-output, tc358743 7-000f")
+	w("sys/bus/i2c/devices/i2c-7/name", "i2c-6-mux (chan_id 0)")
+	w("sys/bus/i2c/devices/i2c-8/name", "i2c-6-mux (chan_id 1)")
+	// Both nodes declare the pin; only CAM0's chip got it (and the control)
+	w("sys/class/video4linux/v4l-subdev2/device/of_node/reset-gpios", "")
+	w("sys/class/video4linux/v4l-subdev3/device/of_node/reset-gpios", "")
+	state := t.TempDir()
+	os.WriteFile(filepath.Join(state, "hw-reset.request"), nil, 0o644)
+	edid := filepath.Join(t.TempDir(), "edid.bin")
+	os.WriteFile(edid, []byte{0x00, 0xff, 0xAB}, 0o644)
+	var log []string
+	run := func(_ time.Duration, name string, args ...string) sysx.Result {
+		log = append(log, strings.Join(args, " "))
+		if len(args) == 3 && args[2] == "--list-ctrls" {
+			if args[1] == "/dev/v4l-subdev3" {
+				return sysx.Result{Out: "                 hardware_reset 0x00981982 (button) : flags=write-only, execute-on-write\n"}
+			}
+			return sysx.Result{Out: "             audio_sampling_rate 0x00981980 (int)    : min=0 max=768000 step=1 default=0 value=0 flags=read-only\n"}
+		}
+		if len(args) > 1 && args[len(args)-1] == "--query-dv-timings" {
+			return sysx.Result{RC: 1}
+		}
+		return sysx.Result{}
+	}
+	s := Sys{Root: root, Run: run, Sleep: func(time.Duration) {}}
+	if got := s.Chips(); len(got) != 2 || got[0].Subdev != "/dev/v4l-subdev3" || got[1].Video != "/dev/video0" {
+		t.Fatalf("chips: %+v", got)
+	}
+	if s.WiredSubdev("") != "/dev/v4l-subdev3" || s.WiredSubdev("cam1") != "/dev/v4l-subdev2" {
+		t.Error("wired subdev: CAM0 by default, CAM1 when set")
+	}
+	if !s.HasResetPin("/dev/v4l-subdev3") || s.HasResetPin("/dev/v4l-subdev2") {
+		t.Error("only the chip with the control has a hardware reset, although both nodes declare the pin")
+	}
+	log = nil
+	if !s.Prepare(edid, state, "cam1") {
+		t.Fatal("no TC358743")
+	}
+	all := strings.Join(log, "|")
+	for _, want := range []string{
+		"-d /dev/v4l-subdev2 -c hardware_reset=1",
+		"-d /dev/v4l-subdev3 --set-edid=pad=0,file=" + edid + ",format=raw",
+		"-d /dev/v4l-subdev2 --set-edid=pad=0,file=" + edid + ",format=raw",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("Prepare: no %q in %v", want, log)
+		}
+	}
+	if strings.Contains(all, "/dev/v4l-subdev3 -c hardware_reset") {
+		t.Errorf("reset on the chip that is not wired: %v", log)
+	}
+	log = nil
+	if !s.Replug(edid, "cam1") || strings.Join(log, "|") != "-d /dev/v4l-subdev2 --set-edid=pad=0,file="+edid+",format=raw" {
+		t.Errorf("replug of the wired chip: %v", log)
 	}
 }
