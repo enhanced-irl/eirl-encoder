@@ -448,3 +448,36 @@ func TestUpdatesAppWords(t *testing.T) {
 		t.Error("capFirst")
 	}
 }
+
+func TestFanPage(t *testing.T) {
+	h, app := pagesHarness(t, "fan")
+	if keys := h.u.pageKeys("fan", &h.net.snap); len(keys) != 0 {
+		t.Fatalf("no fans reported: no switch (%v)", keys)
+	}
+	app.snap.Device.Fan = &FanInfo{TempC: 48.5, PWM: 133}
+	if keys := h.u.pageKeys("fan", &h.net.snap); len(keys) != 0 {
+		t.Fatalf("a board without the second fan: no switch (%v)", keys)
+	}
+	app.snap.Device.Fan.Second = &Fan2Info{Mode: "auto", OnC: 55, HotC: 80}
+	if keys := h.u.pageKeys("fan", &h.net.snap); !slices.Equal(keys, []string{"s_fan2"}) {
+		t.Fatalf("keys %v", keys)
+	}
+	n := len(app.did)
+	h.press("s_fan2", 0.1)
+	if len(app.did) != n || !h.u.confirming("fan2_off") {
+		t.Fatal("switching it off takes a second tap")
+	}
+	h.press("s_fan2", 0.1)
+	if a := app.lastDid(); a.What != "fan2" || a.Value != "off" {
+		t.Fatalf("second tap: %+v", a)
+	}
+	app.snap.Device.Fan.Second.Mode = "off"
+	n = len(app.did)
+	h.press("s_fan2", 0.1)
+	if a := app.lastDid(); len(app.did) != n+1 || a.What != "fan2" || a.Value != "auto" {
+		t.Fatalf("back to automatic in one tap: %+v", a)
+	}
+	h.u.Tick() // draws with every state without panicking
+	app.snap.Device.Fan.Second.On, app.snap.Device.Fan.Second.Reason = true, "hot"
+	h.u.Tick()
+}

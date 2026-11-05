@@ -1439,6 +1439,7 @@ async function loadDevice() {
   }
   state.device = d;
   $('device-card').hidden = false;
+  renderFan(d.fan);
   if (!dev.zones) loadZones();
   if (!dev.dirty) renderDevice();
   if (upd.data) renderVersions(verOf(upd.data.current) || verOf(d.version), upd.data.versions);
@@ -1645,9 +1646,63 @@ $('dev-setup-again').addEventListener('click', async () => {
   }
 });
 
+// --- The fans (FAN.md §5): GET /device's fan, every 10 s while the page is in sight -----------------------------
+// The second fan's switch is PUT /device {fan: {second: auto | off}} at once (not with the device card's «Save»).
+// Off is the user's risk: it asks first, and says it still switches on when the board gets too hot. Off lasts until
+// the next restart.
+
+const fanState = { timer: 0 };
+const fanDeg = (v) => fmtNum(v, Number.isInteger(v) ? 0 : 1);
+
+function renderFan(f) {
+  const card = $('fan-card');
+  card.hidden = !f;
+  if (!f) return;
+  $('fan-temp').textContent = t('fan.temp', { temp: fmtNum(f.tempC, 1), pct: Math.round((f.pwm * 100) / 255) });
+  const s = f.second;
+  $('fan2-row').hidden = !s;
+  $('fan2-none').hidden = !!s;
+  if (!s) return;
+  const auto = s.mode !== 'off';
+  const cb = $('fan2-auto');
+  if (!cb.disabled) cb.checked = auto;
+  $('fan2-state').textContent = auto
+    ? t(s.on ? 'fan.autoOn' : 'fan.auto', { on: fanDeg(s.onC) })
+    : t(s.on ? 'fan.offOn' : 'fan.off', { hot: fanDeg(s.hotC) });
+  $('fan2-warn').hidden = auto;
+}
+
+async function loadFan() {
+  try {
+    const d = await api('GET', '/device', undefined, { quiet: true });
+    renderFan(d.fan);
+  } catch (_) { /* the device card says why */ }
+}
+
+async function setFan2(cb) {
+  const auto = cb.checked;
+  if (!auto && !confirm(t('fan.offConfirm'))) { cb.checked = true; return; }
+  cb.disabled = true;
+  try {
+    const d = await api('PUT', '/device', { fan: { second: auto ? 'auto' : 'off' } });
+    toast(auto ? t('fan.autoDone') : t('fan.offDone'));
+    cb.disabled = false;
+    renderFan(d.fan);
+  } catch (e) {
+    cb.checked = !auto;
+    cb.disabled = false;
+    toast(e.message, true);
+  }
+}
+
+$('fan2-auto').addEventListener('change', (ev) => setFan2(ev.target));
+
 hooks.start.push(loadDevice);
-hooks.live.push(loadUpdate, renderClock);
-hooks.stop.push(() => { clearTimeout(upd.timer); clearTimeout(dev.clockTimer); });
+hooks.live.push(loadUpdate, renderClock, () => {
+  clearInterval(fanState.timer);
+  fanState.timer = setInterval(loadFan, 10000);
+});
+hooks.stop.push(() => { clearTimeout(upd.timer); clearTimeout(dev.clockTimer); clearInterval(fanState.timer); });
 hooks.status.push(renderUpdateGate, renderRebootGate);
 hooks.mixer.push(renderUpdateGate, renderRebootGate);
 onLangChange(() => {

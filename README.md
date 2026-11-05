@@ -239,7 +239,7 @@ regulator, the HDMI chip's hardware reset and a second fan, with parts you can b
 | Setup wizard, translations | ✅ Released in 0.1.0 | [`SETUP.md`](SETUP.md) |
 | Local recording to a USB disk | ✅ Released in 0.12.0: the program at 25 Mbps (up to 40, or H.265) on exFAT, FAT32 or ext4, alone or with the stream, from the screen and the web; 4 h streaming and recording on the board with nothing lost; from 0.15.0, its state and Record/Stop in the EnhancedIRL app (closed beta). Not tested, an accepted risk: a power cut by the cable (the power-cut recovery is tested) | [`RECORDING.md`](RECORDING.md) |
 | Over-the-air updates | ✅ Released in 0.1.0; since 0.11.0 they also bring drivers, firmware and system packages (the system layer), so a card never has to be written again; the test board updates itself from GitHub Releases like any device | [`UPDATES.md`](UPDATES.md) |
-| Fan control | ✅ Released in 0.6.0 (one curve); profiles next | [`FAN.md`](FAN.md) |
+| Fan control | ✅ Released in 0.6.0 (one curve); the second fan and its switch in Settings in 0.17.0; profiles next | [`FAN.md`](FAN.md) |
 | DIY hardware: 12–15 V power, the HDMI chip's reset, a second fan | 🟡 Wired and tested on the test board (Nov 5). Next: the reset pin in the device tree of `main` and the second fan's on/off by temperature | [`HARDWARE.md`](HARDWARE.md) |
 | Boot splash | ✅ Released | [`SPLASH.md`](SPLASH.md) |
 | microSD image | ✅ Published with 0.7.0, 0.8.0 and 0.11.1: the whole card, signed with the updates' key. The one-time firmware update is still to be seen on a board with older firmware | [`IMAGE.md`](IMAGE.md) |

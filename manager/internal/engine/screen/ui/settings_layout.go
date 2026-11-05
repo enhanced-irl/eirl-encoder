@@ -18,7 +18,7 @@ var SettingsGroups = []SettingsGroup{
 	{"cams", []string{"cams"}},
 	{"cloud", []string{"cloud"}},
 	{"device", []string{"language", "time", "account"}},
-	{"system", []string{"updates", "about"}},
+	{"system", []string{"updates", "about", "fan"}}, // Fan (FAN.md §5): a tab, the list keeps seven
 }
 
 // SettingsPages are every Settings page, in the list's order.

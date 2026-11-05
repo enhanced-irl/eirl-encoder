@@ -88,6 +88,10 @@ var catalog = map[string]map[string]string{
 		FR: "le système n’a pas accepté la modification (%s)"},
 	"device.timezones_failed": {ES: "no se pudo leer la lista de zonas horarias", EN: "could not read the list of time zones",
 		FR: "impossible de lire la liste des fuseaux horaires"},
+	"device.bad_fan2": {ES: `{"second": "auto"} o {"second": "off"}`, EN: `{"second": "auto"} or {"second": "off"}`,
+		FR: `{"second": "auto"} ou {"second": "off"}`},
+	"device.no_fan2": {ES: "este aparato no tiene segundo ventilador", EN: "this device has no second fan",
+		FR: "cet appareil n’a pas de second ventilateur"},
 
 	// --- configuration (destination, input) ----------------------------------------------------------
 	"config.read_failed": {ES: "no se pudo leer la configuración", EN: "could not read the configuration",

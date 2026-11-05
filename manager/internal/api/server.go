@@ -111,6 +111,9 @@ type Server struct {
 	Zones         *device.Zones
 	SetupCodePath string
 	Versions      Versions
+	// Fan: the second fan in Settings (FAN.md §5): the fan daemon's state, the request the app writes for it and
+	// this boot's id (Fan.State "" = never shown)
+	Fan FanFiles
 	// SlotsPath: /etc/eirl-encoder/slots.json, the source slots (SETUP.md §5; "" = /sources/slots answers 503)
 	SlotsPath string
 	// Update: over-the-air updates (UPDATES.md §8; nil = /update answers 503)

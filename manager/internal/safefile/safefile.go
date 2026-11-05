@@ -51,6 +51,16 @@ func reject(path, reason string) error {
 // MaxSize). A missing file gives an error that matches os.ErrNotExist; so does an untrusted one (and
 // ErrUntrusted, with a warning).
 func ReadOwned(path string, max int64) ([]byte, error) {
+	return read(path, max, ownerOK)
+}
+
+// ReadFrom is ReadOwned for a reader that is not the app: a root helper that reads one of the app's files as data
+// (eirl-fan, the second fan's control, FAN.md §5). It trusts a regular file owned by uid (the app's user) or by root.
+func ReadFrom(path string, max int64, uid uint32) ([]byte, error) {
+	return read(path, max, func(u uint32) bool { return u == uid || u == 0 })
+}
+
+func read(path string, max int64, ownerOK func(uint32) bool) ([]byte, error) {
 	if max <= 0 {
 		max = MaxSize
 	}

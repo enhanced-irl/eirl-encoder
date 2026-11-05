@@ -20,7 +20,7 @@ import (
 //	settings-updates-restart-confirm · settings-updates-restart-live · settings-updates-restart-notes (with a release
 //	available, its download waiting for Wi-Fi and the system layer failed: everything at once) · settings-updates-metered
 //	(the download waits for Wi-Fi or a cable) · settings-updates-sysfailed · settings-updates-sysskipped ·
-//	settings-about · settings-old (an app without the device API) · settings-sources · settings-sources-edited ·
+//	settings-about · settings-fan… (System › Fan: fanState) · settings-old (an app without the device API) · settings-sources · settings-sources-edited ·
 //	settings-sources-pick · settings-sources-alias · settings-sources-onair · settings-sources-dup ·
 //	settings-sources-oldengine · settings-sources-hidden (slot 2 hidden; hiding the one on air refused) ·
 //	settings-input (the board's HDMI, another EDID in use) · settings-input-usb (a USB card saved, in use) ·
@@ -188,6 +188,7 @@ func appState(variant, lang string, now time.Time) ui.AppSnapshot {
 	case "settings-old":
 		return ui.AppSnapshot{DeviceAPI: ui.No, SetupAPI: ui.No, UpdateAPI: ui.No, SlotsAPI: ui.No}
 	}
+	fanState(variant, dev)
 	return snap
 }
 
@@ -466,5 +467,26 @@ func camsPreview(variant string, p ui.Preview) {
 		p.NetReveal("s_camv_rtmp_eye")
 	case "settings-cams-cam-remove":
 		p.NetConfirm("cam_remove")
+	}
+}
+
+// fanState: the fans (System › Fan, FAN.md §5) for the settings-fan… variants: settings-fan (a board with the second
+// fan, automatic, off at 48.5 °C) · settings-fan-on (automatic, on at 57 °C) · settings-fan-confirm (the first tap to
+// switch it off: its warning) · settings-fan-off (switched off until the next restart) · settings-fan-offhot (switched
+// off, but on at 81 °C) · settings-fan-none (a board without it) · settings-fan-nodata (no fan control).
+func fanState(variant string, dev *ui.DeviceInfo) {
+	second := &ui.Fan2Info{Mode: "auto", OnC: 55, HotC: 80}
+	dev.Fan = &ui.FanInfo{TempC: 48.5, PWM: 133, Second: second}
+	switch variant {
+	case "settings-fan-on":
+		dev.Fan.TempC, dev.Fan.PWM, second.On, second.Reason = 57, 189, true, "temp"
+	case "settings-fan-off":
+		second.Mode = "off"
+	case "settings-fan-offhot":
+		dev.Fan.TempC, dev.Fan.PWM, second.Mode, second.On, second.Reason = 81, 255, "off", true, "hot"
+	case "settings-fan-none":
+		dev.Fan.Second = nil
+	case "settings-fan-nodata":
+		dev.Fan = nil
 	}
 }

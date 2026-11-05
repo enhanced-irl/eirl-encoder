@@ -7,6 +7,7 @@
 #   2. A → B by A's (older) helper: the layer is applied, the update installed;
 #   3. B → C, whose app never starts: the app is rolled back, the committed layer stays (forward only);
 #   4. B → E, whose layer has a file that does not match it: refused before changing anything, rolled back;
+#   (1-3 also check the dual device tree: undone with the layer, then installed and booted by the splash's entry only)
 #   5. streaming: refused before anything.
 set -uo pipefail
 cd /
@@ -28,6 +29,11 @@ stage() {
   echo "$v"
 }
 helper() { /usr/local/sbin/eirl-update -health-timeout 25s -settle 3s install >> /var/log/eirl-update.log 2>&1; }
+# The dual device tree (UPDATES.md §12.11): the layer's file, and which DTB each extlinux entry boots
+DUAL=/boot/tegra210-p3448-0000-p3449-0000-b00-tc358743-dual.dtb
+BASE=/boot/tegra210-p3448-0000-p3449-0000-b00-tc358743.dtb
+fdt_of() { awk -v l="$1" '$1=="LABEL"{cur=$2} $1=="FDT" && cur==l {print $2}' /boot/extlinux/extlinux.conf; }
+fdts() { awk '$1=="LABEL"{cur=$2} $1=="FDT"{printf "%s=%s ", cur, $2}' /boot/extlinux/extlinux.conf; }
 
 # The board: systemd's systemctl stays as systemctl.real (unit files change offline), the rest is faked
 [ -x /bin/systemctl ] && ! grep -q 'Fake systemctl' /bin/systemctl && mv /bin/systemctl /bin/systemctl.real
@@ -42,6 +48,9 @@ echo "=== 0. A by hand (an older release's code: its helper knows no system laye
 mkdir -p /tmp/a && tar -xzf /s/rel/A/eirl-encoder-*-linux-arm64.tar.gz -C /tmp/a
 /tmp/a/install.sh > /var/log/install-a.log 2>&1 || { tail -20 /var/log/install-a.log; fail "install.sh of A"; }
 A=$(ver); echo "A = $A; helper: $(/usr/local/sbin/eirl-update -version 2>/dev/null || echo old)"
+echo "boot after A: $(fdts)"
+[ "$(fdt_of eirl-splash)" = "$BASE" ] || fail "before the dual DTB the splash entry boots $(fdt_of eirl-splash)"
+ext_a=$(md5sum < /boot/extlinux/extlinux.conf)
 /usr/local/sbin/eirl-update system status >/dev/null 2>&1 && fail "A's helper already knows the system layer"
 printf '%s\n' test-password-123 | /bin/asuser eirl-encoder /usr/local/bin/eirl-encoderd passwd >/dev/null 2>&1
 systemctl restart eirl-encoderd.service
@@ -72,6 +81,8 @@ grep -q 'VERSION="0.7.0"' /usr/lib/os-release || fail "os-release not restored: 
 [ ! -e /usr/sbin/policy-rc.d ] || fail "policy-rc.d left behind"
 dpkg --audit | grep -q . && fail "dpkg left half done: $(dpkg --audit | head -3)"
 layer | grep -q interrupted || fail "state.json does not say interrupted"
+[ ! -e "$DUAL" ] || fail "the dual DTB stayed after the undo"
+[ "$(md5sum < /boot/extlinux/extlinux.conf)" = "$ext_a" ] || fail "extlinux changed: $(fdts)"
 echo "OK: the half-applied layer and the release were undone"
 
 echo "=== 2. A → B by A's helper (the first release with a system layer, on an older board)"
@@ -81,6 +92,13 @@ helper; echo "helper: $(helper_state)"
 [ "$(pkg usbmuxd)" = i ] && [ -f /lib/modules/4.9.337-tegra/updates/eirl-modems/ipheth.ko ] || fail "the layer is not there"
 grep -q "VERSION=\"$B\"" /usr/lib/os-release || fail "os-release: $(grep VERSION= /usr/lib/os-release)"
 layer | grep -qx "$B |  | " || fail "state.json: $(layer)"
+echo "boot after B: $(fdts)"
+[ -f "$DUAL" ] && [ "$(python3 -c 'import json;print(json.load(open("/var/lib/eirl-system/state.json"))["files"].get("'"$DUAL"'",""))')" = "$(sha256sum < "$DUAL" | cut -d' ' -f1)" ] ||
+  fail "the layer does not own the dual DTB"
+[ "$(fdt_of eirl-splash)" = "$DUAL" ] || fail "the splash entry boots $(fdt_of eirl-splash), not the dual DTB"
+for e in primary tc358743; do
+  [ -z "$(fdt_of $e)" ] || [ "$(fdt_of $e)" = "$BASE" ] || fail "$e boots $(fdt_of $e)"
+done
 echo "OK: layer $(layer)"
 
 echo "=== 3. B → C, whose app never starts: the app goes back, the layer stays"
@@ -91,6 +109,7 @@ helper_state | grep -q '^rolled_back unhealthy' || fail "not rolled back as unhe
 layer | grep -qx "$C |  | " || fail "the committed layer of C was undone: $(layer)"
 grep -q "VERSION=\"$C\"" /usr/lib/os-release || fail "os-release: $(grep VERSION= /usr/lib/os-release)"
 [ "$(pkg usbmuxd)" = i ] || fail "usbmuxd gone"
+[ -f "$DUAL" ] && [ "$(fdt_of eirl-splash)" = "$DUAL" ] || fail "after C's rollback: $(fdts)"
 echo "OK: app $B, layer $C (forward only)"
 
 echo "=== 4. B → E, whose layer has a file that does not match: refused before any change, rolled back"

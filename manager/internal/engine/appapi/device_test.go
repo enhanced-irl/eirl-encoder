@@ -250,6 +250,7 @@ func TestDeviceActions(t *testing.T) {
 		{ui.AppAction{What: "timezone", Value: "America/Bogota"}, map[string]any{"timezone": "America/Bogota"}},
 		{ui.AppAction{What: "ntp", On: false}, map[string]any{"ntp": false}},
 		{ui.AppAction{What: "time", Time: when}, map[string]any{"ntp": false, "time": "2026-10-14T09:30:00Z"}},
+		{ui.AppAction{What: "fan2", Value: "off"}, map[string]any{"fan": map[string]any{"second": "off"}}},
 	} {
 		run(c.act)
 		if got := a.last(); got.method != "PUT" || !reflect.DeepEqual(got.body, c.want) {
@@ -572,4 +573,28 @@ func TestDeviceGoroutine(t *testing.T) {
 	}
 	d.Watch(ui.AppWatch{Slots: true})
 	wait("the slots", func(s ui.AppSnapshot) bool { return s.Slots != nil && !s.Slots.EngineSupports })
+}
+
+// GET /device's fan (FAN.md §5): only sane values; a second fan only with a known mode
+func TestDeviceFan(t *testing.T) {
+	a, d := newDevice(t)
+	b := deviceBody("es")
+	a.route("GET /device", 200, b)
+	d.PollDevice()
+	if f := d.AppSnapshot().Device.Fan; f != nil {
+		t.Fatalf("no fan in the answer: %+v", f)
+	}
+	b["fan"] = map[string]any{"tempC": 57.5, "pwm": 189, "second": map[string]any{"mode": "off", "on": true,
+		"reason": "hot", "onC": 55, "hotC": 80}}
+	d.PollDevice()
+	f := d.AppSnapshot().Device.Fan
+	if f == nil || f.TempC != 57.5 || f.PWM != 189 || f.Second == nil ||
+		*f.Second != (ui.Fan2Info{Mode: "off", On: true, Reason: "hot", OnC: 55, HotC: 80}) {
+		t.Fatalf("%+v %+v", f, f.Second)
+	}
+	b["fan"] = map[string]any{"tempC": 900, "pwm": 999, "second": map[string]any{"mode": "loud", "reason": "x"}}
+	d.PollDevice()
+	if f := d.AppSnapshot().Device.Fan; f == nil || f.TempC != 0 || f.PWM != 0 || f.Second != nil {
+		t.Fatalf("odd values: %+v", f)
+	}
 }

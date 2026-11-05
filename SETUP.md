@@ -54,8 +54,8 @@ the app started with (mDNS may keep announcing it until a restart, see §7).
 
 | Route | Body | Answer |
 |---|---|---|
-| `GET /device` | — | `{"language","languages":["es","en","fr"],"name","hostname","timezone","time":{"now":RFC3339 in the device zone,"ntp","synced","rtc"?},"version":{"release","app","engine"}}` |
-| `PUT /device` | any of `{"language","name","timezone","ntp":bool,"time":RFC3339}` | `200` + the same as GET · `400 validation` (`fields`: `language`, `name`, `timezone`, `time`) · `502 system_failed` (the system refused: the message says which part) · `503 setup_required` (web, no password, anything but `language`) |
+| `GET /device` | — | `{"language","languages":["es","en","fr"],"name","hostname","timezone","time":{"now":RFC3339 in the device zone,"ntp","synced","rtc"?},"version":{"release","app","engine"},"fan"?:{"tempC","pwm","second"?:{"mode":"auto"\|"off","on","reason"?,"onC","hotC"}}}`; `fan` while the fan control runs, `second` on a board with the second fan ([`FAN.md`](FAN.md) §5) |
+| `PUT /device` | any of `{"language","name","timezone","ntp":bool,"time":RFC3339,"fan":{"second":"auto"\|"off"}}` | `200` + the same as GET · `400 validation` (`fields`: `language`, `name`, `timezone`, `time`, `fan`: an unknown mode, or a board without the second fan) · `502 system_failed` (the system refused: the message says which part) · `503 setup_required` (web, no password, anything but `language`) |
 | `GET /device/timezones` | — | `{"zones":[{"id":"Europe/Madrid","offset":"+02:00"},…]}`, sorted by id; the list is cached, the offsets recomputed every 10 min |
 
 - `time` only with automatic time off (`ntp:false` in the same request or already off): otherwise `400` with

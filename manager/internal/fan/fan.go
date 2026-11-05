@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 )
 
 // MaxPWM: the fan at full speed (the pwm-fan driver's scale, /sys/devices/pwm-fan/target_pwm).
@@ -96,3 +97,92 @@ func (c *Controller) Next(t float64, ok bool) int {
 
 // PWM: the current speed.
 func (c *Controller) PWM() int { return c.pwm }
+
+// Switch: a fan that is only on or off (the second fan, FAN.md §5), by temperature: on at OnC or above, off at OffC or
+// below once it has been on for MinOn, so a temperature around a threshold does not click it on and off. Safety as for
+// the curve: at HotC or above, or with a reading that failed, on at once (MinOn never delays switching on).
+//
+// Switched off in Settings (SetOff), the thresholds move up to HotC and OffHotC: only the safety switches it on.
+type Switch struct {
+	OnC, OffC float64
+	MinOn     time.Duration
+	on        bool
+	off       bool
+	since     time.Time
+}
+
+// OffHotC: switched off in Settings and on because of HotC, where it goes off again (5 °C below, as the defaults'
+// hysteresis, so a temperature around HotC does not click it either).
+const OffHotC = HotC - 5
+
+// DefaultSwitch: the second fan's thresholds (FAN.md §5). Off idle (40-46 °C) and in an ordinary stream (49.5-53 °C,
+// measured on the test board on Nov 4); on from where the curve has the main fan at about 70 % (178 of 255 at 55 °C)
+// on its way to full speed at 65 °C.
+func DefaultSwitch() Switch { return Switch{OnC: 55, OffC: 50, MinOn: 2 * time.Minute} }
+
+// MaxMinOn: the longest MinOn it accepts.
+const MaxMinOn = 30 * time.Minute
+
+// Validate: finite thresholds, off below on, on below HotC (where it is on anyway) and MinOn within 0-MaxMinOn.
+func (s Switch) Validate() error {
+	for _, v := range []float64{s.OnC, s.OffC} {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return fmt.Errorf("threshold out of range: %v", v)
+		}
+	}
+	switch {
+	case s.OffC >= s.OnC:
+		return fmt.Errorf("off at %g °C is not below on at %g °C", s.OffC, s.OnC)
+	case s.OnC >= HotC:
+		return fmt.Errorf("on at %g °C: from %g °C it is on anyway", s.OnC, HotC)
+	case s.MinOn < 0 || s.MinOn > MaxMinOn:
+		return fmt.Errorf("time on %s out of range (0-%s)", s.MinOn, MaxMinOn)
+	}
+	return nil
+}
+
+// Start: the state it starts from (the pin as the daemon finds it), counted as set at now.
+func (s *Switch) Start(on bool, now time.Time) { s.on, s.since = on, now }
+
+// SetOff: switched off in Settings (true) or back to automatic (false). Switching it off stops it at once, without
+// waiting for MinOn (it was asked for): the next Next switches it on again if it is at HotC or the reading fails.
+// Back to automatic, the next Next applies the thresholds.
+func (s *Switch) SetOff(off bool, now time.Time) {
+	if off == s.off {
+		return
+	}
+	s.off = off
+	if off && s.on {
+		s.on, s.since = false, now
+	}
+}
+
+// Off: whether it is switched off in Settings.
+func (s *Switch) Off() bool { return s.off }
+
+// Next: whether the fan is on after a reading of t °C at now (ok = false: the reading failed).
+func (s *Switch) Next(t float64, ok bool, now time.Time) bool {
+	onC, offC := s.OnC, s.OffC
+	if s.off {
+		onC, offC = HotC, OffHotC
+	}
+	switch {
+	case !ok || math.IsNaN(t) || t >= HotC || t >= onC:
+		if !s.on {
+			s.on, s.since = true, now
+		}
+	case s.on && t <= offC && now.Sub(s.since) >= s.MinOn:
+		s.on, s.since = false, now
+	}
+	return s.on
+}
+
+// On: whether it is on. Since: when it was last switched (or started).
+func (s *Switch) On() bool { return s.on }
+
+func (s *Switch) Since() time.Time { return s.since }
+
+// String: the thresholds as people read them.
+func (s Switch) String() string {
+	return fmt.Sprintf("on at %g°C, off at %g°C after %s on", s.OnC, s.OffC, s.MinOn)
+}

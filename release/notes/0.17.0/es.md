@@ -1,0 +1,2 @@
+- Nuevo: en la pantalla, Ajustes › Sistema › Ventilador, y en la web, la tarjeta «Ventilador», ves la temperatura de la placa y la velocidad del ventilador.
+- Nuevo, para quien monte el segundo ventilador de la guía de hardware: el codificador lo enciende y lo apaga solo según la temperatura. Si su ruido molesta en algún momento, puedes desactivarlo desde ahí hasta el próximo reinicio; se enciende igualmente si la placa se calienta demasiado. De momento se activa a mano (FAN.md en el repositorio).

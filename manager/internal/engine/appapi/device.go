@@ -59,11 +59,13 @@ var (
 	sysStates   = set("ok", "failed", "skipped")
 	sysAreas    = set("hdmi", "bluetooth", "uplinks", "system")
 	updWaits    = set("metered")
+	fanModes    = set("auto", "off")
+	fanReasons  = set("temp", "hot", "reading", "start")
 	cloudStates = set("unlinked", "pairing", "linked")
 	// the actions and their route; "device" ones are PUT /device with one field
 	actionRoutes = map[string][2]string{
 		"language": {"PUT", "/device"}, "name": {"PUT", "/device"}, "timezone": {"PUT", "/device"},
-		"ntp": {"PUT", "/device"}, "time": {"PUT", "/device"},
+		"ntp": {"PUT", "/device"}, "time": {"PUT", "/device"}, "fan2": {"PUT", "/device"},
 		"setup_step": {"POST", "/setup/step"}, "setup_password": {"POST", "/setup/password"},
 		"setup_complete": {"POST", "/setup/complete"}, "setup_restart": {"POST", "/setup/restart"},
 		"update_check": {"POST", "/update/check"}, "update_install": {"POST", "/update/install"},
@@ -601,6 +603,8 @@ func (d *DeviceState) runAction(q queued) {
 		body = jsonBody(map[string]any{"timezone": a.Value})
 	case "ntp":
 		body = jsonBody(map[string]any{"ntp": a.On})
+	case "fan2":
+		body = jsonBody(map[string]any{"fan": map[string]any{"second": a.Value}})
 	case "time":
 		body = jsonBody(map[string]any{"ntp": false, "time": a.Time.Format(time.RFC3339)})
 	case "setup_step":
@@ -725,10 +729,40 @@ func deviceInfo(v any, at time.Time) *ui.DeviceInfo {
 		dev.Release, dev.AppVer, dev.EngineVer = textField(ver, "release", 64), textField(ver, "app", 64),
 			textField(ver, "engine", 64)
 	}
+	dev.Fan = fanInfo(m["fan"])
 	if dev.Language == "" && dev.Name == "" && dev.Hostname == "" {
 		return nil // not a device at all
 	}
 	return dev
+}
+
+// fanInfo: GET /device's fan (FAN.md §5), only with sane values; nil without it.
+func fanInfo(v any) *ui.FanInfo {
+	m := obj(v)
+	if m == nil {
+		return nil
+	}
+	temp := func(m map[string]any, k string) float64 {
+		t, _ := floatIn(m[k], -60, 200)
+		return t
+	}
+	f := &ui.FanInfo{TempC: temp(m, "tempC")}
+	if p, ok := floatIn(m["pwm"], 0, 255); ok {
+		f.PWM = int(p)
+	}
+	if sm := obj(m["second"]); sm != nil {
+		mode, _ := sm["mode"].(string)
+		if !fanModes[mode] {
+			return f // an unknown mode: no switch to show
+		}
+		reason, _ := sm["reason"].(string)
+		if !fanReasons[reason] {
+			reason = ""
+		}
+		on, _ := boolOf(sm["on"])
+		f.Second = &ui.Fan2Info{Mode: mode, On: on, Reason: reason, OnC: temp(sm, "onC"), HotC: temp(sm, "hotC")}
+	}
+	return f
 }
 
 func setupInfo(v any) *ui.SetupInfo {

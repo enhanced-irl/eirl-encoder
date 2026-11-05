@@ -1,0 +1,2 @@
+- Nouveau : sur l'écran, Réglages › Système › Ventilateur, et sur le web, la carte « Ventilateur », vous voyez la température de la carte et la vitesse du ventilateur.
+- Nouveau, pour ceux qui montent le second ventilateur du guide matériel : l'encodeur l'allume et l'éteint tout seul selon la température. Si son bruit gêne à un moment, vous pouvez le désactiver depuis là jusqu'au prochain redémarrage ; il s'allume quand même si la carte chauffe trop. Pour l'instant, il s'active à la main (FAN.md dans le dépôt).

@@ -33,6 +33,7 @@ import (
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/cloud"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/config"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/device"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/fan"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/hw"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/links"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/live"
@@ -80,6 +81,7 @@ func main() {
 	camerasMax := flag.Int("cameras-max", netcfg.DefaultMax, "network cameras at most (1-8)")
 	apState := flag.String("ap-state", "/run/eirl-ap/state.json", "access point state (left by eirl-netsetup)")
 	storageState := flag.String("storage-state", "/run/eirl-storage/state.json", "the USB disk of local recordings (left by eirl-storage, RECORDING.md §4.3; empty = none)")
+	fanState := flag.String("fan-state", fan.StateFile, "the fan daemon's state, for the second fan in Settings (FAN.md §5; empty = never shown)")
 	localSock := flag.String("local-socket", "/run/eirl-encoder/api.sock", "Unix socket of the API for the engine's screen (MANAGER.md §3, \"Local socket\"; empty = none)")
 	// GET /device version (SETUP.md §2): the release and the installed engine
 	releaseFile := flag.String("device-version-file", "/usr/lib/eirl-encoder/VERSION", "release version file (GET /device)")
@@ -138,6 +140,9 @@ func main() {
 	// with sudo -n, the sudoers rule's exact commands
 	srv.StoragePath = *storageState
 	setupDevice(srv, *confDir, *releaseFile, *engineFile, log)
+	// The second fan in Settings (FAN.md §5): the fan daemon's state, and the request for it next to the app's files
+	srv.Fan = api.FanFiles{State: *fanState, Control: filepath.Join(*confDir, filepath.Base(fan.ControlFile)),
+		BootID: fan.BootIDFile}
 	var previewWatch api.PreviewWatch
 	if *liveMax > 0 {
 		relay, err := live.New(*liveVideo, *liveAudio, *liveMax, log)

@@ -478,6 +478,14 @@ func drawIcon(c *Canvas, p *Path, kind string, cx, cy, r, lw float64, col Color)
 			stroke()
 			c.FillCircle(cx+k*r*1.6, y, max(lw*1.3, 0.17*r), col)
 		}
+	case "fan": // the fan: a hub and three blades
+		c.FillCircle(cx, cy, max(lw*1.2, 0.16*r), col)
+		for i := range 3 { // each blade: an arc out from the hub, swept the same way
+			a := float64(i)*2*math.Pi/3 - math.Pi/2
+			bx, by := cx+0.5*r*math.Cos(a), cy+0.5*r*math.Sin(a)
+			p.Arc(bx, by, 0.42*r, a-math.Pi/2, a+math.Pi/2)
+			stroke()
+		}
 	case "eye", "eyeoff": // a secret: an eye (shown: crossed out, tap to hide it again)
 		for _, sg := range []float64{-1, 1} {
 			p.NewSubPath()

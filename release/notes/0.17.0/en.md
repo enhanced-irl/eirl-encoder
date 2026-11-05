@@ -1,0 +1,2 @@
+- New: the touch screen's Settings › System › Fan, and the web's "Fan" card, show the board's temperature and the fan's speed.
+- New, for those who fit the second fan from the hardware guide: the encoder switches it on and off by itself with the temperature. If its noise gets in the way, you can switch it off there until the next restart; it still comes on if the board gets too hot. For now it is enabled by hand (FAN.md in the repository).

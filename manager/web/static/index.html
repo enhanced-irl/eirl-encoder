@@ -897,6 +897,21 @@ sudo systemctl restart eirl-encoderd</pre>
         </form>
       </section>
 
+      <!-- The fans (FAN.md §5): the temperature, the main fan and the second fan's switch (automatic, or off until the
+           next restart; it still switches on when the board is too hot). settings.js -->
+      <section id="fan-card" class="card" aria-labelledby="fan-title" hidden>
+        <div class="card-head">
+          <h3 id="fan-title" class="card-title" data-i18n="fan.title"></h3>
+          <span id="fan-temp" class="sub"></span>
+        </div>
+        <div id="fan2-row" hidden>
+          <label class="mx-follow"><input id="fan2-auto" type="checkbox" role="switch"> <span data-i18n="fan.second"></span></label>
+          <p id="fan2-state" class="hint" aria-live="polite"></p>
+          <p id="fan2-warn" class="uplinks-warn" data-i18n="fan.offWarn" hidden></p>
+        </div>
+        <p id="fan2-none" class="hint" data-i18n="fan.none" hidden></p>
+      </section>
+
       <section class="card" aria-labelledby="logs-title">
         <div class="card-head"><h3 id="logs-title" class="card-title" data-i18n="logs.title"></h3></div>
         <ol id="logs" class="logs"></ol>

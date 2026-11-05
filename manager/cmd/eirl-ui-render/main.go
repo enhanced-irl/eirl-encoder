@@ -551,6 +551,8 @@ func render(raw []byte, arg, lang string, fonts *ui.Fonts, outDir, frames string
 			p.AliasKeyboard(1, "Cámara principal")
 		case "settings-updates-confirm":
 			p.ConfirmUpdate()
+		case "settings-fan-confirm":
+			p.ConfirmFan2Off()
 		case "settings-updates-restart-confirm":
 			p.ConfirmReboot()
 		case "settings-language":

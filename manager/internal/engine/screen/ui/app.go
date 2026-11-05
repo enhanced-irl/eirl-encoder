@@ -53,8 +53,8 @@ type AppWatch struct {
 
 // AppAction is a change asked of the app.
 type AppAction struct {
-	What  string // language | name | timezone | ntp | time | setup_step | setup_complete | setup_restart | update_check | update_install | update_reboot | slots | cloud_pair, and MIXER.md §21's (AppActions)
-	Value string // language, name, timezone; setup_step: the step id; bt_device: the order (pair | connect | disconnect | forget)
+	What  string // language | name | timezone | ntp | time | fan2 | setup_step | setup_complete | setup_restart | update_check | update_install | update_reboot | slots | cloud_pair, and MIXER.md §21's (AppActions)
+	Value string // language, name, timezone; fan2: auto | off; setup_step: the step id; bt_device: the order (pair | connect | disconnect | forget)
 	State string // setup_step: done | skipped
 	On    bool   // ntp
 	Time  time.Time
@@ -188,6 +188,23 @@ type DeviceInfo struct {
 	Release   string
 	AppVer    string
 	EngineVer string
+	Fan       *FanInfo // the fans (FAN.md §5): nil while the app does not report them (no fan daemon, an older app)
+}
+
+// FanInfo is GET /device's fan: the temperature the fan daemon reads, the main fan's speed and the second fan.
+type FanInfo struct {
+	TempC  float64
+	PWM    int       // the main fan, 0-255
+	Second *Fan2Info // nil: the board has no second fan
+}
+
+// Fan2Info is the second fan: its mode (auto | off: switched off in Settings until the next boot), whether it is on
+// now and why (temp | hot | reading | start), where it switches on by itself and where it does even when off.
+type Fan2Info struct {
+	Mode      string
+	On        bool
+	Reason    string
+	OnC, HotC float64
 }
 
 // SetupInfo is GET /setup.

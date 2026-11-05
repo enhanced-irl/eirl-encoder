@@ -261,6 +261,7 @@ type Strings struct {
 	Dests   DestStrings    // Stream: the saved destinations (OUTPUTS.md §11)
 	BT      BTStrings      // Wireless: the Bluetooth tab, and the headphones button's Bluetooth mark
 	Rec     RecStrings     // the local recording: the header's line, REC, Go live with it, Stream › Recording
+	Fan     FanStrings     // System › Fan: the temperature, the main fan and the second fan (FAN.md §5)
 }
 
 // Languages are the screen's languages, in the order the Language page lists them.

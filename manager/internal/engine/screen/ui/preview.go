@@ -48,6 +48,9 @@ func (p Preview) PowerKey(d time.Duration) {
 // OpenSettings opens the panel like ui_render.py does (without telling Net).
 func (p Preview) OpenSettings() { p.u.settingsOpen = true }
 
+// ConfirmFan2Off: the first tap on the second fan's switch (System › Fan): it waits for the second one.
+func (p Preview) ConfirmFan2Off() { p.u.confirmTap("fan2_off") }
+
 // OpenModem shows a modem's page (Streaming › Connections).
 func (p Preview) OpenModem(id string)      { p.u.openModem(id) }
 func (p Preview) SettingsPage(page string) { p.u.settingsPage = page }

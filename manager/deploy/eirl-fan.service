@@ -1,6 +1,7 @@
-# eirl-fan: the encoder's fan control (FAN.md). Root, because the fan's speed is a sysfs file of root; it
-# writes nothing else but its state in /run/eirl-fan. While it runs the kernel's control is off: the daemon
-# gives it back when it stops, and ExecStopPost does too if it dies.
+# eirl-fan: the encoder's fan control (FAN.md). Root, because the fan's speed is a sysfs file of root; /sys is
+# read-only for it except the fan's directory and the second fan's pin, and it writes nothing else but its state in
+# /run/eirl-fan. While it runs the kernel's control is off: the daemon gives it back when it stops, and ExecStopPost
+# does too if it dies. A second fan (FAN.md §5) is left as it is in both cases.
 [Unit]
 Description=eirl-fan: the encoder's fan control
 Documentation=https://github.com/enhanced-irl/eirl-encoder/blob/main/FAN.md
@@ -12,6 +13,11 @@ After=automagic-fan.service eirl-update-recover.service
 
 [Service]
 Type=simple
+# The board's settings (FAN.md §5), optional: EIRL_FAN2=on on a board with the second fan, and its thresholds
+EnvironmentFile=-/etc/default/eirl-fan
+# The second fan's pin (gpio168) made an output, outside the sandbox ("+": exporting is allowed for any pin, so the
+# daemon can write only this one). "-": a failure here never keeps the main fan without its control
+ExecStartPre=-+/usr/local/sbin/eirl-fan -claim
 ExecStart=/usr/local/sbin/eirl-fan
 ExecStopPost=/bin/sh -c 'echo 1 > /sys/devices/pwm-fan/temp_control'
 Restart=always
@@ -19,6 +25,12 @@ RestartSec=2
 RuntimeDirectory=eirl-fan
 RuntimeDirectoryMode=0755
 ProtectSystem=strict
+# /sys and /proc/sys read-only (strict leaves them writable) but for the fan and the second fan's pin, as an exported
+# gpio168 is (/sys/class/gpio/gpio168 links there; "-": not there without a second fan or when its claim failed).
+# ReadOnlyPaths, not ProtectKernelTunables: systemd 237 applies that one to "+" commands too, and the claim needs /sys
+ReadOnlyPaths=/sys /proc/sys
+ReadWritePaths=/sys/devices/pwm-fan -/sys/devices/6000d000.gpio/gpiochip0/gpio/gpio168
+PrivateDevices=yes
 ProtectHome=yes
 PrivateTmp=yes
 PrivateNetwork=yes

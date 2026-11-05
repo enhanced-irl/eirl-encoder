@@ -11,6 +11,7 @@ import (
 
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/config"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/device"
+	"github.com/enhanced-irl/eirl-encoder/manager/internal/fan"
 	"github.com/enhanced-irl/eirl-encoder/manager/internal/i18n"
 )
 
@@ -56,6 +57,7 @@ type deviceView struct {
 	Timezone  string      `json:"timezone"`
 	Time      timeView    `json:"time"`
 	Version   versionView `json:"version"`
+	Fan       *fanView    `json:"fan,omitempty"` // the fans, while their daemon runs (FAN.md §5)
 }
 
 type timeView struct {
@@ -113,6 +115,7 @@ func (s *Server) deviceView(ctx context.Context) deviceView {
 		Time:     timeView{Now: now.Format(time.RFC3339), NTP: ti.NTP, Synced: ti.Synced, RTC: ti.RTC},
 		Version: versionView{Release: readVersion(s.Versions.ReleaseFile), App: s.Info.Version,
 			Engine: readVersion(s.Versions.EngineFile)},
+		Fan: s.fanView(),
 	}
 }
 
@@ -129,9 +132,9 @@ const (
 	maxYear = 2100
 )
 
-// putDevice: any of {"language", "name", "timezone", "ntp", "time"}. Before an admin password exists, the
-// web may only change the language (the local socket, the screen, everything). The system changes go
-// first (hostname, time zone, NTP, clock), then device.json.
+// putDevice: any of {"language", "name", "timezone", "ntp", "time", "fan": {"second": "auto"|"off"}}. Before an
+// admin password exists, the web may only change the language (the local socket, the screen, everything). The
+// system changes go first (hostname, time zone, NTP, clock), then the second fan, then device.json.
 func (s *Server) putDevice(w http.ResponseWriter, r *http.Request) {
 	if s.deviceOff(w, r) {
 		return
@@ -142,17 +145,20 @@ func (s *Server) putDevice(w http.ResponseWriter, r *http.Request) {
 		Timezone *string `json:"timezone"`
 		NTP      *bool   `json:"ntp"`
 		Time     *string `json:"time"`
+		Fan      *struct {
+			Second *string `json:"second"`
+		} `json:"fan"`
 	}
 	if decode(r, &body) != nil {
 		fail(w, r, 400, "bad_request", "common.bad_body")
 		return
 	}
 	system := body.Name != nil || body.Timezone != nil || body.NTP != nil || body.Time != nil
-	if body.Language == nil && !system {
+	if body.Language == nil && !system && body.Fan == nil {
 		fail(w, r, 400, "bad_request", "common.nothing_to_change")
 		return
 	}
-	if system && !s.Auth.Configured() && !isLocal(r) {
+	if (system || body.Fan != nil) && !s.Auth.Configured() && !isLocal(r) {
 		fail(w, r, 503, "setup_required", "device.language_only")
 		return
 	}
@@ -188,6 +194,18 @@ func (s *Server) putDevice(w http.ResponseWriter, r *http.Request) {
 			errs["time"] = i18n.Ref("device.time_needs_manual")
 		}
 		at = t
+	}
+	var fan2 *fan2View
+	if body.Fan != nil {
+		if v := s.fanView(); v != nil {
+			fan2 = v.Second
+		}
+		switch {
+		case body.Fan.Second == nil || (*body.Fan.Second != fan.ModeAuto && *body.Fan.Second != fan.ModeOff):
+			errs["fan"] = i18n.Ref("device.bad_fan2")
+		case fan2 == nil:
+			errs["fan"] = i18n.Ref("device.no_fan2")
+		}
 	}
 	if len(errs) > 0 {
 		fieldErrors(w, r, errs)
@@ -232,6 +250,13 @@ func (s *Server) putDevice(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		changed = append(changed, "time", at.UTC().Format(time.RFC3339))
+	}
+	if body.Fan != nil && *body.Fan.Second != fan2.Mode {
+		if err := s.setFan2Mode(*body.Fan.Second); err != nil {
+			sysFail("fan", err)
+			return
+		}
+		changed = append(changed, "fan2", *body.Fan.Second)
 	}
 	if body.Language != nil || body.Name != nil {
 		_, err := s.Device.Update(func(d *device.Settings) error {

@@ -130,6 +130,7 @@ func runLocal(ctx context.Context, o localOpts, log *slog.Logger) error {
 		o.hwID = simHardwareID(o.dataDir)
 	}
 	srv.Network = simNetwork(o.dataDir, o.hwID)
+	srv.Fan = simFan(ctx, o.dataDir) // a board with the second fan (FAN.md §5)
 	// The internet connections and modems (MODEMS.md), through the real links service
 	if r, svc, mods, err := simLinks(o.dataDir); err != nil {
 		log.Warn("simulated connections off", "err", err)

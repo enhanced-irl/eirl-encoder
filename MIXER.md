@@ -1,7 +1,7 @@
 # Multi-camera: composition, multiview and touch screen
 
 > **Status:** IN PROGRESS (F0, F1 —single engine— and F2 —web ↔ screen— in main; F3 —no rehearsal mode— on the board; next F4, per-source audio)
-> **Updated:** 2026-11-05 (Nov 5: two TC358743s, `hdmi` and `hdmi2`, §4, and the tiles' cadence on the screen, one picture per screen frame, and what the screen shows per pad in the timings line, §24; Nov 4: the board's power button, §14.1, and its LED, §14.2; Oct 28: the local recording on the screen, §23; Oct 15: the HDMI output stays lit when the screen closes, §3 trap 27; USB cameras plugged and unplugged while running, "Sources and slots" in §4, and a camera's audio follows its video slot, §10; the output protocols and encoding settings in the state and `output_config`, §5, [`OUTPUTS.md`](OUTPUTS.md); translated to English; the Python engine retired, the Go engine is the only one: [`ENGINE_GO.md`](ENGINE_GO.md); last content change Oct 13: header and Settings, §18; Wi-Fi in Settings, §19; Oct 14: renaming "Create my Wi-Fi", §19; everything the web configures, on the screen, §21; fades one step per program frame and the screen's tiles in step with the program, §22)
+> **Updated:** 2026-11-06 (Nov 6: the screen at 60 discarded, §24; Nov 5: two TC358743s, `hdmi` and `hdmi2`, §4, and the tiles' cadence on the screen, one picture per screen frame, and what the screen shows per pad in the timings line, §24; Nov 4: the board's power button, §14.1, and its LED, §14.2; Oct 28: the local recording on the screen, §23; Oct 15: the HDMI output stays lit when the screen closes, §3 trap 27; USB cameras plugged and unplugged while running, "Sources and slots" in §4, and a camera's audio follows its video slot, §10; the output protocols and encoding settings in the state and `output_config`, §5, [`OUTPUTS.md`](OUTPUTS.md); translated to English; the Python engine retired, the Go engine is the only one: [`ENGINE_GO.md`](ENGINE_GO.md); last content change Oct 13: header and Settings, §18; Wi-Fi in Settings, §19; Oct 14: renaming "Create my Wi-Fi", §19; everything the web configures, on the screen, §21; fades one step per program frame and the screen's tiles in step with the program, §22)
 
 **The mixer is the encoder.** `eirl-engine` captures all the sources it detects at the same time, and what
 comes out is always the composed **program** (cut, PiP, side by side, fades). That includes SRT/SRTLA
@@ -1221,7 +1221,7 @@ title row (`SettingsGroups`, settings_layout.go; a list entry is `s_page_<group>
 | Network cameras | — (`cams`) |
 | EnhancedIRL | — (`cloud`) |
 | Device | Language (`language`) · Date & time (`time`) · Name & password (`account`) |
-| System | Updates (`updates`) · About (`about`) |
+| System | Updates (`updates`) · About (`about`) · Fan (`fan`, since Nov 6: [`FAN.md`](FAN.md) §5) |
 
 A group's entry goes back to the tab last seen. The dots (Wi-Fi down, an update or a restart to finish one, the setup
 pending) show on the group's entry and on the tab. The Updates page also shows the system layer (UPDATES.md §12): a
@@ -1321,6 +1321,10 @@ a download that waits for Wi-Fi or a cable, and a system part that failed or was
   new one, twice (the setup's). The app limits wrong current passwords like the login (`429`).
 - **Audio settings** (in the audio view, «Audio settings ›» in its header): each input's delay (0-500 ms, 10 ms a tap,
   100 ms held) and each camera's audio (a choice list: an input or «No audio of its own»).
+- **Fan** (`fanpage.go`, [`FAN.md`](FAN.md) §5): the temperature the fan control reads and the main fan's speed and,
+  on a board with the second fan, its switch: automatic, or off until the next restart (action `fan2` → `PUT /device`
+  `{"fan":{"second":"auto"|"off"}}`). Switching it off takes a second tap and says what it risks; back to automatic,
+  one. As the web's «Fan» card. Previews `settings-fan`, `-on`, `-confirm`, `-off`, `-offhot`, `-none`, `-nodata`.
 
 ### 21.5 Limits
 
@@ -1542,8 +1546,9 @@ in the `timings` line:
 
 Its cost is a lock and a few counters per screen frame and per tile frame.
 
-**The screen at 60 (F2), not done.** C2 shows what it gives: the program tile at 57 pictures a second instead of
-30, and a 60 fps source's tile would follow once its frames are shown (C2 still had the duration problem). It
-costs, with two sources and not streaming, ~6.7 points of CPU of the engine and ~165 mW (3.7 %); the VIC's load
-did not move. With four sources and streaming it is the tiles' conversions twice over on a board whose power
-supply already has little margin (§3): to be decided with a measurement in those conditions.
+**The screen at 60 (F2): discarded (Nov 6).** The screen stays at `min(program, 30)`. C2 showed what it would
+give: the program tile at 57 pictures a second instead of 30, and a 60 fps source's tile would follow once its
+frames are shown (C2 still had the duration problem). It would cost, with two sources and not streaming, ~6.7
+points of CPU of the engine and ~165 mW (3.7 %), the VIC's load unchanged; with four sources and streaming, the
+tiles' conversions twice over on a board whose power supply already has little margin (§3). Not worth it for a
+7" monitor.
